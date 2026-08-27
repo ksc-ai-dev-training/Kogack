@@ -43,6 +43,8 @@ export interface ChannelMember {
   name: string
   email: string
   picture_url: string | null
+  role: Role
+  is_active: boolean
   is_channel_admin: boolean
   joined_at: string
 }

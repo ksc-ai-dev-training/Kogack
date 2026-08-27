@@ -78,6 +78,7 @@ export default function ThreadPanel({
 
         <MessageList
           messages={replies}
+          showDaySeparators={false}
           onDeleted={() => {
             mutateReplies()
             onReplyDeleted?.()

@@ -98,33 +98,69 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
     return {**_channel_out(row), "member_count": member_count, "is_channel_admin": bool(is_admin)}
 
 
+class JoinChannelRequest(BaseModel):
+    user_id: str | None = None
+
+
 @router.post("/{channel_id}/members", status_code=201)
-async def join_channel(channel_id: int, user: CurrentUser = Depends(require_auth)):
-    """A-08: 参加（このスライスは公開チャンネルへの自己参加のみ。非公開チャンネルへの招待は次スライス）"""
+async def join_channel(
+    channel_id: int, body: JoinChannelRequest | None = None, user: CurrentUser = Depends(require_auth),
+):
+    """A-08: 参加・招待（F-34）。公開チャンネルは本人のみ自己参加（本文省略）、非公開チャンネルは
+    既存の参加者が他の利用者をuser_id指定で追加する（chadmin限定にせず参加者全員に開放。
+    基本設計書6.2節「設計判断」）。"""
     pool = get_pool()
     channel = await pool.fetchrow("SELECT is_public FROM channels WHERE id = $1", channel_id)
     if channel is None:
         raise HTTPException(404, detail="見つかりません")
-    if not channel["is_public"]:
-        raise HTTPException(403, detail="非公開チャンネルへの参加には招待が必要です")
+    target_user_id = body.user_id if body else None
+
+    if channel["is_public"]:
+        if target_user_id is not None and target_user_id != str(user.id):
+            raise HTTPException(403, detail="本人のみ自己参加できます")
+        target_id = user.id
+    else:
+        is_member = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+            channel_id, user.id,
+        )
+        if not is_member:
+            # 非公開チャンネルの非参加者には存在を伏せる（総論5.3節と同じ考え方）
+            raise HTTPException(404, detail="見つかりません")
+        if target_user_id is None:
+            raise HTTPException(403, detail="非公開チャンネルへの参加には招待が必要です")
+        try:
+            target_id = int(target_user_id)
+        except ValueError:
+            raise HTTPException(422, detail="不正なuser_idです")
+        target_exists = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND is_active)", target_id
+        )
+        if not target_exists:
+            raise HTTPException(404, detail="見つかりません")
+
     already = await pool.fetchval(
         "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
-        channel_id, user.id,
+        channel_id, target_id,
     )
     if already:
         raise HTTPException(409, detail="既に参加しています")
+
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             """INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)
                RETURNING channel_id, user_id, is_channel_admin, joined_at""",
-            channel_id, user.id,
+            channel_id, target_id,
+        )
+        target_name = user.name if target_id == user.id else await conn.fetchval(
+            "SELECT name FROM users WHERE id = $1", target_id
         )
         # F-43: 入室通知。F-36/F-38と同じsender_type='bot'を流用し、新規テーブル・列は追加しない
         # （基本設計書6.2節「設計判断」）。表示名は固定で「システム通知」
         await conn.execute(
             """INSERT INTO messages (channel_id, sender_type, bot_display_name, body)
                VALUES ($1, 'bot', 'システム通知', $2)""",
-            channel_id, f"{user.name} さんが参加しました。",
+            channel_id, f"{target_name} さんが参加しました。",
         )
     return {
         "channel_id": str(row["channel_id"]), "user_id": str(row["user_id"]),
@@ -134,10 +170,12 @@ async def join_channel(channel_id: int, user: CurrentUser = Depends(require_auth
 
 @router.get("/{channel_id}/members")
 async def list_channel_members(channel_id: int, user: CurrentUser = Depends(require_channel_member)):
-    """A-46: 参加者一覧（chadminバッジ表示・S-06チャンネル管理者タブでの追加候補選定に使用）"""
+    """A-46: 参加者一覧（chadmin/adminバッジ表示・補足03メンバー一覧、S-06チャンネル管理者タブでの
+    追加候補選定に使用）"""
     pool = get_pool()
     rows = await pool.fetch(
-        """SELECT u.id, u.name, u.email, u.picture_url, cm.is_channel_admin, cm.joined_at
+        """SELECT u.id, u.name, u.email, u.picture_url, u.role, u.is_active,
+               cm.is_channel_admin, cm.joined_at
            FROM channel_members cm JOIN users u ON u.id = cm.user_id
            WHERE cm.channel_id = $1 ORDER BY u.name""",
         channel_id,
@@ -146,6 +184,7 @@ async def list_channel_members(channel_id: int, user: CurrentUser = Depends(requ
         "items": [
             {
                 "id": str(r["id"]), "name": r["name"], "email": r["email"], "picture_url": r["picture_url"],
+                "role": r["role"], "is_active": r["is_active"],
                 "is_channel_admin": r["is_channel_admin"], "joined_at": r["joined_at"].isoformat(),
             }
             for r in rows

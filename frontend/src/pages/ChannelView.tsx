@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useMessages } from '../hooks/useMessages'
@@ -7,6 +7,7 @@ import { apiFetch, ApiError } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
+import MembersModal from '../components/MembersModal'
 
 // S-03 チャンネル会話＋S-04 スレッド表示（このスライスはメンション・添付・送信予約・要約は未実装）
 export default function ChannelView() {
@@ -20,6 +21,7 @@ export default function ChannelView() {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined)
   const listRef = useRef<HTMLDivElement>(null)
+  const [membersOpen, setMembersOpen] = useState(false)
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
@@ -58,8 +60,17 @@ export default function ChannelView() {
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-5">
-          <span className="text-base text-ink-subtle">#</span>
+          <span className="text-base text-ink-subtle">{channel?.is_public === false ? '🔒' : '#'}</span>
           <span className="text-[15px] font-bold text-ink">{channel?.name ?? '読み込み中...'}</span>
+          {channel && (
+            <button
+              type="button"
+              onClick={() => setMembersOpen(true)}
+              className="text-xs text-ink-subtle hover:text-accent-700 hover:underline"
+            >
+              {channel.member_count}名
+            </button>
+          )}
           {channel?.topic && <span className="ml-1 truncate text-xs text-ink-subtle">{channel.topic}</span>}
           {(channel?.is_channel_admin || me?.role === 'admin') && (
             <Link
@@ -105,6 +116,10 @@ export default function ChannelView() {
           onReplyPosted={() => bumpThreadReplyCount(threadId)}
           onReplyDeleted={() => decrementThreadReplyCount(threadId)}
         />
+      )}
+
+      {membersOpen && channelId && (
+        <MembersModal channelId={channelId} onClose={() => setMembersOpen(false)} />
       )}
     </div>
   )

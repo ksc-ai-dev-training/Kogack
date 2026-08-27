@@ -34,6 +34,7 @@
       <tr><td>1.3</td><td>2026-08-26</td><td>実運用中に唯一の管理者が自分自身をmemberへ降格しログイン後にS-08を開けなくなる事象が発生したため、A-37に自分自身のrole='member'変更を拒否する制約を追加した（既存の自己無効化拒否と同じ管理者ロックアウト防止の考え方）。</td></tr>
       <tr><td>1.4</td><td>2026-08-27</td><td>A-12（メッセージ削除）のリクエスト/レスポンス例と権限判定（投稿者本人またはadmin、参加していない会話には404、参加しているが権限が無い場合は403）を新規追加した（基本設計書4.3節にAPI一覧のみ記載で詳細が未反映だった抜けをbackfill）。新規DB列は無い（T-05.deleted_at/deleted_byは既存）。</td></tr>
       <tr><td>1.5</td><td>2026-08-27</td><td>基本設計書v1.16（未読バッジ、新規T-22 read_states）を反映し、新規API A-05のjoined/A-16のunread_count追加、新規API A-69（チャンネル既読化）・A-70（DM既読化）を追加した（サイドバーの未読バッジは4.2節に記載済みだったがAPI設計側が未反映だった抜けをbackfill）。</td></tr>
+      <tr><td>1.6</td><td>2026-08-27</td><td>A-08の非公開チャンネル招待（既存参加者がuser_id指定で追加）を実装し、非参加者からの呼び出しは404（存在を伏せる）であることを明記した。招待時の入室通知（F-43）は追加された本人の氏名を使うことを追記。新規API A-46（参加者一覧。補足03）のリクエスト/レスポンス例を新規追加し、role・is_active列を追加した（補足03メンバー一覧のchadmin/adminバッジ・無効化アカウント表示に対応。従来テーブル一覧のみで未記載だった抜けをbackfill）。</td></tr>
     </tbody>
   </table>
 
@@ -111,7 +112,15 @@ POST /api/channels/42/members
 { "user_id": "15" }
 // response 201
 { "channel_id": "42", "user_id": "15", "is_channel_admin": false, "joined_at": "..." }</code></pre>
-  <p class="muted">非公開チャンネルで本文の <code>user_id</code> を省略（自己参加）した場合は403。公開チャンネルで他者の <code>user_id</code> を指定した場合も403（本人のみ自己参加可）。<span class="diff-new">参加者の追加に成功すると、同一トランザクション内でT-05へ<code>sender_type='bot'</code>・<code>bot_display_name='システム通知'</code>の発言「（氏名）さんが参加しました。」を1件作成する（F-43。基本設計書6.2節「設計判断」）。</span></p>
+  <p class="muted">非公開チャンネルで本文の <code>user_id</code> を省略（自己参加）した場合は403。公開チャンネルで他者の <code>user_id</code> を指定した場合も403（本人のみ自己参加可）。非公開チャンネルの非参加者が呼び出した場合は存在を伏せるため404。<span class="diff-new">参加者の追加に成功すると、同一トランザクション内でT-05へ<code>sender_type='bot'</code>・<code>bot_display_name='システム通知'</code>の発言「（氏名）さんが参加しました。」を1件作成する（F-43。基本設計書6.2節「設計判断」）。招待の場合は<strong>追加された本人</strong>の氏名を使う（招待した人ではない）。</span></p>
+
+  <p><strong>A-46 <span class="badge badge-get">GET</span> /api/channels/{id}/members（参加者一覧。補足03）</strong></p>
+  <pre><code>// response 200
+{ "items": [
+    { "id": "15", "name": "田中 智子", "email": "tanaka@kogasoftware.com", "picture_url": null,
+      "role": "member", "is_active": true, "is_channel_admin": true, "joined_at": "2026-08-19T01:00:00Z" }
+  ] }</code></pre>
+  <p class="muted">対象はチャンネル参加者全員（<code>require_channel_member</code>で保護。無効化されたアカウントも一覧に残り、<code>is_active:false</code>で示す）。<code>role</code>はグローバルなロール（システムadminバッジ表示用）、<code>is_channel_admin</code>はこのチャンネルのchadminかどうか。補足03メンバー一覧のほかS-06チャンネル管理者タブの追加候補選定、F-39の同姓同名判定でも共有する。</p>
 
   <p><strong>A-11 <span class="badge badge-post">POST</span> /api/channels/{id}/messages（メッセージ投稿）</strong></p>
   <pre><code>// request（@田中 智子をF-41のオートコンプリートで選択した例）

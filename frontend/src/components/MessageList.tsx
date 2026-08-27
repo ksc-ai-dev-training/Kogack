@@ -10,6 +10,26 @@ export function formatTime(iso: string) {
   return d.toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+function dayKey(iso: string) {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+}
+
+function formatDaySeparator(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+function DaySeparator({ label }: { label: string }) {
+  return (
+    <div className="mx-5 my-2.5 flex items-center gap-2.5 text-[11px] font-semibold text-ink-subtle">
+      <span className="h-px flex-1 bg-line" />
+      {label}
+      <span className="h-px flex-1 bg-line" />
+    </div>
+  )
+}
+
 export function Avatar({ message }: { message: Message }) {
   if (message.sender_type === 'bot') {
     return (
@@ -46,12 +66,15 @@ export default function MessageList({
   onOpenThread,
   openThreadId,
   onDeleted,
+  showDaySeparators = true,
 }: {
   messages: Message[]
   emptyMessage?: string
   onOpenThread?: (messageId: string) => void
   openThreadId?: string | null
   onDeleted?: (messageId: string) => void
+  /** S-04スレッド返信欄では表示しない（画面モックアップに合わせる。既定はtrue） */
+  showDaySeparators?: boolean
 }) {
   const { me } = useMe()
   const confirm = useConfirm()
@@ -80,65 +103,68 @@ export default function MessageList({
 
   return (
     <>
-      {messages.map((m) => {
+      {messages.map((m, i) => {
         const canDelete = !!me && (m.sender_user_id === me.id || me.role === 'admin')
         const showReplyButton = onOpenThread && !(m.thread_reply_count ?? 0)
+        const isNewDay = showDaySeparators && (i === 0 || dayKey(messages[i - 1].created_at) !== dayKey(m.created_at))
 
         return (
-          <div
-            key={m.id}
-            className={`group relative flex gap-2.5 px-5 py-[7px] ${
-              openThreadId === m.id ? 'bg-accent-50' : 'hover:bg-surface-subtle'
-            }`}
-          >
-            <Avatar message={m} />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline gap-[7px]">
-                <span className="text-[13px] font-bold text-ink">{m.sender_name ?? '(不明)'}</span>
-                {m.sender_type === 'bot' && (
-                  <span className="rounded bg-bot-bg px-1.5 py-0.5 text-[10px] font-bold text-bot-text">BOT</span>
-                )}
-                {m.sender_type === 'ai' && (
-                  <span className="rounded bg-accent-100 px-1.5 py-0.5 text-[10px] font-bold text-accent-700">
-                    AI
-                  </span>
-                )}
-                <span className="text-[11px] text-ink-subtle">{formatTime(m.created_at)}</span>
-              </div>
-              <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">{m.body}</div>
-              {onOpenThread && (m.thread_reply_count ?? 0) > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onOpenThread(m.id)}
-                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-semibold text-accent-700 hover:border-line-strong hover:bg-surface-subtle"
-                >
-                  💬 {m.thread_reply_count}件の返信{openThreadId === m.id ? ' — スレッドを表示中' : ''}
-                </button>
-              )}
-            </div>
-            {(showReplyButton || canDelete) && (
-              // 常時flowに置くと表示/非表示の切替で下の発言がガタつくため、絶対配置でホバー時だけ重ねて出す
-              <div className="absolute right-4 top-1 hidden items-center gap-1 group-hover:flex">
-                {showReplyButton && (
+          <div key={m.id}>
+            {isNewDay && <DaySeparator label={formatDaySeparator(m.created_at)} />}
+            <div
+              className={`group relative flex gap-2.5 px-5 py-[7px] ${
+                openThreadId === m.id ? 'bg-accent-50' : 'hover:bg-surface-subtle'
+              }`}
+            >
+              <Avatar message={m} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline gap-[7px]">
+                  <span className="text-[13px] font-bold text-ink">{m.sender_name ?? '(不明)'}</span>
+                  {m.sender_type === 'bot' && (
+                    <span className="rounded bg-bot-bg px-1.5 py-0.5 text-[10px] font-bold text-bot-text">BOT</span>
+                  )}
+                  {m.sender_type === 'ai' && (
+                    <span className="rounded bg-accent-100 px-1.5 py-0.5 text-[10px] font-bold text-accent-700">
+                      AI
+                    </span>
+                  )}
+                  <span className="text-[11px] text-ink-subtle">{formatTime(m.created_at)}</span>
+                </div>
+                <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">{m.body}</div>
+                {onOpenThread && (m.thread_reply_count ?? 0) > 0 && (
                   <button
                     type="button"
                     onClick={() => onOpenThread(m.id)}
-                    className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-muted shadow-sm hover:text-accent-700"
+                    className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-semibold text-accent-700 hover:border-line-strong hover:bg-surface-subtle"
                   >
-                    返信
-                  </button>
-                )}
-                {canDelete && (
-                  <button
-                    type="button"
-                    onClick={() => deleteMessage(m.id)}
-                    className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-muted shadow-sm hover:text-danger-text"
-                  >
-                    削除
+                    💬 {m.thread_reply_count}件の返信{openThreadId === m.id ? ' — スレッドを表示中' : ''}
                   </button>
                 )}
               </div>
-            )}
+              {(showReplyButton || canDelete) && (
+                // 常時flowに置くと表示/非表示の切替で下の発言がガタつくため、絶対配置でホバー時だけ重ねて出す
+                <div className="absolute right-4 top-1 hidden items-center gap-1 group-hover:flex">
+                  {showReplyButton && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenThread(m.id)}
+                      className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-muted shadow-sm hover:text-accent-700"
+                    >
+                      返信
+                    </button>
+                  )}
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={() => deleteMessage(m.id)}
+                      className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-muted shadow-sm hover:text-danger-text"
+                    >
+                      削除
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )
       })}
