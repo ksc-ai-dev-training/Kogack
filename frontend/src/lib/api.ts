@@ -32,3 +32,22 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (res.status === 204) return undefined as T
   return res.json()
 }
+
+// A-61: アイコン画像アップロード（汎用）。FormDataはブラウザが境界付きのContent-Typeを
+// 自動設定する必要があるため、'Content-Type: application/json'を強制するapiFetchは使わず専用実装にする。
+export async function uploadIcon(file: File): Promise<{ url: string }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch('/api/icons', { method: 'POST', credentials: 'same-origin', body: formData })
+  if (!res.ok) {
+    let detail = 'アップロードに失敗しました'
+    try {
+      const body = await res.json()
+      if (body.detail) detail = body.detail
+    } catch {
+      // JSONでないレスポンスは汎用メッセージのまま
+    }
+    throw new ApiError(res.status, detail)
+  }
+  return res.json()
+}

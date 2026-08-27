@@ -22,6 +22,8 @@ def _message_out(row, blocks: list[dict] | None = None) -> dict:
         "sender_user_id": str(row["sender_user_id"]) if row["sender_user_id"] is not None else None,
         # BOT発言（sender_user_id無し）はbot_display_nameを表示名として使う（F-36/F-38/F-43）
         "sender_name": row["bot_display_name"] if row["sender_type"] == "bot" else row["sender_name"],
+        # BOT/AI発言はsender_user_idが無いためJOIN結果が自然にNULLになる（実写真を持たない）
+        "sender_picture_url": row["sender_picture_url"],
         "body": row["body"],
         "generation_status": row["generation_status"],
         "blocks": blocks or [],
@@ -69,7 +71,7 @@ async def list_thread(message_id: int, user: CurrentUser = Depends(require_threa
     """A-13: スレッド内の返信一覧（古い順）"""
     pool = get_pool()
     rows = await pool.fetch(
-        """SELECT m.*, u.name AS sender_name FROM messages m
+        """SELECT m.*, u.name AS sender_name, u.picture_url AS sender_picture_url FROM messages m
            LEFT JOIN users u ON u.id = m.sender_user_id
            WHERE m.thread_parent_id = $1 AND m.deleted_at IS NULL
            ORDER BY m.created_at ASC""",
@@ -104,4 +106,4 @@ async def post_reply(
             await insert_mention_blocks(conn, row["id"], parent["channel_id"], body.mentions)
             if parent["channel_id"] is not None else []
         )
-    return _message_out({**dict(row), "sender_name": user.name}, blocks)
+    return _message_out({**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url}, blocks)

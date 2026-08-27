@@ -8,3 +8,5 @@ cryptography>=44
 httpx>=0.28
 # Windowsにはtzdataが同梱されないためzoneinfoが失敗する（A-20検索のJST日付境界計算に使用）
 tzdata>=2025.1
+# A-61 アイコンアップロード（multipart/form-data）のパースに必要
+python-multipart>=0.0.20

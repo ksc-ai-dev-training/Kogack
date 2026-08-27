@@ -7,6 +7,7 @@ import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
 import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
+import ProfileEditModal from './ProfileEditModal'
 import type { Me } from '../types'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -33,6 +34,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const { dms } = useDms()
   const [modalOpen, setModalOpen] = useState(false)
   const [dmModalOpen, setDmModalOpen] = useState(false)
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
   // 実装済みなのはそれぞれ1タブのみのため、未実装タブは出さない
@@ -141,12 +143,21 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                 return (
                   <li key={d.id} className="my-px">
                     <NavLink to={`/dms/${d.id}`} className={({ isActive }) => navItemClass(isActive)}>
-                      <span
-                        className="flex h-5 w-5 flex-none items-center justify-center rounded-full text-[9.5px] font-bold text-white"
-                        style={{ background: avatarColorFor(firstMember?.id ?? d.id) }}
-                      >
-                        {firstMember?.name.slice(0, 1) ?? '?'}
-                      </span>
+                      {firstMember?.picture_url ? (
+                        <img
+                          src={firstMember.picture_url}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          className="h-5 w-5 flex-none rounded-full object-cover"
+                        />
+                      ) : (
+                        <span
+                          className="flex h-5 w-5 flex-none items-center justify-center rounded-full text-[9.5px] font-bold text-white"
+                          style={{ background: avatarColorFor(firstMember?.id ?? d.id) }}
+                        >
+                          {firstMember?.name.slice(0, 1) ?? '?'}
+                        </span>
+                      )}
                       <span className={`min-w-0 flex-1 truncate ${d.unread_count > 0 ? 'font-bold text-ink' : ''}`}>
                         {label}
                       </span>
@@ -178,24 +189,31 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </NavLink>
           )}
           <div className="flex items-center gap-2">
-            {me.picture_url ? (
-              <img
-                src={me.picture_url}
-                alt=""
-                referrerPolicy="no-referrer"
-                className="h-[30px] w-[30px] flex-none rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full bg-[#cbd5f5] text-xs font-bold text-accent-700">
-                {me.name.slice(0, 1)}
+            <button
+              type="button"
+              onClick={() => setProfileModalOpen(true)}
+              title="プロフィールを編集"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-[7px] py-0.5 text-left hover:bg-surface-muted"
+            >
+              {me.picture_url ? (
+                <img
+                  src={me.picture_url}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="h-[30px] w-[30px] flex-none rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full bg-[#cbd5f5] text-xs font-bold text-accent-700">
+                  {me.name.slice(0, 1)}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12.5px] font-semibold text-ink">{me.name}</div>
+                <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${ROLE_BADGE_CLASS[me.role]}`}>
+                  {ROLE_LABELS[me.role]}
+                </span>
               </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[12.5px] font-semibold text-ink">{me.name}</div>
-              <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${ROLE_BADGE_CLASS[me.role]}`}>
-                {ROLE_LABELS[me.role]}
-              </span>
-            </div>
+            </button>
             <button
               type="button"
               onClick={logout}
@@ -212,6 +230,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
 
       {modalOpen && <JoinChannelModal onClose={() => setModalOpen(false)} />}
       {dmModalOpen && <DmPickerModal onClose={() => setDmModalOpen(false)} />}
+      {profileModalOpen && <ProfileEditModal me={me} onClose={() => setProfileModalOpen(false)} />}
     </div>
   )
 }

@@ -283,6 +283,8 @@ def _message_out(row, blocks: list[dict] | None = None) -> dict:
         "sender_user_id": str(row["sender_user_id"]) if row["sender_user_id"] is not None else None,
         # BOT発言（sender_user_id無し）はbot_display_nameを表示名として使う（F-36/F-38/F-43）
         "sender_name": row["bot_display_name"] if row["sender_type"] == "bot" else row["sender_name"],
+        # BOT/AI発言はsender_user_idが無いためJOIN結果が自然にNULLになる（実写真を持たない）
+        "sender_picture_url": row["sender_picture_url"],
         "body": row["body"],
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],
@@ -291,7 +293,7 @@ def _message_out(row, blocks: list[dict] | None = None) -> dict:
     }
 
 
-_MESSAGES_SELECT = """SELECT m.*, u.name AS sender_name,
+_MESSAGES_SELECT = """SELECT m.*, u.name AS sender_name, u.picture_url AS sender_picture_url,
        (SELECT count(*) FROM messages r WHERE r.thread_parent_id = m.id AND r.deleted_at IS NULL)
            AS thread_reply_count
    FROM messages m
@@ -348,4 +350,7 @@ async def post_message(
             channel_id, user.id, body.body,
         )
         blocks = await insert_mention_blocks(conn, row["id"], channel_id, body.mentions)
-    return _message_out({**dict(row), "sender_name": user.name, "thread_reply_count": 0}, blocks)
+    return _message_out(
+        {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
+        blocks,
+    )

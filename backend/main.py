@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import database
-from routers import admin, auth, channels, dms, messages, search, users
+from routers import admin, auth, channels, dms, icons, messages, search, users
 
 
 @asynccontextmanager
@@ -23,6 +23,7 @@ app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(channels.router)
 app.include_router(dms.router)
+app.include_router(icons.router)
 app.include_router(messages.router)
 app.include_router(search.router)
 app.include_router(users.router)

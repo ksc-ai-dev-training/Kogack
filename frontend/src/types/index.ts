@@ -74,6 +74,8 @@ export interface Message {
   sender_type: 'human' | 'ai' | 'bot'
   sender_user_id: string | null
   sender_name: string | null
+  /** BOT/AI発言はsender_user_idが無いため常にnull（実写真を持たない） */
+  sender_picture_url: string | null
   body: string
   generation_status: 'generating' | null
   /** 元発言のみに含まれる（S-04スレッド表示への導線。A-10/A-18）。返信自体には付かない */
@@ -131,6 +133,16 @@ export interface SearchResponse {
   counts: { message: number; file: number; document: number }
   items: SearchResultItem[]
   page: number
+}
+
+/** A-67: 発言者・メンバーのプロフィール確認（F-40）。所属チャンネル等は含まない
+ * （基本設計書5.21節「設計判断」） */
+export interface UserProfile {
+  id: string
+  name: string
+  email: string
+  picture_url: string | null
+  role: Role
 }
 
 /** S-08利用者管理（A-36）。chadmin_channelsは参考表示のみ（変更はS-06から行う） */

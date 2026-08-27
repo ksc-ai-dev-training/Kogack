@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { apiFetch } from '../lib/api'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
+import ProfileCard from './ProfileCard'
 import type { ChannelMember, Message } from '../types'
 
 export function formatTime(iso: string) {
@@ -33,8 +34,9 @@ function DaySeparator({ label }: { label: string }) {
 
 // F-41 @メンションの描画。本文中の「@display_name_snapshot」を検出し、target_user_idを
 // 現在のチャンネル参加者一覧で解決した最新の表示名でハイライト表示する（05-1_詳細設計書_DB設計.html
-// 3.7節「表示時はtarget_user_idを解決して現在の表示名・アイコンを描画」）。A-62プロフィール編集が
-// 未実装で表示名が変わる経路が無いため、実際にはdisplay_name_snapshotと現在名は常に一致する。
+// 3.7節「表示時はtarget_user_idを解決して現在の表示名・アイコンを描画」）。A-62プロフィール編集の
+// 実装（F-39）により、対象者が後から表示名を変更した場合はdisplay_name_snapshotと現在名が食い違う
+// ことがあり、この場合も現在名の方で描画し直す（本文中の静的テキストは検索の起点にのみ使う）。
 export function renderMessageBody(body: string, blocks: Message['blocks'], members?: ChannelMember[]): ReactNode {
   const mentions = (blocks ?? []).filter(
     (b): b is { block_type: 'mention'; payload: { target_user_id: string; display_name_snapshot: string }; sort_order: number } =>
@@ -67,7 +69,7 @@ export function renderMessageBody(body: string, blocks: Message['blocks'], membe
   return nodes
 }
 
-export function Avatar({ message }: { message: Message }) {
+export function Avatar({ message, onClick }: { message: Message; onClick?: () => void }) {
   if (message.sender_type === 'bot') {
     return (
       <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-bot-bg text-base">
@@ -82,10 +84,24 @@ export function Avatar({ message }: { message: Message }) {
       </div>
     )
   }
+  // アイコン画像を設定済みならそれを表示し、無ければ氏名から一意に決まる背景色＋頭文字にフォールバックする
+  // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）
+  if (message.sender_picture_url) {
+    return (
+      <img
+        src={message.sender_picture_url}
+        alt=""
+        referrerPolicy="no-referrer"
+        onClick={onClick}
+        className={`h-[34px] w-[34px] flex-none rounded-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
+      />
+    )
+  }
   const seed = message.sender_user_id ?? message.sender_name ?? message.id
   return (
     <div
-      className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-full text-xs font-bold text-white"
+      onClick={onClick}
+      className={`flex h-[34px] w-[34px] flex-none items-center justify-center rounded-full text-xs font-bold text-white ${onClick ? 'cursor-pointer' : ''}`}
       style={{ background: avatarColorFor(seed) }}
     >
       {(message.sender_name ?? '?').slice(0, 1)}
@@ -119,6 +135,9 @@ export default function MessageList({
   const { me } = useMe()
   const confirm = useConfirm()
   const toast = useToast()
+  // F-40 プロフィールカード。開いている対象はメッセージid単位で持つ（カードは各メッセージ行に
+  // 相対配置するため。表示するのはsender_user_idのプロフィール）
+  const [profileFor, setProfileFor] = useState<string | null>(null)
 
   const deleteMessage = async (messageId: string) => {
     const ok = await confirm({
@@ -156,10 +175,26 @@ export default function MessageList({
                 openThreadId === m.id ? 'bg-accent-50' : 'hover:bg-surface-subtle'
               }`}
             >
-              <Avatar message={m} />
+              <Avatar
+                message={m}
+                onClick={
+                  m.sender_type === 'human' && m.sender_user_id
+                    ? () => setProfileFor(m.id)
+                    : undefined
+                }
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-[7px]">
-                  <span className="text-[13px] font-bold text-ink">{m.sender_name ?? '(不明)'}</span>
+                  <span
+                    onClick={
+                      m.sender_type === 'human' && m.sender_user_id ? () => setProfileFor(m.id) : undefined
+                    }
+                    className={`text-[13px] font-bold text-ink ${
+                      m.sender_type === 'human' && m.sender_user_id ? 'cursor-pointer hover:underline' : ''
+                    }`}
+                  >
+                    {m.sender_name ?? '(不明)'}
+                  </span>
                   {m.sender_type === 'bot' && (
                     <span className="rounded bg-bot-bg px-1.5 py-0.5 text-[10px] font-bold text-bot-text">BOT</span>
                   )}
@@ -205,6 +240,9 @@ export default function MessageList({
                     </button>
                   )}
                 </div>
+              )}
+              {profileFor === m.id && m.sender_user_id && (
+                <ProfileCard userId={m.sender_user_id} onClose={() => setProfileFor(null)} />
               )}
             </div>
           </div>

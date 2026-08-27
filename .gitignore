@@ -7,6 +7,9 @@ __pycache__/
 node_modules/
 dist/
 
+# アップロードされたアイコン画像（A-61、ローカルディスク保存。本番はSupabase Storageに置き換える想定）
+backend/uploads/
+
 # 環境変数・秘密情報
 .env
 .env.*

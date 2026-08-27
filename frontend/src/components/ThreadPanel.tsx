@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useThread } from '../hooks/useThread'
 import { apiFetch } from '../lib/api'
 import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageList'
 import Composer from './Composer'
+import ProfileCard from './ProfileCard'
 import type { ChannelMember, MentionPayload, Message } from '../types'
 
 // S-04 スレッド表示（画面モックアップ S-04）。S-03/DmViewの右側に重ねて表示するパネル。
@@ -28,6 +29,9 @@ export default function ThreadPanel({
 }) {
   const { replies, mutate: mutateReplies } = useThread(messageId)
   const bodyRef = useRef<HTMLDivElement>(null)
+  // F-40 プロフィールカード（元発言のヘッダーはMessageListの外で個別に描画しているため、
+  // ここだけ別途状態を持つ）
+  const [parentProfileOpen, setParentProfileOpen] = useState(false)
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
@@ -61,17 +65,40 @@ export default function ThreadPanel({
 
       <div ref={bodyRef} className="flex-1 overflow-y-auto py-1.5">
         {parentMessage && (
-          <div className="flex gap-2.5 border-b border-line px-4 py-3">
-            <Avatar message={parentMessage} />
+          <div className="relative flex gap-2.5 border-b border-line px-4 py-3">
+            <Avatar
+              message={parentMessage}
+              onClick={
+                parentMessage.sender_type === 'human' && parentMessage.sender_user_id
+                  ? () => setParentProfileOpen(true)
+                  : undefined
+              }
+            />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-1.5">
-                <span className="text-sm font-bold text-ink">{parentMessage.sender_name ?? '(不明)'}</span>
+                <span
+                  onClick={
+                    parentMessage.sender_type === 'human' && parentMessage.sender_user_id
+                      ? () => setParentProfileOpen(true)
+                      : undefined
+                  }
+                  className={`text-sm font-bold text-ink ${
+                    parentMessage.sender_type === 'human' && parentMessage.sender_user_id
+                      ? 'cursor-pointer hover:underline'
+                      : ''
+                  }`}
+                >
+                  {parentMessage.sender_name ?? '(不明)'}
+                </span>
                 <span className="text-[11px] text-ink-subtle">{formatTime(parentMessage.created_at)}</span>
               </div>
               <div className="whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
                 {renderMessageBody(parentMessage.body, parentMessage.blocks, members)}
               </div>
             </div>
+            {parentProfileOpen && parentMessage.sender_user_id && (
+              <ProfileCard userId={parentMessage.sender_user_id} onClose={() => setParentProfileOpen(false)} />
+            )}
           </div>
         )}
 
