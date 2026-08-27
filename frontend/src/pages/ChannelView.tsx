@@ -100,6 +100,7 @@ export default function ChannelView() {
           <Composer
             placeholder={`# ${channel?.name ?? ''} にメッセージを送る（@でメンション）`}
             mentionCandidates={members.filter((m) => m.is_active)}
+            scheduleTarget={{ channel_id: channelId }}
             onSend={async (body, mentions: MentionPayload[]) => {
               if (!channelId) return
               await apiFetch(`/api/channels/${channelId}/messages`, {

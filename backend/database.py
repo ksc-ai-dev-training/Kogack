@@ -164,6 +164,30 @@ CREATE TABLE IF NOT EXISTS message_blocks (
 );
 CREATE INDEX IF NOT EXISTS idx_message_blocks_message ON message_blocks (message_id);
 ALTER TABLE message_blocks ENABLE ROW LEVEL SECURITY;
+
+-- T-18 scheduled_messages: 送信予約（F-35、05-1_詳細設計書_DB設計.html 3.13節）。channel_id/dm_idは
+-- T-05と同じCHECK制約（いずれか一方）。pending行はservices/scheduled_dispatcher.pyが30秒間隔
+-- ポーリングで検出し、通常投稿と同じ経路でmessagesへ発言化する（基本設計書5.15節）。専用ジョブ
+-- キュー（Celery等）は導入せずFastAPI内蔵のasyncioタスクとする。単一インスタンス運用が前提で、
+-- 複数インスタンスに水平スケールする場合はアトミックなUPDATE...RETURNINGへの変更が必要
+-- （基本設計書10章「設計判断」。F-36定期投稿と同じ制約）。
+-- @メンションの構造化（T-07 message_blocks）・ファイル添付との併用はこのスライスでは対象外
+-- （要件定義書3.2節。予約メッセージの本文はプレーンテキストのみ）。
+CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id        BIGINT REFERENCES channels(id) ON DELETE CASCADE,
+    dm_id             BIGINT REFERENCES direct_messages(id) ON DELETE CASCADE,
+    thread_parent_id  BIGINT REFERENCES messages(id) ON DELETE CASCADE,
+    sender_user_id    BIGINT NOT NULL REFERENCES users(id),
+    body              TEXT NOT NULL,
+    scheduled_at      TIMESTAMPTZ NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'cancelled')),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at           TIMESTAMPTZ,
+    CHECK ((channel_id IS NULL) <> (dm_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_messages_dispatch ON scheduled_messages (status, scheduled_at);
+ALTER TABLE scheduled_messages ENABLE ROW LEVEL SECURITY;
 """
 
 

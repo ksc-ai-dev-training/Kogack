@@ -7,13 +7,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import database
-from routers import admin, auth, channels, dms, icons, messages, search, users
+from routers import admin, auth, channels, dms, icons, messages, scheduled_messages, search, users
+from services import scheduled_dispatcher
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await database.init_pool()
+    scheduled_dispatcher.start()  # F-35 送信予約の30秒間隔ディスパッチャ（基本設計書5.15節）
     yield
+    await scheduled_dispatcher.stop()
     await database.close_pool()
 
 
@@ -25,6 +28,7 @@ app.include_router(channels.router)
 app.include_router(dms.router)
 app.include_router(icons.router)
 app.include_router(messages.router)
+app.include_router(scheduled_messages.router)
 app.include_router(search.router)
 app.include_router(users.router)
 

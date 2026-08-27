@@ -74,6 +74,7 @@ export default function DmView() {
         <div className="flex-none border-t border-line px-5 py-2.5">
           <Composer
             placeholder={`${title} にメッセージを送る`}
+            scheduleTarget={{ dm_id: dmId }}
             onSend={async (body) => {
               if (!dmId) return
               await apiFetch(`/api/dms/${dmId}/messages`, {

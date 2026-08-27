@@ -5,9 +5,11 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
+import { useScheduledMessages } from '../hooks/useScheduledMessages'
 import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
 import ProfileEditModal from './ProfileEditModal'
+import ScheduledMessagesModal from './ScheduledMessagesModal'
 import type { Me } from '../types'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -32,9 +34,11 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const { mutate: mutateMe } = useMe()
   const { joined } = useChannels()
   const { dms } = useDms()
+  const { items: scheduledItems } = useScheduledMessages()
   const [modalOpen, setModalOpen] = useState(false)
   const [dmModalOpen, setDmModalOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [scheduledModalOpen, setScheduledModalOpen] = useState(false)
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
   // 実装済みなのはそれぞれ1タブのみのため、未実装タブは出さない
@@ -57,10 +61,27 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             K
           </div>
           <span className="text-[15px] font-bold text-accent-700">Kogack</span>
+          <button
+            type="button"
+            onClick={() => setScheduledModalOpen(true)}
+            title="予約中のメッセージ"
+            className={`ml-auto flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${
+              scheduledItems.length > 0
+                ? 'border-accent-600 bg-accent-50 text-accent-700'
+                : 'border-transparent text-ink-subtle hover:bg-surface-muted'
+            }`}
+          >
+            🕐
+            {scheduledItems.length > 0 && (
+              <span className="rounded-full bg-accent-600 px-1.5 text-[10px] font-bold text-white">
+                {scheduledItems.length}
+              </span>
+            )}
+          </button>
           <NavLink
             to="/search"
             title="横断検索"
-            className="ml-auto rounded p-1.5 text-ink-subtle hover:bg-surface-muted hover:text-ink-muted"
+            className="rounded p-1.5 text-ink-subtle hover:bg-surface-muted hover:text-ink-muted"
           >
             🔍
           </NavLink>
@@ -231,6 +252,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
       {modalOpen && <JoinChannelModal onClose={() => setModalOpen(false)} />}
       {dmModalOpen && <DmPickerModal onClose={() => setDmModalOpen(false)} />}
       {profileModalOpen && <ProfileEditModal me={me} onClose={() => setProfileModalOpen(false)} />}
+      {scheduledModalOpen && <ScheduledMessagesModal onClose={() => setScheduledModalOpen(false)} />}
     </div>
   )
 }

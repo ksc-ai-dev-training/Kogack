@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
+import { apiFetch } from '../lib/api'
 import { useToast } from './Toast'
-import type { MentionPayload } from '../types'
+import type { MentionPayload, ScheduleTarget } from '../types'
 
 const MIN_ROWS = 2
 const MAX_ROWS = 10
@@ -9,6 +10,20 @@ const MAX_ROWS = 10
 export interface MentionCandidate {
   id: string
   name: string
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+// 送信予約ポップオーバーを開いたときの日時欄の既定値（F-35）。5分後を初期値にし、
+// 「未来の日時を指定してください」のバリデーションに即座に引っかからないようにする。
+function defaultScheduleDateTime(): { date: string; time: string } {
+  const d = new Date(Date.now() + 5 * 60 * 1000)
+  return {
+    date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+    time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+  }
 }
 
 // 「@」（全角「＠」も同様に扱う。IME入力時に全角になりやすいため）の直後、空白を挟まずカーソルまで
@@ -29,22 +44,34 @@ function detectMentionQuery(text: string, cursor: number): { atIndex: number; qu
 // とmutate()だけを担い、送信中状態・エラートーストはこちらで一元管理する。
 // mentionCandidatesを渡すと「@」入力でF-41のオートコンプリートが有効になる（チャンネル会話のみ。
 // DM会話では候補元＝A-46がチャンネル専用のため渡さない）。
+// scheduleTargetを渡すとF-35の送信予約ボタンが有効になる（チャンネル・DM・スレッド返信いずれも
+// 対応。送信予約自体はComposerがA-50を直接呼ぶ。設計書のComposerがchannelId/threadParentIdを
+// 直接受け取る想定とは異なり、このアプリの実装はonSendコールバック方式のため、送信予約専用に
+// 送信先だけを渡す形にしている）。
 export default function Composer({
   placeholder,
   onSend,
   mentionCandidates,
+  scheduleTarget,
 }: {
   placeholder: string
   onSend: (body: string, mentions: MentionPayload[]) => Promise<void>
   mentionCandidates?: MentionCandidate[]
+  scheduleTarget?: ScheduleTarget
 }) {
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [mentions, setMentions] = useState<MentionPayload[]>([])
   const [pickerQuery, setPickerQuery] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [scheduleTime, setScheduleTime] = useState('')
+  const [scheduling, setScheduling] = useState(false)
   const toast = useToast()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
   // 3行目以降は入力に合わせて自動的に高さを広げ、10行を超えたらそれ以上は広げずスクロールにする
   useEffect(() => {
@@ -76,6 +103,48 @@ export default function Composer({
     setActiveIndex(0)
   }
 
+  const toggleSchedulePopover = () => {
+    if (!scheduleOpen) {
+      const d = defaultScheduleDateTime()
+      setScheduleDate((prev) => prev || d.date)
+      setScheduleTime((prev) => prev || d.time)
+      setPickerQuery(null)
+    }
+    setScheduleOpen((v) => !v)
+  }
+
+  const confirmSchedule = async () => {
+    const text = body.trim()
+    if (!text) {
+      toast('本文を入力してください', 'error')
+      return
+    }
+    if (!scheduleDate || !scheduleTime) {
+      toast('送信日時を指定してください', 'error')
+      return
+    }
+    const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}:00`)
+    if (Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+      toast('未来の日時を指定してください', 'error')
+      return
+    }
+    setScheduling(true)
+    try {
+      await apiFetch('/api/scheduled-messages', {
+        method: 'POST',
+        body: JSON.stringify({ ...scheduleTarget, body: text, scheduled_at: scheduledAt.toISOString() }),
+      })
+      setBody('')
+      setMentions([])
+      setScheduleOpen(false)
+      toast('送信を予約しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '予約に失敗しました', 'error')
+    } finally {
+      setScheduling(false)
+    }
+  }
+
   const selectCandidate = (candidate: MentionCandidate) => {
     const el = textareaRef.current
     const cursor = el?.selectionStart ?? body.length
@@ -104,6 +173,7 @@ export default function Composer({
     setBody(body.slice(0, cursor) + insertText + body.slice(cursor))
     setPickerQuery('')
     setActiveIndex(0)
+    setScheduleOpen(false)
     requestAnimationFrame(() => {
       const pos = cursor + insertText.length
       el?.focus()
@@ -183,6 +253,45 @@ export default function Composer({
           ))}
         </div>
       )}
+      {scheduleOpen && (
+        <div className="absolute bottom-full right-0 z-40 mb-2 w-[260px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+          <div className="mb-2 text-[12.5px] font-bold text-ink">送信日時を指定</div>
+          <div className="flex gap-1.5">
+            <input
+              type="date"
+              value={scheduleDate}
+              onChange={(e) => setScheduleDate(e.target.value)}
+              className="w-1/2 rounded-md border border-line-strong px-2 py-1.5 text-[12px] text-ink outline-none"
+            />
+            <input
+              type="time"
+              value={scheduleTime}
+              onChange={(e) => setScheduleTime(e.target.value)}
+              className="w-1/2 rounded-md border border-line-strong px-2 py-1.5 text-[12px] text-ink outline-none"
+            />
+          </div>
+          <div className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+            指定した日時に自動的に送信されます。送信されるまでは自分だけが内容を確認・キャンセルできます。
+          </div>
+          <div className="mt-2.5 flex justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => setScheduleOpen(false)}
+              className="rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] text-ink-muted"
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              disabled={scheduling}
+              onClick={confirmSchedule}
+              className="rounded-md bg-accent-600 px-2.5 py-1 text-[11.5px] font-bold text-white disabled:opacity-40"
+            >
+              予約する
+            </button>
+          </div>
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         value={body}
@@ -207,11 +316,28 @@ export default function Composer({
             </svg>
           </button>
         )}
+        {canSchedule && (
+          <button
+            type="button"
+            title="送信日時を指定"
+            onClick={toggleSchedulePopover}
+            className={`ml-auto flex h-7 w-7 items-center justify-center rounded-md ${
+              scheduleOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle hover:bg-surface-muted'
+            }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <circle cx="10" cy="10" r="7.2" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M10 6v4l3 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           disabled={sending || !body.trim()}
           onClick={send}
-          className="ml-auto rounded-[7px] bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40"
+          className={`rounded-[7px] bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40 ${
+            canSchedule ? '' : 'ml-auto'
+          }`}
         >
           送信
         </button>

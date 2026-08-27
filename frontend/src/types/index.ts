@@ -108,6 +108,30 @@ export interface DmsResponse {
   items: Dm[]
 }
 
+/** F-35 送信予約（T-18 scheduled_messages）。このスライスはpendingのみをA-51が返す
+ * （補足04・ヘッダーバッジ共通、05-3画面設計11.4節） */
+export interface ScheduledMessage {
+  id: string
+  channel_id: string | null
+  dm_id: string | null
+  thread_parent_id: string | null
+  body: string
+  scheduled_at: string
+  status: 'pending' | 'sent' | 'cancelled'
+}
+
+export interface ScheduledMessagesResponse {
+  items: ScheduledMessage[]
+}
+
+/** Composerが送信予約（A-50）を呼ぶ際の送信先。channel_id/dm_idはどちらか一方のみ、
+ * thread_parent_idはスレッド返信時のみ指定する */
+export interface ScheduleTarget {
+  channel_id?: string
+  dm_id?: string
+  thread_parent_id?: string
+}
+
 export interface UserSearchResult {
   id: string
   name: string

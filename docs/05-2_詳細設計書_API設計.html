@@ -270,14 +270,16 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   "limits": { "global": { "monthly_limit_yen": 20000, "used_pct": 24.1 } } }</code></pre>
 
   <h3>4.9 送信予約（A-50〜A-52）</h3>
-  <pre><code>// A-50 POST /api/scheduled-messages
+  <pre><code>// A-50 POST /api/scheduled-messages（channel_id/dm_idはどちらか一方、thread_parent_idは任意）
 { "channel_id": "42", "body": "明日13時から棚卸しです", "scheduled_at": "2026-08-22T04:00:00Z" }
-// response 201: { "id": "701", "status": "pending", "scheduled_at": "..." }
+// response 201: { "id": "701", "channel_id": "42", "dm_id": null, "thread_parent_id": null,
+//   "body": "...", "scheduled_at": "...", "status": "pending" }
 
-// A-51 GET /api/scheduled-messages → { "items": [ { "id":"701", "channel_id":"42", "body":"...",
-//   "scheduled_at":"...", "status":"pending" } ] }
-// A-52 DELETE /api/scheduled-messages/701 → 204（既にsent済みなら404）</code></pre>
-  <p class="muted"><code>scheduled_at</code> が現在時刻以前の場合は400。ファイル添付は受け付けない（要件定義書3.2節、対象外）。</p>
+// A-51 GET /api/scheduled-messages（呼び出し本人のpendingのみ、scheduled_at昇順）
+// → { "items": [ { "id":"701", "channel_id":"42", "dm_id": null, "thread_parent_id": null,
+//   "body":"...", "scheduled_at":"...", "status":"pending" } ] }
+// A-52 DELETE /api/scheduled-messages/701 → 204（既にsent/cancelled済み・他人の予約は404で存在を伏せる）</code></pre>
+  <p class="muted"><code>scheduled_at</code> が現在時刻以前の場合は400。投稿先の参加者であることをA-11/A-19と同じ基準で検証する（非公開チャンネルの非参加者は404、公開チャンネルの非参加者は403）。ファイル添付、および@メンションの構造化（T-07 message_blocks）は受け付けない（要件定義書3.2節、対象外。本文に「@氏名」と入力すること自体は可能だが、送信時にプレーンテキストのまま発言化されハイライト表示や参照解決はされない）。実際の発言化は<code>services/scheduled_dispatcher.py</code>が30秒間隔ポーリングで行う（基本設計書5.15節）。</p>
 
   <h3>4.10 定期投稿・自動応答トリガー（A-53〜A-56, A-63〜A-66）</h3>
   <pre><code>// A-54 POST /api/channels/42/recurring-posts
