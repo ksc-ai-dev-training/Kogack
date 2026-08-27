@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プロフィールを編集 | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af; --accent-700: #1e3a8a; --accent-100: #dbeafe; --accent-50: #eff6ff;
+    --bg: #ffffff; --bg-subtle: #fafbfc; --bg-muted: #f5f7f9;
+    --border: #e7eaee; --border-strong: #d9dde3;
+    --text: #1a1d21; --text-muted: #60656d; --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9; --member-text: #475569;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text); background: var(--bg);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  .screen-tag {
+    position: fixed; top: 14px; left: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 5px; padding: 3px 9px; z-index: 60;
+  }
+
+  .topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg); z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 380px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px;
+  }
+  .topbar .user {
+    flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 20px;
+    background: var(--accent-50);
+  }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+
+  .body-row { flex: 1; display: flex; min-height: 0; }
+  .main { flex: 1; background: var(--bg-subtle); }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(20, 24, 33, 0.45);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal {
+    width: 100%; max-width: 380px; background: var(--bg); border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(16,24,40,0.28); overflow: hidden; display: flex; flex-direction: column;
+  }
+  .modal-head { display: flex; align-items: center; gap: 10px; padding: 18px 22px 4px; }
+  .modal-head h2 { font-size: 15.5px; margin: 0; flex: 1; }
+  .modal-close { background: none; border: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; }
+
+  .modal-body { padding: 18px 22px 4px; text-align: center; }
+  .avatar-preview {
+    width: 96px; height: 96px; border-radius: 50%; margin: 0 auto 14px;
+    background: linear-gradient(135deg, #cbd5f5, #a5b4e8); color: var(--accent-700);
+    font-size: 30px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--border-strong);
+  }
+  .upload-btn {
+    background: var(--accent-600); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .upload-hint { font-size: 11px; color: var(--text-subtle); margin-top: 8px; line-height: 1.6; }
+
+  .selected-file {
+    display: flex; align-items: center; gap: 10px; margin: 16px 0 4px; padding: 9px 12px;
+    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px; text-align: left;
+  }
+  .selected-file .thumb {
+    width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #fbbf24, #f97316);
+    flex: none;
+  }
+  .selected-file .fname { font-size: 12px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .selected-file .fsize { font-size: 10.5px; color: var(--text-subtle); flex: none; }
+
+  .field-group { text-align: left; margin-top: 18px; }
+  .field-label { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; display: block; }
+  .field-input {
+    width: 100%; box-sizing: border-box; border: 1.5px solid var(--border-strong); border-radius: 8px;
+    padding: 9px 12px; font-size: 13.5px; color: var(--text); font-family: inherit;
+  }
+  .field-input:focus { outline: none; border-color: var(--accent-600); box-shadow: 0 0 0 3px var(--accent-50); }
+  .field-hint { font-size: 11px; color: var(--text-subtle); margin-top: 6px; line-height: 1.6; }
+  .field-hint.warn { color: #c2410c; }
+  .field-locked {
+    width: 100%; box-sizing: border-box; border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; font-size: 13.5px; color: var(--text-subtle); background: var(--bg-muted);
+  }
+
+  .modal-foot { padding: 16px 22px 20px; }
+  .save-row { display: flex; gap: 8px; }
+  .btn-cancel { flex: 1; background: none; border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px; font-size: 13px; color: var(--text-muted); }
+  .btn-save { flex: 1; background: var(--accent-600); color: #fff; border: none; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 700; }
+  .profile-note { font-size: 11px; color: var(--text-subtle); line-height: 1.7; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; text-align: left; }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 60;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #fbbf24; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">補足06 プロフィールを編集</span>
+
+  <div class="topbar">
+    <div class="brand"><div class="mark">K</div><div class="name">Kogack</div></div>
+    <div class="search-wrap">
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>メッセージ・ファイル・ドキュメントを検索</span>
+      </div>
+    </div>
+    <div class="user"><div class="avatar">山</div><span class="uname">山田 太郎</span><span class="badge badge-member">member</span></div>
+  </div>
+
+  <div class="body-row">
+    <div class="main"></div>
+  </div>
+
+  <div class="modal-overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>プロフィールを編集</h2>
+        <button class="modal-close" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="avatar-preview">山</div>
+        <button class="upload-btn" type="button">画像をアップロード</button>
+        <div class="upload-hint">JPEG・PNG・WebP、5MBまで。アップロードした画像は他の利用者にも表示されます。</div>
+
+        <div class="selected-file">
+          <div class="thumb"></div>
+          <span class="fname">yamada_photo.jpg</span>
+          <span class="fsize">2.1MB</span>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">表示名</label>
+          <input class="field-input" type="text" value="山田 太郎">
+          <div class="field-hint">社員番号・かな/ローマ字表記などを含めてもかまいません。同じ表示名の利用者が同じチャンネルにいる場合、発言者表示に自動でメールアドレスが併記されます。</div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">メールアドレス</label>
+          <div class="field-locked">yamada@kogasoftware.com</div>
+          <div class="field-hint">Googleアカウントの情報を表示しており、この画面からは変更できません。</div>
+        </div>
+
+        <div class="profile-note">表示名は初回ログイン時にGoogleアカウントの氏名で初期化されますが、変更後はGoogle側の氏名更新を自動的には反映しません。画像も同様に、初回ログイン時にGoogleのプロフィール写真で初期化された後は、ここで変更するまでGoogle側の写真更新を反映しません。</div>
+      </div>
+      <div class="modal-foot">
+        <div class="save-row">
+          <button class="btn-cancel" type="button">キャンセル</button>
+          <button class="btn-save" type="button">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>補足モックアップ</strong>（要件定義書4.1節の画面一覧S-01〜S-08には含まれない）<br>
+    ヘッダー右のユーザーメニュー（自分のアバター・氏名）から開くモーダル（<code>F-37</code>, <span style="color:#fbbf24;">1.16版で追加: F-39</span>）。「画像をアップロード」でファイルを選ぶと、選択したファイル名がプレビュー表示され（本モックアップでの例示）、表示名を編集したうえで「保存」を押すと<code>POST /api/icons</code>（A-61）でアップロード後、<code>PUT /api/users/me</code>（A-62）でアイコン・表示名をまとめて反映する。同じアップロードの仕組みを<a href="S-06_チャンネル設定.html">チャンネルAIのアイコン（S-06「キャラクタ」タブ）</a>・<a href="S-06_チャンネル設定.html">定期投稿の送り主アイコン（S-06「定期投稿」タブ）</a>にも使う。アップロード画像の内容審査（モデレーション）は対象外（要件定義書3.2節）。<br><br>
+    <span style="color:#fbbf24;">1.16版で追加:</span> 表示名の編集欄を追加した。従来は氏名・メールアドレスとも変更不可としていたが、200名規模の運用では同姓同名が起こりうるにもかかわらず発言者表示・@メンションが氏名の一致に依存しており、取り違えのリスクがあると判明したため方針を見直した（詳細は<a href="../../検討資料/README.md">検討資料</a>「発言者表示・メンションの識別性改善」）。表示名の重複自体は許容し、同じチャンネルに同名の参加者がいる場合は発言者表示にメールアドレスを自動併記して区別する（<a href="S-03_チャンネル会話.html">S-03</a>、F-39）。メールアドレスは引き続きGoogleアカウントの情報が正であり変更不可。画面のファイル名・画面ID（補足06）は変更していないが、画像専用だったスコープが表示名にも広がったため、モーダル見出しは「プロフィールを編集」に改めた（S-06のような画面ファイル名の変更は今回は行わず、次回改訂で揃える）。<a href="../02_要件定義書.html#sec3">要件定義書F-37・F-39</a>参照。
+  </div>
+
+</body>
+</html>

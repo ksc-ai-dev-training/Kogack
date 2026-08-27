@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>検索: デプロイ 手順 | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af;
+    --accent-700: #1e3a8a;
+    --accent-100: #dbeafe;
+    --accent-50: #eff6ff;
+    --bg: #ffffff;
+    --bg-subtle: #fafbfc;
+    --bg-muted: #f5f7f9;
+    --border: #e7eaee;
+    --border-strong: #d9dde3;
+    --text: #1a1d21;
+    --text-muted: #60656d;
+    --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9;
+    --member-text: #475569;
+    --ai-bg: #dbeafe;
+    --ai-text: #1d4ed8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .screen-tag {
+    position: fixed; top: 14px; left: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    color: #0369a1; background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 5px; padding: 3px 9px; z-index: 30;
+  }
+
+  /* ---- topbar ---- */
+  .topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg); z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 460px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg); border: 1.5px solid var(--accent-600); border-radius: 8px;
+    padding: 7px 10px 7px 12px; color: var(--text); font-size: 13px;
+    box-shadow: 0 0 0 3px var(--accent-50);
+  }
+  .search-box svg { flex: none; }
+  .search-box .q { flex: 1; font-weight: 600; }
+  .search-box .clear-btn {
+    flex: none; width: 18px; height: 18px; border-radius: 50%; border: none; background: var(--bg-muted);
+    color: var(--text-subtle); font-size: 11px; display: flex; align-items: center; justify-content: center;
+  }
+  .search-box .mod { color: var(--accent-700); font-weight: 700; }
+
+  /* ---- modifier hint / autocomplete (F-42) ---- */
+  .search-wrap { position: relative; }
+  .mod-popover {
+    display: none; position: absolute; top: 46px; left: 50%; transform: translateX(-50%);
+    width: 320px; max-height: 260px; overflow-y: auto; background: var(--bg);
+    border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 30px rgba(16,24,40,0.18);
+    padding: 6px; z-index: 45;
+  }
+  .mod-popover.show { display: block; }
+  .mod-popover .mp-title { font-size: 10.5px; font-weight: 700; color: var(--text-subtle); padding: 6px 8px 4px; }
+  .mp-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; }
+  .mp-row:hover, .mp-row.active { background: var(--bg-subtle); }
+  .mp-row .mp-av {
+    width: 26px; height: 26px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center;
+    font-size: 10.5px; font-weight: 700; color: #fff;
+  }
+  .mp-row .mp-info { flex: 1; min-width: 0; }
+  .mp-row .mp-name { font-size: 12px; font-weight: 700; }
+  .mp-row .mp-email { font-size: 10.5px; color: var(--text-subtle); }
+  .mp-syntax { padding: 6px 8px; font-size: 11px; color: var(--text-muted); line-height: 1.9; }
+  .mp-syntax code { background: var(--bg-muted); border-radius: 4px; padding: 0 5px; color: var(--accent-700); font-weight: 600; }
+
+  /* ---- filter chips ---- */
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--accent-50); color: var(--accent-700);
+    border: 1px solid var(--accent-100); border-radius: 20px; padding: 4px 6px 4px 11px; font-size: 11.5px; font-weight: 600;
+  }
+  .chip button {
+    border: none; background: rgba(30,64,175,0.12); color: var(--accent-700); border-radius: 50%;
+    width: 15px; height: 15px; font-size: 9px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .tab.disabled { color: var(--border-strong); cursor: not-allowed; }
+  .tab.disabled .n { color: var(--border-strong); }
+  .topbar .user {
+    flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 20px;
+  }
+  .topbar .user:hover { background: var(--bg-muted); }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+  .badge-ai { background: var(--ai-bg); color: var(--ai-text); }
+
+  /* ---- body row ---- */
+  .body-row { flex: 1; display: flex; min-height: 0; }
+
+  /* ---- sidebar (reuse) ---- */
+  .sidebar {
+    width: 260px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 14px 10px 20px;
+  }
+  .sidebar-section { margin-bottom: 18px; }
+  .sidebar-section-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px; }
+  .sidebar-section-head .label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; }
+  .add-btn {
+    width: 20px; height: 20px; border-radius: 5px; border: none; background: transparent;
+    color: var(--text-subtle); font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .add-btn:hover { background: var(--accent-100); color: var(--accent-700); }
+  .nav-list { list-style: none; margin: 0; padding: 0; }
+  .nav-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px;
+    font-size: 13px; color: var(--text); margin: 1px 0;
+  }
+  .nav-item:hover { background: var(--bg-muted); }
+  .nav-item .hash { color: var(--text-subtle); flex: none; font-weight: 400; }
+  .nav-item .chname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item.unread .chname { font-weight: 700; }
+  .unread-badge {
+    flex: none; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+    background: var(--accent-600); color: #fff; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dm-avatar {
+    width: 20px; height: 20px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex: none; color: #fff; position: relative;
+  }
+  .dot-online {
+    position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 50%;
+    background: #22c55e; border: 1.5px solid var(--bg-subtle);
+  }
+  .sidebar-footer { margin-top: 8px; padding: 8px; border-top: 1px solid var(--border); }
+
+  /* ---- main: search results ---- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+
+  .search-head { flex: none; padding: 18px 28px 0; }
+  .search-head h1 { font-size: 16px; margin: 0; }
+  .search-head h1 .q { color: var(--accent-700); }
+  .search-head .count { font-size: 12px; color: var(--text-subtle); font-weight: 400; margin-left: 6px; }
+
+  .scope-note {
+    margin: 12px 0 0; display: flex; align-items: flex-start; gap: 8px;
+    background: var(--accent-50); border: 1px solid var(--accent-100); border-radius: 8px;
+    padding: 9px 12px; font-size: 12px; color: var(--accent-700);
+  }
+  .scope-note svg { flex: none; margin-top: 1px; }
+  .scope-note .sub { display: block; margin-top: 3px; font-size: 11px; color: var(--text-subtle); }
+
+  .tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 9px 4px; margin-right: 20px; font-size: 13px; font-weight: 600; color: var(--text-subtle);
+    border-bottom: 2px solid transparent; cursor: default;
+  }
+  .tab .n { font-weight: 400; color: var(--text-subtle); margin-left: 3px; }
+  .tab.active { color: var(--accent-700); border-bottom-color: var(--accent-600); }
+  .tab.active .n { color: var(--accent-700); }
+
+  .results { flex: 1; overflow-y: auto; padding: 4px 0 24px; }
+  .group-title {
+    font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em;
+    margin: 18px 28px 6px;
+  }
+
+  mark { background: var(--accent-100); color: var(--accent-700); border-radius: 3px; padding: 0 2px; }
+
+  .result-row { display: flex; gap: 12px; padding: 10px 28px; border-bottom: 1px solid var(--bg-muted); }
+  .result-row:hover { background: var(--bg-subtle); }
+  .result-src {
+    flex: none; width: 150px; font-size: 11.5px; color: var(--text-muted); padding-top: 1px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .result-src .loc { font-weight: 600; color: var(--text); }
+  .result-src .thread-tag { color: var(--accent-700); font-size: 10.5px; }
+
+  .result-main { flex: 1; min-width: 0; }
+  .result-head { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+  .result-head .name { font-size: 13px; font-weight: 700; }
+  .result-head .time { font-size: 11px; color: var(--text-subtle); }
+  .result-text { font-size: 13px; line-height: 1.7; color: var(--text); margin-top: 2px; }
+
+  .result-icon {
+    flex: none; width: 34px; height: 34px; border-radius: 8px; background: var(--bg-muted);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .file-name { font-size: 13px; font-weight: 700; }
+  .file-meta { font-size: 11.5px; color: var(--text-subtle); margin-top: 2px; }
+
+  .doc-title { font-size: 13px; font-weight: 700; color: var(--accent-700); }
+  .doc-path { font-size: 11px; color: var(--text-subtle); margin-top: 1px; }
+  .doc-excerpt { font-size: 12.5px; color: var(--text-muted); margin-top: 5px; }
+  .doc-cited { display: inline-block; margin-top: 6px; font-size: 11px; color: var(--text-subtle); background: var(--bg-muted); border-radius: 5px; padding: 2px 7px; }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 30;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #93c5fd; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">S-05 横断検索</span>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">K</div>
+      <div class="name">Kogack</div>
+    </div>
+    <div class="search-wrap">
+      <div class="search-box" onclick="document.getElementById('modPopover').classList.toggle('show')">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#1e40af" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#1e40af" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span class="q"><span class="mod">in:開発相談 from:鈴木一郎 after:2026-08-01</span> デプロイ 手順</span>
+        <button class="clear-btn" type="button">✕</button>
+      </div>
+      <div class="mod-popover" id="modPopover">
+        <div class="mp-title">from: の候補（F-42）</div>
+        <div class="mp-row active">
+          <div class="mp-av" style="background:#0ea5e9;">鈴</div>
+          <div class="mp-info"><div class="mp-name">鈴木 一郎</div><div class="mp-email">suzuki@kogasoftware.com</div></div>
+        </div>
+        <div class="mp-row">
+          <div class="mp-av" style="background:#f97316;">佐</div>
+          <div class="mp-info"><div class="mp-name">佐藤 花子</div><div class="mp-email">sato@kogasoftware.com</div></div>
+        </div>
+        <div class="mp-syntax">
+          <code>in:</code>チャンネル指定　<code>from:</code>投稿者　<code>with:</code>DM相手<br>
+          <code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>日付　<code>"…"</code>完全一致
+        </div>
+      </div>
+    </div>
+    <div class="user">
+      <div class="avatar">山</div>
+      <span class="uname">山田 太郎</span>
+      <span class="badge badge-member">member</span>
+    </div>
+  </div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-head">
+          <span class="label">チャンネル</span>
+          <button class="add-btn" title="チャンネルを作成" type="button">＋</button>
+        </div>
+        <ul class="nav-list">
+          <li class="nav-item unread"><span class="hash">#</span><span class="chname">総務問い合わせ</span><span class="unread-badge">3</span></li>
+          <li class="nav-item"><span class="hash">#</span><span class="chname">開発相談</span></li>
+          <li class="nav-item unread"><span class="hash">#</span><span class="chname">新人質問</span><span class="unread-badge">1</span></li>
+          <li class="nav-item"><span class="hash">#</span><span class="chname">雑談</span></li>
+        </ul>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-head">
+          <span class="label">ダイレクトメッセージ</span>
+          <button class="add-btn" title="DMを開始" type="button">＋</button>
+        </div>
+        <ul class="nav-list">
+          <li class="nav-item unread"><span class="dm-avatar" style="background:#f97316;">佐</span><span class="chname">佐藤 花子</span><span class="unread-badge">2</span></li>
+          <li class="nav-item"><span class="dm-avatar" style="background:#0ea5e9;">鈴<span class="dot-online"></span></span><span class="chname">鈴木 一郎</span></li>
+          <li class="nav-item"><span class="dm-avatar" style="background:#a855f7;">高</span><span class="chname">高橋 美咲</span></li>
+        </ul>
+      </div>
+      <div class="sidebar-footer">
+        <div class="nav-item"><span class="avatar" style="width:22px;height:22px;font-size:10px;">山</span><span class="chname">山田 太郎</span></div>
+      </div>
+    </nav>
+
+    <div class="main">
+      <div class="search-head">
+        <h1><span class="q">「デプロイ 手順」</span>の検索結果<span class="count">2件</span></h1>
+        <div class="chip-row">
+          <span class="chip">in: #開発相談<button type="button">✕</button></span>
+          <span class="chip">from: 鈴木 一郎<button type="button">✕</button></span>
+          <span class="chip">after: 2026-08-01<button type="button">✕</button></span>
+        </div>
+        <div class="scope-note">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="1.6" stroke="#1e3a8a" stroke-width="1.5"/><path d="M6.5 9V6.5a3.5 3.5 0 0 1 7 0V9" stroke="#1e3a8a" stroke-width="1.5"/></svg>
+          <span>
+            検索対象は、あなたが参加しているチャンネル・DMの発言と、あなたが閲覧権限を持つドキュメントに限定されます。
+            <span class="sub">非表示: 5件（条件に一致しない発言・ファイルのため対象外）</span>
+          </span>
+        </div>
+
+        <div class="tabs">
+          <div class="tab active">すべて<span class="n">2</span></div>
+          <div class="tab">メッセージ<span class="n">1</span></div>
+          <div class="tab">ファイル<span class="n">1</span></div>
+          <div class="tab disabled" title="検索条件（in:/from:等）はドキュメント根拠には対応していません">ドキュメント根拠<span class="n">対象外</span></div>
+        </div>
+      </div>
+
+      <div class="results">
+        <div class="group-title">メッセージ</div>
+
+        <div class="result-row">
+          <div class="result-src"><span class="loc"># 開発相談</span></div>
+          <div class="result-main">
+            <div class="result-head"><span class="name">鈴木 一郎</span><span class="time">08/19 10:05</span></div>
+            <div class="result-text">@Kogack AI 直近の<mark>デプロイ手順</mark>書のリンクを教えて</div>
+          </div>
+        </div>
+
+        <div class="group-title">ファイル</div>
+        <div class="result-row">
+          <div class="result-src"><span class="loc"># 開発相談</span></div>
+          <div class="result-main" style="display:flex; align-items:center; gap:12px;">
+            <div class="result-icon">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 3h7l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="#60656d" stroke-width="1.4" stroke-linejoin="round"/><path d="M12 3v4h4" stroke="#60656d" stroke-width="1.4" stroke-linejoin="round"/></svg>
+            </div>
+            <div>
+              <div class="file-name"><mark>デプロイ手順</mark>書.pdf</div>
+              <div class="file-meta">鈴木 一郎がアップロード ・ 2.4MB ・ 2026/08/10</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="group-title" style="color:var(--border-strong);">ドキュメント根拠（対象外）</div>
+        <p style="margin:0 28px 18px;font-size:12px;color:var(--text-subtle);">検索条件（in:/from:等）を含む検索には、Google Drive文書は対象になりません。条件チップをすべて外すと、ドキュメント根拠も検索対象に戻ります。</p>
+        <div class="result-row" style="display:none">
+          <div class="result-src"><span class="loc">Google Drive</span></div>
+          <div class="result-main">
+            <div class="doc-title">📄 <mark>デプロイ手順</mark>書.md</div>
+            <div class="doc-path">開発部 ＞ 運用ドキュメント</div>
+            <div class="doc-excerpt">「…マイグレーションは必ずステージング環境での検証後、バックアップを取得してから本番に適用する…」</div>
+            <span class="doc-cited">引用元: # 開発相談 の回答</span>
+          </div>
+        </div>
+        <div class="result-row" style="display:none">
+          <div class="result-src"><span class="loc">Google Drive</span></div>
+          <div class="result-main">
+            <div class="doc-title">📄 リリース作業<mark>手順</mark>チェックリスト.md</div>
+            <div class="doc-path">開発部 ＞ 運用ドキュメント</div>
+            <div class="doc-excerpt">「…本番<mark>デプロイ</mark>作業は必ず2名以上で実施し、作業後にチェックリストへ記入する…」</div>
+            <span class="doc-cited">引用元: 未参照（検索一致のみ）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>モックアップ注記</strong><br>
+    画面ID: <code>S-05</code> ／ 対応機能: <code>F-06</code>（横断検索）、<code>F-42</code>（検索条件モディファイア）<br>
+    ヘッダー中央の検索欄（各画面共通）からいつでもアクセス可能（4.3節）。「メッセージ・ファイル・ドキュメント根拠」の3種を横断検索し、結果は利用者が参加しているチャンネル・DM、および閲覧権限を持つ文書の範囲に限定する（F-06・REQ-N-02）。権限により除外された件数の表示は一例で、除外対象そのものの内容は表示しない。詳細は<a href="../02_要件定義書.html#sec3">要件定義書F-06</a>参照。<br>
+    <span style="color:#fbbf24;">1.17版で追加:</span> Slackを参考にした検索条件モディファイア（<code>in:</code>チャンネル指定、<code>from:</code>投稿者指定、<code>with:</code>DM相手指定、<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>日付指定、<code>"完全一致"</code>フレーズ検索）を追加した（F-42）。検索欄をクリックすると入力補助のポップオーバーが開き（本モックアップでも実際にクリックして開閉を確認できる）、<code>in:</code>/<code>from:</code>/<code>with:</code>は候補（氏名・メールアドレス付き。同姓同名でも取り違えないようF-41と同じくユーザーID/チャンネルIDで解決する）から選ぶ。確定した条件は結果上部にチップとして表示され、個別に✕で解除できる。モディファイアはメッセージ・ファイルの検索には適用されるが、Google Drive文書には対応する属性（チャンネル・投稿者・投稿日時）がないため、ドキュメント根拠タブは対象外になる（グレーアウト表示）。すべての条件チップを外すとキーワードのみの検索に戻り、ドキュメント根拠も対象に含まれる。詳細は<a href="../02_要件定義書.html#sec3">要件定義書F-42</a>参照。
+  </div>
+
+</body>
+</html>

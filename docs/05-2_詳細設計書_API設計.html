@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>詳細設計書 API設計 | AIネイティブチャットシステム（Kogack）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<script src="_sidenav.js"></script>
+<div class="doc">
+
+  <!-- ============ 表紙 ============ -->
+  <div class="cover">
+    <span class="doc-type">詳細設計書 分冊2</span>
+    <h1>詳細設計書 API設計</h1>
+    <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
+    <div class="meta">
+      <span>分冊化日: 2026-08-24</span>
+      <span>版数: 1.0（<a href="05_詳細設計書.html">詳細設計書（総論）</a> v1.4から分冊化）</span>
+      <span>作成: コガソフトウェア株式会社</span>
+    </div>
+    <p class="note">本書は<a href="05_詳細設計書.html">詳細設計書（総論）</a>の一部（4章 API詳細設計・6章 検索処理詳細）を分冊化したもの。改訂履歴・全体の版数は総論を参照。本ドキュメントは新人社員向けAI開発研修の成果物です</p>
+  </div>
+
+  <!-- ============ 改訂履歴（本分冊固有） ============ -->
+  <h2>改訂履歴（本分冊）</h2>
+  <table>
+    <thead><tr><th>版数</th><th>日付</th><th>改訂内容</th></tr></thead>
+    <tbody>
+      <tr><td>1.0</td><td>2026-08-24</td><td>総論v1.4からの分冊化により新設。内容は総論v1.3時点の4章（API詳細設計）・6章（検索処理詳細）と同一。以降、本分冊のみで完結する変更はここに追記し、分冊をまたぐ変更は総論の改訂履歴に記載する。</td></tr>
+      <tr><td>1.1</td><td>2026-08-26</td><td>基本設計書v1.15（新規F-43「チャンネル参加の通知」）を反映し、A-08の説明に入室通知の発言作成（sender_type='bot'、同一トランザクション内）を追記した。新規API・DB変更は無い。</td></tr>
+      <tr><td>1.2</td><td>2026-08-26</td><td>A-36・A-37のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。A-36のlast_login_atはT-01への新規列追加（05-1 DB設計backfill）に対応。A-37はrole/is_activeがいずれも省略可（部分更新）であることを明記した。</td></tr>
+      <tr><td>1.3</td><td>2026-08-26</td><td>実運用中に唯一の管理者が自分自身をmemberへ降格しログイン後にS-08を開けなくなる事象が発生したため、A-37に自分自身のrole='member'変更を拒否する制約を追加した（既存の自己無効化拒否と同じ管理者ロックアウト防止の考え方）。</td></tr>
+      <tr><td>1.4</td><td>2026-08-27</td><td>A-12（メッセージ削除）のリクエスト/レスポンス例と権限判定（投稿者本人またはadmin、参加していない会話には404、参加しているが権限が無い場合は403）を新規追加した（基本設計書4.3節にAPI一覧のみ記載で詳細が未反映だった抜けをbackfill）。新規DB列は無い（T-05.deleted_at/deleted_byは既存）。</td></tr>
+      <tr><td>1.5</td><td>2026-08-27</td><td>基本設計書v1.16（未読バッジ、新規T-22 read_states）を反映し、新規API A-05のjoined/A-16のunread_count追加、新規API A-69（チャンネル既読化）・A-70（DM既読化）を追加した（サイドバーの未読バッジは4.2節に記載済みだったがAPI設計側が未反映だった抜けをbackfill）。</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 目次 ============ -->
+  <nav class="toc">
+    <strong>目次（詳細設計書 全体）</strong>
+    <ol>
+      <li><a href="05_詳細設計書.html#sec1">1. はじめに</a>（総論）</li>
+      <li><a href="05_詳細設計書.html#sec2">2. 実装構成</a>（総論）</li>
+      <li><a href="05-1_詳細設計書_DB設計.html#sec3">3. テーブル定義</a>（分冊: DB設計）</li>
+      <li><a href="#sec4">4. API詳細設計</a></li>
+      <li><a href="05_詳細設計書.html#sec5">5. 権限制御詳細</a>（総論）</li>
+      <li><a href="#sec6">6. 検索処理詳細</a></li>
+      <li><a href="05_詳細設計書.html#sec7">7. エラーハンドリング・ログ設計</a>（総論）</li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec8">8. 画面項目定義</a>（分冊: 画面設計）</li>
+      <li><a href="05_詳細設計書.html#sec9">9. 処理シーケンス</a>（総論）</li>
+      <li><a href="05-4_詳細設計書_AIサポート.html#sec10">10. AIサポート機能</a>（分冊: AIサポート）</li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec11">11. フロントエンドコンポーネント設計</a>（分冊: 画面設計）</li>
+    </ol>
+  </nav>
+
+  <!-- ============ 4. API詳細設計 ============ -->
+  <h2 id="sec4">4. API詳細設計</h2>
+
+  <h3>4.1 共通仕様</h3>
+  <table>
+    <thead><tr><th>項目</th><th>仕様</th></tr></thead>
+    <tbody>
+      <tr><td>ベースパス</td><td><code>/api</code>。認証はセッションJWT（HttpOnly Cookie）、A-01・A-02を除き認証必須</td></tr>
+      <tr><td>エラー形式</td><td><code>{"detail": "メッセージ"}</code>（総論7.1節）。バリデーションエラーはFastAPI標準の422形式をそのまま返す</td></tr>
+      <tr><td>ID表現</td><td>レスポンスの <code>id</code> 系フィールドはすべて文字列（BIGINTの精度落ち防止、総論2.4節）</td></tr>
+      <tr><td>日時表現</td><td>UTCのISO 8601（<code>Z</code>付き）</td></tr>
+      <tr><td>一覧のページネーション</td><td><code>{"items": [...], "total": 件数, "page": ページ番号}</code>。<code>page</code>は1始まり、1ページ20件を既定とする</td></tr>
+      <tr><td>欠番</td><td>A-32（AIエージェントの応答生成は内部処理のためAPI非公開。基本設計書7章）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.2 認証（A-01〜A-04）</h3>
+  <table>
+    <thead><tr><th>API</th><th>メソッド/パス</th><th>リクエスト</th><th>レスポンス（200）</th></tr></thead>
+    <tbody>
+      <tr><td>A-01</td><td><span class="badge badge-get">GET</span> <code>/api/auth/login</code></td><td>なし</td><td>302リダイレクト（Google認可URL）</td></tr>
+      <tr><td>A-02</td><td><span class="badge badge-get">GET</span> <code>/api/auth/callback</code></td><td>クエリ: <code>code</code>, <code>state</code></td><td>302リダイレクト（<code>/</code>、Cookie発行。失敗時は<code>/login?error=&lt;種別&gt;</code>、総論7.2節）</td></tr>
+      <tr><td>A-03</td><td><span class="badge badge-post">POST</span> <code>/api/auth/logout</code></td><td>なし</td><td><code>{"ok": true}</code></td></tr>
+      <tr><td>A-04</td><td><span class="badge badge-get">GET</span> <code>/api/auth/me</code></td><td>なし</td><td><code>{"id","email","name","picture_url","role"}</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.3 チャンネル・メッセージ（A-05〜A-15, A-46〜A-49, A-69）</h3>
+  <p><strong>A-05 <span class="badge badge-get">GET</span> /api/channels（参加中＋参加可能一覧）</strong></p>
+  <pre><code>// response 200
+{ "joined": [ { "id": "42", "name": "開発相談", "topic": "...", "is_public": true,
+    "created_by": "7", "created_at": "...", "unread_count": 3 } ],
+  "joinable": [ { "id": "50", "name": "総務問い合わせ", "topic": null, "is_public": true,
+    "created_by": "3", "created_at": "..." } ] }</code></pre>
+  <p class="muted"><code>unread_count</code>は<code>joined</code>のみに含まれる（未読バッジ用。T-22 read_states、基本設計書6.2節「設計判断」）。自分以外が送った、スレッド返信ではない発言のうち、既読時刻（無ければ参加時刻）より後に投稿されたものの件数。</p>
+
+  <p><strong>A-69 <span class="badge badge-post">POST</span> /api/channels/{id}/read（既読化）</strong></p>
+  <pre><code>POST /api/channels/42/read
+// response 200: { "channel_id": "42", "read": true }</code></pre>
+  <p class="muted">T-22 read_statesの<code>last_read_at</code>を現在時刻へ更新する（無ければ新規作成）。フロントエンドはS-03表示中（マウント時・新着メッセージ受信時）に呼び出す。専用の既読ボタンは無い。</p>
+
+  <p><strong>A-07 <span class="badge badge-post">POST</span> /api/channels（チャンネル作成）</strong></p>
+  <pre><code>// request
+{ "name": "経理連絡", "topic": "経理部からの連絡用", "is_public": true }
+// response 201
+{ "id": "42", "name": "経理連絡", "topic": "経理部からの連絡用", "is_public": true,
+  "created_by": "7", "created_at": "2026-08-21T01:00:00Z" }</code></pre>
+  <p class="muted">作成者は同一トランザクション内でT-03へ <code>is_channel_admin=true</code> として登録する。<code>name</code> は空文字不可・256文字まで。既存名との重複は409。</p>
+
+  <p><strong>A-08 <span class="badge badge-post">POST</span> /api/channels/{id}/members（参加・招待。F-34）</strong></p>
+  <pre><code>// 公開チャンネル: 本人を追加（本文なし）
+POST /api/channels/42/members
+// 非公開チャンネル: 対象を指定して追加（呼び出し元は既存参加者であること、総論5.4節）
+{ "user_id": "15" }
+// response 201
+{ "channel_id": "42", "user_id": "15", "is_channel_admin": false, "joined_at": "..." }</code></pre>
+  <p class="muted">非公開チャンネルで本文の <code>user_id</code> を省略（自己参加）した場合は403。公開チャンネルで他者の <code>user_id</code> を指定した場合も403（本人のみ自己参加可）。<span class="diff-new">参加者の追加に成功すると、同一トランザクション内でT-05へ<code>sender_type='bot'</code>・<code>bot_display_name='システム通知'</code>の発言「（氏名）さんが参加しました。」を1件作成する（F-43。基本設計書6.2節「設計判断」）。</span></p>
+
+  <p><strong>A-11 <span class="badge badge-post">POST</span> /api/channels/{id}/messages（メッセージ投稿）</strong></p>
+  <pre><code>// request（@田中 智子をF-41のオートコンプリートで選択した例）
+{ "body": "@Kogack AI デプロイ手順を教えて／@田中 智子 さんも確認お願いします",
+  "thread_parent_id": null,
+  "mentions": [ { "target_user_id": "15", "display_name_snapshot": "田中 智子" } ] }
+// response 201（即時。AI応答は非同期で別途投稿される、総論9.2節）
+{ "id": "10301", "channel_id": "42", "sender_type": "human", "sender_user_id": "7",
+  "body": "@Kogack AI デプロイ手順を教えて／@田中 智子 さんも確認お願いします",
+  "blocks": [ { "block_type": "mention", "payload": { "target_user_id": "15", "display_name_snapshot": "田中 智子" }, "sort_order": 0 } ],
+  "created_at": "2026-08-21T01:05:00Z" }</code></pre>
+  <p class="muted"><code>body</code> は1〜4000文字。<code>mentions</code>は任意（F-41のオートコンプリートで確定した人間へのメンションのみを含み、AIへのメンションは含めない）。各要素は<code>target_user_id</code>が当該チャンネルの参加者であることをAPI側で検証し、1件につきT-07 message_blocksへblock_type='mention'の行を1件作成する。投稿後、サーバーは(1) 本文中の<code>@チャンネルAI名</code>を検知→<code>services/ai_agent.py</code> を非同期起動、(2) <code>services/trigger_matcher.py</code> による自動応答トリガー判定を同期実行、の2処理を行う（基本設計書8.1節・総論9.3節）。人間へのメンション（mentions配列）はAI起動・トリガー判定のいずれの契機にもならない。</p>
+
+  <p><strong>A-10 <span class="badge badge-get">GET</span> /api/channels/{id}/messages（履歴取得）</strong></p>
+  <pre><code>GET /api/channels/42/messages?since=2026-08-21T00:00:00Z&limit=50
+// response 200
+{ "items": [ { "id":"10301", "sender_type":"human", "sender_user_id":"7", "body":"...",
+    "generation_status": null, "thread_reply_count": 2, "blocks": [], "created_at":"..." } ],
+  "has_more": false }</code></pre>
+  <p class="muted"><code>since</code> 省略時は直近50件。ポーリング（3秒間隔）は直近ポーリング時刻を <code>since</code> として差分取得する（基本設計書9.1節）。<code>generation_status</code> が <code>"generating"</code> の行はAI発言が生成中であることを示す（AIサポート10.3節）。</p>
+
+  <p><strong>A-12 <span class="badge badge-delete">DELETE</span> /api/messages/{id}（メッセージ削除）</strong></p>
+  <pre><code>DELETE /api/messages/10301
+// response 200: { "id": "10301", "deleted": true }</code></pre>
+  <p class="muted">論理削除（T-05.deleted_at/deleted_by）。投稿者本人またはadminのみ実行できる。チャンネル・DMどちらの発言、スレッド返信・元発言のいずれも同じエンドポイントで扱う。削除に成功すると以後A-10/A-18/A-13の一覧から除外される（元発言を削除した場合、そのスレッドのA-13/A-14は404になる）。参加していない会話の発言に対しては存在自体を伏せるため404、参加しているが投稿者本人でもadminでもない場合は403を返す（総論5.3節と同じ使い分け）。</p>
+
+  <p><strong>A-49 <span class="badge badge-put">PUT</span> /api/channels/{id}/visibility（公開/非公開切替）</strong></p>
+  <pre><code>{ "is_public": false }
+// response 200: { "id": "42", "is_public": false }</code></pre>
+
+  <h3>4.4 DM（A-16〜A-19, A-70）</h3>
+  <p><strong>A-16 <span class="badge badge-get">GET</span> /api/dms（参加中DM一覧）</strong></p>
+  <pre><code>// response 200
+{ "items": [ { "id": "9", "members": [ { "id": "15", "name": "田中 智子", "picture_url": null } ],
+    "created_at": "...", "unread_count": 2 } ] }</code></pre>
+  <p class="muted"><code>members</code>は自分以外の参加者（アイコン・氏名解決済み）。<code>unread_count</code>はA-05の<code>joined</code>と同じ考え方（T-22 read_states、基本設計書6.2節「設計判断」）。</p>
+
+  <p><strong>A-70 <span class="badge badge-post">POST</span> /api/dms/{id}/read（既読化）</strong></p>
+  <pre><code>POST /api/dms/9/read
+// response 200: { "dm_id": "9", "read": true }</code></pre>
+  <p class="muted">A-69と同じ（対象がdm_idになるのみ）。フロントエンドはDM会話画面表示中に呼び出す。</p>
+
+  <p><strong>A-17 <span class="badge badge-post">POST</span> /api/dms（DM開始・グループDM対応）</strong></p>
+  <pre><code>// request（自分以外の相手user_idを配列で指定。1件でも複数件でもよい）
+{ "user_ids": ["15", "23"] }
+// response 200 or 201
+{ "id": "9", "member_user_ids": ["7","15","23"], "created": false }</code></pre>
+  <p class="muted">呼び出し元ユーザーを加えた参加者集合が既存のT-17と完全一致するT-04があれば <code>created:false</code> で既存DM（200）を返し、無ければ新規作成（201、<code>created:true</code>）する（基本設計書6.2節「設計判断」）。</p>
+
+  <h3>4.5 検索・添付ファイル（A-20〜A-22, A-61, A-68）</h3>
+  <p><strong>A-20 <span class="badge badge-get">GET</span> /api/search（横断検索。詳細は6章）</strong></p>
+  <pre><code>GET /api/search?q=デプロイ%20手順&type=all&page=1
+// response 200
+{ "counts": { "message": 4, "file": 1, "document": 2 },
+  "items": [
+    { "type": "message", "message_id": "10245", "channel_id": "42", "channel_name": "開発部",
+      "sender_display_name": "田中", "excerpt": "デプロイ手順は...", "posted_at": "..." },
+    { "type": "file", "attachment_id": "301", "file_name": "デプロイ手順書.pdf", "channel_id": "42", ... },
+    { "type": "document", "doc_title": "運用ドキュメント：デプロイ手順書", "doc_url": "...", "excerpt": "..." }
+  ], "page": 1 }
+
+// F-42: モディファイア付き検索（in:開発相談 from:田中智子 after:2026-08-01 デプロイ 手順）
+GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&page=1
+// response 200（typeにdocumentを含めてもcountsのdocumentは常に0。6.5節）
+{ "counts": { "message": 2, "file": 0, "document": 0 },
+  "items": [
+    { "type": "message", "message_id": "10245", "channel_id": "42", "channel_name": "開発部",
+      "sender_display_name": "田中 智子", "excerpt": "デプロイ手順は...", "posted_at": "2026-08-19T01:06:00Z" }
+  ], "page": 1 }</code></pre>
+  <p class="muted">クエリパラメータ: <code>in</code>=channel_id、<code>from</code>=user_id、<code>with</code>=user_id、<code>before</code>/<code>after</code>/<code>on</code>=YYYY-MM-DD、<code>during</code>=YYYY-MM。いずれも省略可・複数同時指定可（AND）。<code>in</code>/<code>with</code>は指定した対象に自分がアクセス権を持たない場合（未参加チャンネル・未参加DM）、総論5.3節と同じ扱いで結果0件を返す（403にはしない。存在の有無を教えないため）。</p>
+
+  <p><strong>A-68 <span class="badge badge-get">GET</span> /api/users（利用者検索。F-42・F-05）</strong></p>
+  <pre><code>GET /api/users?q=田中&limit=20
+// response 200
+{ "items": [
+    { "id": "15", "name": "田中 智子", "email": "tanaka.dev@kogasoftware.com", "picture_url": "..." },
+    { "id": "31", "name": "田中 智子", "email": "tanaka.soumu@kogasoftware.com", "picture_url": "..." }
+  ] }</code></pre>
+  <p class="muted">氏名（<code>name</code>）・メールアドレス（<code>email</code>）の部分一致（ILIKE）で検索し、<code>is_active=true</code>の利用者のみを返す。<code>q</code>省略時は全利用者を氏名順で返す（<code>limit</code>件まで）。表示名が重複する利用者（上記の「田中 智子」2名）はどちらも候補に含め、区別はメールアドレスの併記で行う（F-39と同じ考え方）。補足02（DM相手選択）・S-05検索モディファイア（from:/with:）のオートコンプリート双方から呼び出す共通API。</p>
+
+  <p><strong>A-61 <span class="badge badge-post">POST</span> /api/icons（画像アップロード・汎用）</strong></p>
+  <pre><code>// request: multipart/form-data（file）
+// response 201: { "url": "https://.../icons/ab12cd34.png" }</code></pre>
+  <p class="muted">JPEG/PNG/WebP、5MBまで。認証済みであれば誰でも呼べる（アップロード自体は無害。反映先API側で権限検証、総論5.5節）。</p>
+
+  <h3>4.6 チャンネルAI設定（A-23〜A-31, A-45〜A-48）</h3>
+  <p><strong>A-25 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/character</strong></p>
+  <pre><code>{ "persona_name": "総務サポーター", "persona_icon_url": "https://.../icons/ab12cd34.png",
+  "persona_tone": "丁寧語・簡潔" }
+// response 200: 更新後のT-08該当カラムを返す</code></pre>
+
+  <p><strong>A-27 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/doc-scope</strong></p>
+  <pre><code>{ "folder_ids": ["3", "5"], "out_of_scope_policy": "strict" }
+// response 200</code></pre>
+  <p class="muted"><code>folder_ids</code> は送信された集合でT-10を洗い替える（追加・削除の差分計算はAPI側で行う）。</p>
+
+  <p><strong>A-45 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/handoff</strong></p>
+  <pre><code>{ "fallback_handoff_user_id": "15" }  // nullで既定（chadmin）へ戻す
+// response 200</code></pre>
+  <p class="muted"><code>fallback_handoff_user_id</code> は当該チャンネルのT-03参加者であることをAPI側で検証（400）。</p>
+
+  <h3>4.7 実行前確認（A-33〜A-35）</h3>
+  <pre><code>// A-33 GET /api/pending-actions/88
+{ "id": "88", "message_id": "10301", "system_name": "座席予約システム", "action_type": "reserve_seat",
+  "action_payload": { "date": "2026-08-22", "seat": "3F-B12" }, "status": "pending" }
+
+// A-34 POST /api/pending-actions/88/confirm → { "id": "88", "status": "confirmed" }
+// A-35 POST /api/pending-actions/88/cancel  → { "id": "88", "status": "cancelled" }</code></pre>
+  <p class="muted">本リリースでは書き込み系ツール自体を実装しないため到達しない（基本設計書8.5節）。A-34は次フェーズで連携先への実際の書き込み呼び出しに差し替える前提のモック応答とする。</p>
+
+  <h3>4.8 管理コンソール（A-36〜A-44）</h3>
+  <p><strong>A-36 <span class="badge badge-get">GET</span> /api/admin/users</strong></p>
+  <pre><code>// response 200
+{ "items": [
+    { "id": "15", "name": "田中 智子", "email": "tanaka@kogasoftware.com", "role": "member",
+      "is_active": true, "last_login_at": "2026-08-19T01:15:00Z",
+      "chadmin_channels": ["開発相談"] }
+  ] }</code></pre>
+  <p class="muted"><code>chadmin_channels</code>はこの利用者がchadminであるチャンネル名の一覧（参考表示のみ。変更は各チャンネルのS-06「チャンネル管理者」タブから行う）。<code>last_login_at</code>はA-02（OAuthコールバック）・dev-loginのログイン成功時にT-01へ記録する（05-3画面設計「最終ログイン」列に対応。未ログインならnull）。</p>
+
+  <p><strong>A-37 <span class="badge badge-put">PUT</span> /api/admin/users/{id}</strong></p>
+  <pre><code>{ "role": "admin", "is_active": true }
+// response 200: { "id": "15", "role": "admin", "is_active": true }</code></pre>
+  <p class="muted"><code>role</code>・<code>is_active</code>はいずれも省略可（指定したフィールドのみ更新する）。<code>role</code>は<code>member</code>/<code>admin</code>のみ許可。管理者ロックアウト防止のため、自分自身を<code>is_active=false</code>にする操作、および自分自身の<code>role</code>を<code>member</code>にする操作はいずれも400で拒否する（唯一の管理者が誤って自分を無効化・降格し、以後誰もS-08を開けなくなる事態を防ぐ）。フロントエンドは自分自身の行のロール選択・無効化ボタンをあらかじめ操作不可にする。</p>
+
+  <p><strong>A-42 <span class="badge badge-get">GET</span> /api/admin/usage</strong></p>
+  <pre><code>GET /api/admin/usage?month=2026-08
+// response 200
+{ "total_cost_yen": 4820.5, "by_channel": [ { "channel_id":"42","channel_name":"開発部",
+    "call_count": 130, "input_tokens": 210000, "output_tokens": 45000, "cost_yen": 1200.0 } ],
+  "limits": { "global": { "monthly_limit_yen": 20000, "used_pct": 24.1 } } }</code></pre>
+
+  <h3>4.9 送信予約（A-50〜A-52）</h3>
+  <pre><code>// A-50 POST /api/scheduled-messages
+{ "channel_id": "42", "body": "明日13時から棚卸しです", "scheduled_at": "2026-08-22T04:00:00Z" }
+// response 201: { "id": "701", "status": "pending", "scheduled_at": "..." }
+
+// A-51 GET /api/scheduled-messages → { "items": [ { "id":"701", "channel_id":"42", "body":"...",
+//   "scheduled_at":"...", "status":"pending" } ] }
+// A-52 DELETE /api/scheduled-messages/701 → 204（既にsent済みなら404）</code></pre>
+  <p class="muted"><code>scheduled_at</code> が現在時刻以前の場合は400。ファイル添付は受け付けない（要件定義書3.2節、対象外）。</p>
+
+  <h3>4.10 定期投稿・自動応答トリガー（A-53〜A-56, A-63〜A-66）</h3>
+  <pre><code>// A-54 POST /api/channels/42/recurring-posts
+{ "body": "本日の日報を提出してください", "bot_display_name": "日報Bot", "bot_icon": "📝",
+  "frequency": "daily", "anchor_at": "2026-08-24T09:00:00Z" }
+// response 201: { "id": "12", "next_run_at": "2026-08-24T09:00:00Z", "is_active": true }
+
+// A-64 POST /api/channels/42/trigger-rules
+{ "trigger_type": "keyword", "trigger_value": "サポート", "action_body": "サポート窓口は #総務 へどうぞ",
+  "bot_display_name": "ヘルプ案内Bot", "bot_icon": "⚡" }
+// response 201: { "id": "5", "is_active": true }</code></pre>
+  <p class="muted">A-55/A-65（PUT）は同一スキーマの部分更新に加え、<code>{"is_active": false}</code>のみを送る呼び出しで一時停止/再開をトグルできる。</p>
+
+  <h3>4.11 プロフィール（A-62, A-67）</h3>
+  <pre><code>PUT /api/users/me
+{ "picture_url": "https://.../icons/ab12cd34.png", "name": "山田 太郎" }
+// response 200: { "id": "7", "picture_url": "...", "name": "山田 太郎" }</code></pre>
+  <p class="muted"><code>name</code>（表示名）は1〜100文字、NOT NULL。F-39により受け付ける。メールアドレスはGoogleアカウントの情報を正としており本APIでは受け付けない（<code>email</code>を含めて送信された場合は無視ではなく400で拒否し、誤解を防ぐ）。</p>
+
+  <pre><code>GET /api/users/15
+// response 200
+{ "id": "15", "name": "田中 智子", "email": "tanaka.dev@kogasoftware.com", "picture_url": "...", "role": "member" }</code></pre>
+  <p class="muted">A-67（プロフィール確認、F-40）。存在しないidは404。所属チャンネル等の追加情報は返さない（基本設計書5.21節「設計判断」）。</p>
+
+  <!-- ============ 6. 検索処理詳細 ============ -->
+  <h2 id="sec6">6. 検索処理詳細</h2>
+
+  <h3>6.1 検索対象と権限フィルタリング</h3>
+  <p>S-05横断検索（F-06、A-20）は3種類の結果を横断的に検索し、いずれも利用者の参照権限の範囲に限定する。</p>
+  <table>
+    <thead><tr><th>種別</th><th>検索対象</th><th>権限フィルタ</th><th>モディファイア対応（F-42）</th></tr></thead>
+    <tbody>
+      <tr><td>メッセージ</td><td>T-05 messages.body（deleted_atがNULLの行のみ）</td><td>参加中のchannel_id（非公開含む）とdm_idに限定（T-03/T-17との結合）</td><td>in/from/with/before/after/on/during すべて対応</td></tr>
+      <tr><td>ファイル</td><td>T-06 message_attachments.file_name</td><td>同上（親メッセージの参加者限定を継承）</td><td>同上（親メッセージのchannel_id/dm_id/sender_user_id/created_atを継承）</td></tr>
+      <tr><td>ドキュメント根拠</td><td>Drive文書索引（基本設計書8.2節と同じ索引データ）</td><td>質問者本人のGoogle Drive閲覧権限を都度確認（基本設計書8.2節と同一ロジックを流用）</td><td>非対応。モディファイアを1つ以上含む場合は検索対象から除外（6.5節）</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <strong>設計判断（ドキュメント検索の範囲はチャンネルのT-10に縛らない）:</strong> AIのチャンネル質問応答（F-19）はそのチャンネルのT-10（参照ドキュメント範囲）に限定するが、S-05横断検索は特定チャンネルに紐づかない全社検索であるため、T-09に登録された全社の索引対象からユーザー個人のDrive閲覧権限のみで絞り込む。チャンネルごとの参照範囲設定はAIの回答根拠を絞るためのものであり、人間による検索の可視性を制限する目的の設定ではないと整理する。
+  </div>
+
+  <h3>6.2 メッセージ・ファイル検索のSQL方針</h3>
+  <pre><code>-- pg_trgm による部分一致（日本語形態素解析は導入しない。想定規模200名では要件定義書7章の
+-- 目標値（2秒以内）を満たせると判断。将来語幹一致の精度が要求される場合はFTS導入を再検討）
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_messages_body_trgm ON messages USING gin (body gin_trgm_ops);
+CREATE INDEX idx_messages_channel_created ON messages (channel_id, created_at);
+CREATE INDEX idx_messages_dm_created ON messages (dm_id, created_at);
+
+SELECT m.* FROM messages m
+LEFT JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = :me
+LEFT JOIN direct_message_members dm ON dm.dm_id = m.dm_id AND dm.user_id = :me
+WHERE m.deleted_at IS NULL
+  AND (cm.user_id IS NOT NULL OR dm.user_id IS NOT NULL)
+  -- キーワード: 引用符なしの各語をAND結合、"…"はフレーズのまま1条件（6.5節）
+  AND m.body ILIKE '%' || :term1 || '%'
+  AND m.body ILIKE '%' || :term2 || '%'
+  -- モディファイア（指定されたもののみ条件を追加。6.5節のパース結果に応じてSQLを動的に組み立てる）
+  AND (:in_channel_id IS NULL OR m.channel_id = :in_channel_id)
+  AND (:with_user_id IS NULL OR dm.dm_id IN (SELECT dm_id FROM direct_message_members WHERE user_id = :with_user_id))
+  AND (:from_user_id IS NULL OR m.sender_user_id = :from_user_id)
+  AND (:after_date IS NULL OR m.created_at >= :after_date::date + interval '1 day' AT TIME ZONE 'Asia/Tokyo')
+  AND (:before_date IS NULL OR m.created_at < :before_date::date AT TIME ZONE 'Asia/Tokyo')
+  AND (:on_date IS NULL OR m.created_at >= :on_date::date AT TIME ZONE 'Asia/Tokyo'
+                        AND m.created_at < :on_date::date + interval '1 day' AT TIME ZONE 'Asia/Tokyo')
+  AND (:during_month IS NULL OR m.created_at >= (:during_month || '-01')::date AT TIME ZONE 'Asia/Tokyo'
+                              AND m.created_at < (:during_month || '-01')::date + interval '1 month' AT TIME ZONE 'Asia/Tokyo')
+ORDER BY m.created_at DESC
+LIMIT 20 OFFSET :offset;</code></pre>
+  <p class="muted">ファイル検索（T-06）も同じ考え方で、<code>message_attachments</code>を<code>messages</code>に結合してchannel_id/dm_id/sender_user_id/created_atを継承し、同一のモディファイア条件を適用する（file_nameに対してILIKE、in/with/from/日付系はJOIN先messagesの列で判定）。</p>
+
+  <h3>6.3 ドキュメント検索・索引の実装</h3>
+  <p>基本設計書8.2節の索引（S-08「今すぐ同期」A-41で実行）を検索にも流用する。索引テーブル（例: <code>doc_index</code>、T-xxを新設せず内部実装として保持してよい）にドキュメントID・フォルダパス・抜粋・埋め込みベクトルを保持し、質問文/検索語のベクトル類似度で候補を絞ったのち、候補ごとに<code>drive_client.py</code>でユーザー本人のDrive閲覧権限をそのつど確認して除外する（基本設計書8.2節と同一の2段構成）。</p>
+
+  <h3>6.4 タブ・件数・ページング</h3>
+  <p>S-05の「すべて/メッセージ/ファイル/ドキュメント根拠」タブは、A-20が一括で返す<code>counts</code>をもとにフロントで切替表示する（タブ切替のたびに再検索はしない。初回検索でtype=allとして3種すべてを取得）。1タブあたりの表示件数上限は20件、超過分は「もっと見る」でtype指定の追加リクエスト（<code>type=message&page=2</code>等）を行う。モディファイア（in/from/with/before/after/on/during）を1つ以上含む場合、ドキュメント根拠タブは無効化表示（グレーアウト＋「検索条件は発言・ファイルのみに対応」の注記）とし、<code>counts.document</code>は常に0を返す（F-42、6.5節）。</p>
+
+  <h3>6.5 F-42 検索条件モディファイアのパース方式</h3>
+  <p><strong>フロントエンドのトークン分解:</strong> 検索欄の生文字列を正規表現 <code>/(in|from|with|before|after|on|during):(\S+)/g</code> で走査してモディファイアのトークンを抽出し、<code>"…"</code>で囲まれた区間はフレーズトークンとして別扱いにする。残りの空白区切り語は自由語トークンとする。<code>in:</code>/<code>from:</code>/<code>with:</code>のトークンを検出すると、直後に候補ポップオーバー（<code>in:</code>はA-05で取得済みの参加チャンネル一覧から前方一致、<code>from:</code>/<code>with:</code>はA-68を都度呼び出して氏名・メールアドレスの部分一致）を表示し、候補を選択すると当該トークンをid（channel_id／user_id）に確定する。確定前に検索を実行した場合、フロントは値をチャンネル名／氏名の文字列としてそのままA-20へ渡し、バックエンドはchannel_id/user_idへの解決を試みたうえで一致しなければ0件を返す（曖昧一致は行わない。基本設計書5.20節のF-39と同じく、氏名の完全一致でも複数候補があり得るため）。</p>
+  <p><strong>バックエンドのクエリ組み立て:</strong> <code>services/search.py</code>の<code>build_search_query(params)</code>が、A-20で受け取った構造化パラメータ（in/from/with/before/after/on/during/q）から6.2節のSQLテンプレートへバインドするパラメータを組み立てる。<code>q</code>はサーバー側でも<code>"…"</code>の有無を再度パースし（フロントのバリデーションを信頼しない）、フレーズはエスケープしてそのまま1つのILIKE条件に、自由語は空白分割してそれぞれ独立したILIKE条件にする（AND結合。6.2節）。モディファイアが1つ以上存在する場合、<code>type=document</code>のリクエストであっても常に<code>counts.document=0</code>・<code>items</code>にdocumentを含めない応答を返す（6.1節・6.4節）。</p>
+  <div class="callout">
+    <strong>設計判断（サーバー側でqを再パースする理由）:</strong> A-20はcrypto等の認可を経ないGETリクエストであり、フロントのトークン分解ロジックをバイパスして直接クエリパラメータを叩くことも可能。<code>q</code>に含まれる引用符の解釈をサーバー側で信頼せず独自に再パースするのは、フレーズ検索の意味（完全一致か部分一致か）がリクエスト送信者の自己申告に依存しないようにするため（改ざんされても結果の意味が変わるだけで、権限上の問題は生じないが、検索結果の一貫性を担保する目的）。in/from/withについても同様にidの形式（数値）のみを受け付け、それ以外の値は無視する（400にはしない。UIの軽微な不整合でエラー画面に落ちるより、条件が無視されて広めの結果が返るほうが利用者体験として穏当なため）。
+  </div>
+
+  <footer class="doc-footer">
+    <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 API設計</span>
+    <span>Ver 1.0 / 2026-08-24</span>
+  </footer>
+</div>
+</body>
+</html>

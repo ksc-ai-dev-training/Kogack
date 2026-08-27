@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>検討資料: 検索条件モディファイアの追加 | Kogack</title>
+<link rel="stylesheet" href="../docs/assets/style.css">
+</head>
+<body>
+
+<h1>検索条件モディファイアの追加</h1>
+
+<p class="meta">
+  作成日: 2026-08-24 ／ ステータス: <strong>採用／設計反映済み</strong>
+  ／ 反映先: <a href="../docs/02_要件定義書.html">要件定義書</a> v1.17（新規F-42）、<a href="../docs/04_基本設計書.html">基本設計書</a> v1.13（5.23節、A-20拡張、新規A-68）、<a href="../docs/05-2_詳細設計書_API設計.html">詳細設計書 API設計</a> v1.0相当（分冊化前のv1.1時点で6章、あわせてF-39〜F-41の未反映分をbackfill）、<a href="../docs/画面モックアップ/00_一覧.html">画面モックアップ</a> v3.1（S-05）
+</p>
+
+<div class="callout">
+  <strong>結論:</strong> Slackを参考に、横断検索（F-06）へ <code>in:</code>（チャンネル指定）・<code>from:</code>（投稿者指定）・<code>with:</code>（DM相手指定）・<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>（日付指定）・<code>"完全一致"</code>（フレーズ検索）の5系統のモディファイアを追加する（F-42）。すべてAND条件のみとし、OR・NOT演算子と相対日付（「昨日」等）は対象外とした。モディファイアはメッセージ・ファイルの検索にのみ適用し、対応する属性を持たないGoogle Drive文書（ドキュメント根拠タブ）は対象外とする。
+</div>
+
+<h2>1. 検討のきっかけ</h2>
+<p>利用者から、Slackの検索モディファイア（in:/from:/before:/after:/on:/during:/with:/完全一致）と同等の絞り込み機能をKogackの横断検索にも追加したいという要望があった。</p>
+
+<h2>2. 主な設計判断</h2>
+<table>
+  <thead><tr><th>論点</th><th>決定</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td>from:/with: の対象特定方式</td><td>自由入力の氏名一致ではなく、候補選択でuser_idを確定する</td><td>T-01.nameはUNIQUE制約を持たず同姓同名を許容する設計（F-39）にしたため、自由入力では対象が一意に定まらない。F-41（@メンションのID参照化）と同じ考え方を踏襲した。</td></tr>
+    <tr><td>from:/with: の候補取得元</td><td>新規API A-68（<code>GET /api/users?q=</code>）を追加</td><td>検索は複数チャンネル・DMを横断するため候補は全社員が対象になり、チャンネル参加者に限定されるA-46では代用できない。あわせて、DM相手選択（補足02）が従来どのAPIから利用者一覧を取得するか未定義だった設計上の抜けも、このA-68追加で埋まった。</td></tr>
+    <tr><td>ドキュメント根拠への適用</td><td>対象外とし、モディファイアを含む検索ではドキュメント根拠タブをグレーアウトする</td><td>in:/from:/with:/日付系はいずれもT-05 messages（channel_id・sender_user_id・created_at）に対応する属性があるが、Google Drive文書索引にはチャンネル・投稿者・投稿日時に相当する属性が無い。無理に対応づけると解釈が利用者に伝わりにくいため、非対応と明示するほうを選んだ。</td></tr>
+    <tr><td>複数条件・複数キーワードの結合方式</td><td>AND条件のみ。キーワードは空白区切りで各語をAND、引用符区間は1つのフレーズとしてAND</td><td>OR・NOT演算子の要求は無く、クエリ構文・UIの複雑化に見合わない。フレーズ検索（引用符）は「複数語のうち一部を厳密な並びで一致させたい」という需要に対応する最小限の追加。</td></tr>
+    <tr><td>日付の範囲・タイムゾーン</td><td>絶対日付（YYYY-MM-DD/YYYY-MM）のみ。Asia/Tokyo基準でUTCに変換</td><td>「昨日」「今週」等の相対日付は基準時刻の定義が絡み実装が複雑化する。既存の非機能要件（業務時間9-18時）がJST前提であることと揃えた。</td></tr>
+  </tbody>
+</table>
+
+<h2>3. 積み残し</h2>
+<ul>
+  <li>OR・NOT演算子、相対日付指定は対象外機能として要件定義書3.2節・基本設計書5.24節に記録した（次フェーズ以降の拡張候補）。</li>
+  <li>検索結果のランキング（関連度順・複数条件時の重み付け等）は本改訂の対象外。現行どおり<code>created_at DESC</code>の新着順を維持する。</li>
+</ul>
+
+<script src="../docs/_sidenav.js"></script>
+</body>
+</html>

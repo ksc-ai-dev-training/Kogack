@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>メンバー一覧 | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af; --accent-700: #1e3a8a; --accent-100: #dbeafe; --accent-50: #eff6ff;
+    --bg: #ffffff; --bg-subtle: #fafbfc; --bg-muted: #f5f7f9;
+    --border: #e7eaee; --border-strong: #d9dde3;
+    --text: #1a1d21; --text-muted: #60656d; --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9; --member-text: #475569;
+    --chadmin-bg: #ccfbf1; --chadmin-text: #0f766e;
+    --admin-bg: #ede9fe; --admin-text: #6d28d9;
+    --off-bg: #f1f5f9; --off-text: #94a3b8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text); background: var(--bg);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  .screen-tag {
+    position: fixed; top: 14px; left: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 5px; padding: 3px 9px; z-index: 60;
+  }
+
+  .topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg); z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 460px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px;
+  }
+  .topbar .user { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 20px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+  .badge-chadmin { background: var(--chadmin-bg); color: var(--chadmin-text); }
+  .badge-admin { background: var(--admin-bg); color: var(--admin-text); }
+  .badge-off { background: var(--off-bg); color: var(--off-text); }
+
+  .body-row { flex: 1; display: flex; min-height: 0; }
+  .sidebar {
+    width: 260px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 14px 10px 20px;
+  }
+  .sidebar-section-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px; }
+  .sidebar-section-head .label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; }
+  .nav-list { list-style: none; margin: 0; padding: 0; }
+  .nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 13px; margin: 1px 0; }
+  .nav-item.active { background: var(--accent-50); color: var(--accent-700); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent-600); }
+  .nav-item .hash { color: var(--text-subtle); flex: none; }
+  .nav-item .lock { color: var(--text-subtle); flex: none; font-size: 11px; }
+  .main { flex: 1; background: var(--bg-subtle); }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(20, 24, 33, 0.45);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal {
+    width: 100%; max-width: 420px; max-height: 82vh; background: var(--bg); border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(16,24,40,0.28); overflow: hidden; display: flex; flex-direction: column;
+  }
+  .modal-head { display: flex; align-items: center; gap: 10px; padding: 18px 22px 4px; }
+  .modal-head .title-wrap { flex: 1; }
+  .modal-head h2 { font-size: 15.5px; margin: 0; }
+  .modal-head .sub { font-size: 11.5px; color: var(--text-subtle); margin-top: 2px; }
+  .modal-close { background: none; border: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; }
+
+  .search-mini {
+    margin: 12px 22px 8px; display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--text-subtle);
+  }
+
+  .member-list { overflow-y: auto; padding: 4px 10px 18px; }
+  .m-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 9px; }
+  .m-row:hover { background: var(--bg-subtle); }
+  .m-row .av {
+    width: 32px; height: 32px; border-radius: 50%; font-size: 12px; font-weight: 700; color: #fff;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .m-row .info { flex: 1; min-width: 0; }
+  .m-row .mname { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .m-row .you-tag { font-size: 10px; color: var(--text-subtle); font-weight: 400; }
+  .m-row.disabled { opacity: 0.55; }
+  .m-row.disabled .mname { text-decoration: line-through; }
+  .more-note { text-align: center; font-size: 11.5px; color: var(--text-subtle); padding: 10px 0 4px; }
+
+  .modal-foot { padding: 12px 22px 18px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-subtle); line-height: 1.7; }
+  .modal-foot a { color: var(--accent-700); }
+
+  .add-member-btn {
+    margin: 0 22px 8px; align-self: flex-start; display: flex; align-items: center; gap: 6px;
+    border: none; background: var(--accent-600); color: #fff; border-radius: 7px;
+    padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 60;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #fbbf24; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">補足 メンバー一覧</span>
+
+  <div class="topbar">
+    <div class="brand"><div class="mark">K</div><div class="name">Kogack</div></div>
+    <div class="search-wrap">
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>メッセージ・ファイル・ドキュメントを検索</span>
+      </div>
+    </div>
+    <div class="user"><div class="avatar">山</div><span class="uname">山田 太郎</span><span class="badge badge-member">member</span></div>
+  </div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <div class="sidebar-section-head"><span class="label">チャンネル</span></div>
+      <ul class="nav-list">
+        <li class="nav-item"><span class="hash">#</span>総務問い合わせ</li>
+        <li class="nav-item"><span class="hash">#</span>開発相談</li>
+        <li class="nav-item"><span class="hash">#</span>新人質問</li>
+        <li class="nav-item"><span class="hash">#</span>雑談</li>
+        <li class="nav-item active"><span class="lock">🔒</span>経営会議</li>
+      </ul>
+    </nav>
+    <div class="main"></div>
+  </div>
+
+  <div class="modal-overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="title-wrap">
+          <h2>メンバー一覧</h2>
+          <div class="sub">🔒 経営会議（非公開）・ 7名</div>
+        </div>
+        <button class="modal-close" type="button">✕</button>
+      </div>
+      <div class="search-mini">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        メンバーを検索
+      </div>
+      <button class="add-member-btn" type="button">＋ メンバーを追加</button>
+      <div class="member-list">
+        <div class="m-row">
+          <div class="av" style="background:#99f6e4;color:#0f766e;">田</div>
+          <div class="info"><div class="mname">田中 智子 <span class="badge badge-chadmin">chadmin</span></div></div>
+        </div>
+        <div class="m-row">
+          <div class="av" style="background:#cbd5f5;color:#1e3a8a;">山</div>
+          <div class="info"><div class="mname">山田 太郎 <span class="you-tag">(本人)</span></div></div>
+        </div>
+        <div class="m-row">
+          <div class="av" style="background:#f97316;">佐</div>
+          <div class="info"><div class="mname">佐藤 花子</div></div>
+        </div>
+        <div class="m-row">
+          <div class="av" style="background:#0ea5e9;">鈴</div>
+          <div class="info"><div class="mname">鈴木 一郎</div></div>
+        </div>
+        <div class="m-row">
+          <div class="av" style="background:#a855f7;">高</div>
+          <div class="info"><div class="mname">高橋 美咲</div></div>
+        </div>
+        <div class="m-row">
+          <div class="av" style="background:#ddd6fe;color:#6d28d9;">石</div>
+          <div class="info"><div class="mname">石井 直樹 <span class="badge badge-admin">admin</span></div></div>
+        </div>
+        <div class="m-row disabled">
+          <div class="av" style="background:#e2e8f0;color:#94a3b8;">渡</div>
+          <div class="info"><div class="mname">渡辺 健 <span class="badge badge-off">無効</span></div></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        チャンネル管理者（<span class="badge badge-chadmin">chadmin</span>）の変更は<a href="S-06_チャンネル設定.html">S-06 チャンネル設定「基本設定」タブ</a>から行います。<br>
+        「＋ メンバーを追加」は非公開チャンネルのみ表示され、参加者なら誰でも（chadminに限らず）他の利用者を追加できます。公開チャンネルではこの操作は不要なため表示されません（誰でも自分で参加できるため）。
+      </div>
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>補足モックアップ</strong>（要件定義書4.1節の画面一覧S-01〜S-08には含まれない）<br>
+    S-03ヘッダーの参加人数から開くメンバー一覧。チャンネル管理者（chadmin）バッジと、無効化されたアカウント（要件定義書5.2節、退職者等）が引き続き一覧に残る例を表示。管理者の変更はS-06から行う設計とし、この一覧からは行わない（編集操作の窓口を一本化するため）。<br>
+    <span style="color:#fbbf24;">1.8版で追加:</span> 非公開チャンネル（<code>F-34</code>）の例として「経営会議」🔒を表示。「＋ メンバーを追加」を押すと、<a href="補足02_DM相手を選ぶ.html">補足02のDM相手選択</a>と同様の氏名・メールアドレス検索UIが開き、選んだ利用者をこのチャンネルに追加する想定（無効化されたアカウントは選択不可）。公開チャンネルではこのボタン自体を表示しない。<a href="../02_要件定義書.html#sec3">要件定義書F-34</a>参照。
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,246 @@
+/* AIネイティブチャットシステム「Kogack」設計ドキュメント共通スタイル */
+:root {
+  --accent-600: #1e40af;
+  --accent-700: #1e3a8a;
+  --accent-100: #dbeafe;
+  --accent-50: #eff6ff;
+  --bg: #ffffff;
+  --bg-subtle: #fafbfc;
+  --bg-muted: #f5f7f9;
+  --border: #e7eaee;
+  --border-strong: #d9dde3;
+  --text: #1a1d21;
+  --text-muted: #60656d;
+  --text-subtle: #8a8f98;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+  background: var(--bg-muted);
+}
+
+.doc {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 48px 56px 96px;
+  background: var(--bg);
+  min-height: 100vh;
+  box-shadow: 0 0 24px rgba(16, 24, 40, 0.06);
+}
+
+/* 表紙 */
+.cover {
+  border-bottom: 3px solid var(--accent-600);
+  padding-bottom: 24px;
+  margin-bottom: 40px;
+}
+.cover .doc-type {
+  display: inline-block;
+  background: var(--accent-600);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+}
+.cover h1 { font-size: 26px; font-weight: 700; margin: 0 0 4px; }
+.cover .subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
+.cover .meta {
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.cover .note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 48px 0 16px;
+  padding: 6px 0 6px 12px;
+  border-left: 4px solid var(--accent-600);
+  color: var(--accent-700);
+}
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 32px 0 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+h4 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; }
+
+p { margin: 8px 0; }
+ul, ol { margin: 8px 0; padding-left: 24px; }
+li { margin: 3px 0; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0 20px;
+  font-size: 13px;
+}
+th, td {
+  border: 1px solid var(--border-strong);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: var(--accent-50);
+  color: var(--accent-700);
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+tbody tr:nth-child(even) { background: var(--bg-subtle); }
+td .muted { color: var(--text-muted); }
+
+code {
+  font-family: "SF Mono", ui-monospace, "Consolas", monospace;
+  font-size: 12.5px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+pre {
+  background: #1e2530;
+  color: #dce3ec;
+  border-radius: 8px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+pre code { background: none; border: none; color: inherit; padding: 0; }
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.badge-get { background: #dcfce7; color: #15803d; }
+.badge-post { background: #dbeafe; color: #1d4ed8; }
+.badge-put { background: #fef3c7; color: #b45309; }
+.badge-delete { background: #fee2e2; color: #b91c1c; }
+.badge-admin { background: #ede9fe; color: #6d28d9; }
+.badge-chadmin { background: #ccfbf1; color: #0f766e; }
+.badge-member { background: #f1f5f9; color: #475569; }
+.badge-ai { background: #dbeafe; color: #1d4ed8; }
+.badge-mvp { background: #dcfce7; color: #15803d; }
+.badge-next { background: #f1f5f9; color: #60656d; }
+.badge-core { background: #1e40af; color: #fff; }
+.badge-should { background: #dcfce7; color: #15803d; }
+.badge-maybe { background: #fef3c7; color: #b45309; }
+.badge-skip { background: #f1f5f9; color: #60656d; }
+
+.callout {
+  background: var(--accent-50);
+  border: 1px solid var(--accent-100);
+  border-left: 4px solid var(--accent-600);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.callout.warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  border-left-color: #d97706;
+}
+
+.diagram {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin: 16px 0;
+  overflow-x: auto;
+}
+.diagram svg { display: block; margin: 0 auto; max-width: 100%; }
+
+/* 画面キャプチャ（操作マニュアル） */
+figure.shot {
+  margin: 16px 0 24px;
+}
+figure.shot img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+figure.shot figcaption {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+figure.shot figcaption .fig-no {
+  font-weight: 600;
+  color: var(--accent-700);
+  margin-right: 6px;
+}
+
+/* 操作手順（番号付き。各ステップの見出しを強調する） */
+ol.steps { padding-left: 22px; }
+ol.steps > li { margin: 10px 0; }
+ol.steps > li > strong { color: var(--accent-700); }
+
+/* 画面IDバッジ */
+.badge-screen { background: #e0f2fe; color: #0369a1; }
+
+/* 必須項目マーク（画面上の「*」を本文中で示すとき） */
+.required-mark { color: #dc2626; }
+
+/* 変更差分マーク（レビュー用に変更箇所を赤字で示すとき） */
+.diff-new { color: #dc2626; }
+
+/* 目次 */
+.toc {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 24px;
+  margin: 24px 0;
+  font-size: 13px;
+}
+.toc ol { margin: 4px 0; }
+.toc a { color: var(--accent-700); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+a { color: var(--accent-700); }
+
+footer.doc-footer {
+  margin-top: 64px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-subtle);
+  display: flex;
+  justify-content: space-between;
+}
+
+@media print {
+  body { background: #fff; }
+  .doc { box-shadow: none; max-width: none; padding: 0; }
+  h2 { break-after: avoid; }
+  table, .diagram, .callout { break-inside: avoid; }
+}

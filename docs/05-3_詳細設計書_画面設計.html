@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>詳細設計書 画面設計 | AIネイティブチャットシステム（Kogack）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<script src="_sidenav.js"></script>
+<div class="doc">
+
+  <!-- ============ 表紙 ============ -->
+  <div class="cover">
+    <span class="doc-type">詳細設計書 分冊3</span>
+    <h1>詳細設計書 画面設計</h1>
+    <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
+    <div class="meta">
+      <span>分冊化日: 2026-08-24</span>
+      <span>版数: 1.0（<a href="05_詳細設計書.html">詳細設計書（総論）</a> v1.4から分冊化）</span>
+      <span>作成: コガソフトウェア株式会社</span>
+    </div>
+    <p class="note">本書は<a href="05_詳細設計書.html">詳細設計書（総論）</a>の一部（8章 画面項目定義・11章 フロントエンドコンポーネント設計）を分冊化したもの。改訂履歴・全体の版数は総論を参照。本ドキュメントは新人社員向けAI開発研修の成果物です</p>
+  </div>
+
+  <!-- ============ 改訂履歴（本分冊固有） ============ -->
+  <h2>改訂履歴（本分冊）</h2>
+  <table>
+    <thead><tr><th>版数</th><th>日付</th><th>改訂内容</th></tr></thead>
+    <tbody>
+      <tr><td>1.0</td><td>2026-08-24</td><td>総論v1.4からの分冊化により新設。内容は総論v1.3時点の8章（画面項目定義）・11章（フロントエンドコンポーネント設計）と同一。以降、本分冊のみで完結する変更はここに追記し、分冊をまたぐ変更は総論の改訂履歴に記載する。</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 目次 ============ -->
+  <nav class="toc">
+    <strong>目次（詳細設計書 全体）</strong>
+    <ol>
+      <li><a href="05_詳細設計書.html#sec1">1. はじめに</a>（総論）</li>
+      <li><a href="05_詳細設計書.html#sec2">2. 実装構成</a>（総論）</li>
+      <li><a href="05-1_詳細設計書_DB設計.html#sec3">3. テーブル定義</a>（分冊: DB設計）</li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec4">4. API詳細設計</a>（分冊: API設計）</li>
+      <li><a href="05_詳細設計書.html#sec5">5. 権限制御詳細</a>（総論）</li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec6">6. 検索処理詳細</a>（分冊: API設計）</li>
+      <li><a href="05_詳細設計書.html#sec7">7. エラーハンドリング・ログ設計</a>（総論）</li>
+      <li><a href="#sec8">8. 画面項目定義</a></li>
+      <li><a href="05_詳細設計書.html#sec9">9. 処理シーケンス</a>（総論）</li>
+      <li><a href="05-4_詳細設計書_AIサポート.html#sec10">10. AIサポート機能</a>（分冊: AIサポート）</li>
+      <li><a href="#sec11">11. フロントエンドコンポーネント設計</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============ 8. 画面項目定義 ============ -->
+  <h2 id="sec8">8. 画面項目定義</h2>
+  <p>画面モックアップ（S-01〜S-08、補足01〜04・補足06）に対応する入力項目・操作の一覧。レイアウトは画面モックアップを正とし、本節は項目名・種別・必須・対応APIの対応関係を定義する。</p>
+
+  <h3>8.1 S-01 ログイン</h3>
+  <table>
+    <thead><tr><th>項目</th><th>種別</th><th>備考</th></tr></thead>
+    <tbody>
+      <tr><td>Googleでログイン</td><td>ボタン</td><td>クリックでA-01へ遷移</td></tr>
+      <tr><td>ドメインヒント文言</td><td>静的テキスト</td><td>「社用Googleアカウント（@kogasoftware.com）でログインできます。」</td></tr>
+      <tr><td>エラーメッセージ</td><td>アラート表示</td><td>クエリパラメータ<code>error</code>の値に応じ総論7.2節の文言を表示</td></tr>
+    </tbody>
+  </table>
+
+  <h3>8.2 S-03 チャンネル会話 / S-04 スレッド表示</h3>
+  <table>
+    <thead><tr><th>項目</th><th>種別</th><th>必須</th><th>対応API</th></tr></thead>
+    <tbody>
+      <tr><td>チャンネル名・トピック・参加人数</td><td>ヘッダー表示</td><td>-</td><td>A-06</td></tr>
+      <tr><td>参加人数（クリック）</td><td>リンク</td><td>-</td><td>補足03メンバー一覧を開く（A-46）</td></tr>
+      <tr><td>チャンネル設定</td><td>ボタン</td><td>-</td><td>S-06を開く（chadmin/adminのみ表示）</td></tr>
+      <tr><td>要約</td><td>ボタン</td><td>-</td><td>A-15</td></tr>
+      <tr><td>発言者アイコン・表示名（クリック）</td><td>リンク</td><td>-</td><td>プロフィールカードをポップオーバー表示（A-67、F-40）</td></tr>
+      <tr><td>投稿本文</td><td>テキストエリア</td><td>必須（1〜4000文字）</td><td>A-11 / A-14</td></tr>
+      <tr><td>「@」入力時のメンション候補</td><td>オートコンプリート・ポップオーバー</td><td>-</td><td>A-46（チャンネル参加者）＋チャンネルAI。選択でmentions配列に追加（F-41）</td></tr>
+      <tr><td>ファイルを添付</td><td>アイコンボタン</td><td>任意（20MBまで）</td><td>A-21</td></tr>
+      <tr><td>送信日時を指定</td><td>アイコンボタン→ポップオーバー</td><td>任意</td><td>ポップオーバー内の日時入力＋「予約する」でA-50、「キャンセル」で閉じるのみ</td></tr>
+      <tr><td>送信</td><td>ボタン</td><td>-</td><td>A-11 / A-14</td></tr>
+      <tr><td>スレッドを閉じる（S-04）</td><td>ボタン</td><td>-</td><td>パネルを閉じるのみ（APIなし）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>8.3 S-05 横断検索</h3>
+  <table>
+    <thead><tr><th>項目</th><th>種別</th><th>備考</th></tr></thead>
+    <tbody>
+      <tr><td>検索キーワード</td><td>テキスト入力＋クリアボタン</td><td>A-20の<code>q</code>。引用符<code>"…"</code>で囲むと完全一致のフレーズ検索（F-42、API設計6.5節）</td></tr>
+      <tr><td>検索モディファイア（in:/from:/with:/before:/after:/on:/during:）</td><td>テキスト入力中のオートコンプリート・ポップオーバー</td><td>in:はA-05取得済みのチャンネル一覧、from:/with:はA-68、日付系はカレンダーピッカー。確定した条件はA-20のin/from/with/before/after/on/during各パラメータに解決（F-42、API設計6.5節）</td></tr>
+      <tr><td>解決済み条件のチップ表示</td><td>チップ＋個別✕ボタン</td><td>クリックで該当パラメータのみ解除し再検索（F-42）</td></tr>
+      <tr><td>すべて/メッセージ/ファイル/ドキュメント根拠</td><td>タブ（件数バッジ付き）</td><td>A-20の<code>counts</code>から算出、切替時は<code>type</code>指定で再取得（API設計6.4節）。モディファイア指定時はドキュメント根拠タブを無効化表示（API設計6.4節）</td></tr>
+      <tr><td>「参照権限の範囲に限定される」旨の説明文</td><td>静的テキスト</td><td>権限フィルタリングの周知（API設計6.1節）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>8.4 S-06 チャンネル設定</h3>
+  <p>10個のタブで構成する（画面モックアップの検討で「チャンネル管理者」「定期投稿」「自動応答トリガー」を「AI設定の項目」7タブから独立させた、基本設計書1.1節・4.10節）。</p>
+  <table>
+    <thead><tr><th>タブ</th><th>項目</th><th>種別</th><th>対応API</th></tr></thead>
+    <tbody>
+      <tr><td>基本設定</td><td>公開範囲（公開/非公開）</td><td>ラジオ</td><td>A-49</td></tr>
+      <tr><td>チャンネル管理者</td><td>現在の管理者一覧＋解除ボタン／＋管理者を追加</td><td>一覧＋ボタン</td><td>A-47（追加。対象は参加者に限る）, A-48（解除。最後の1人は拒否）</td></tr>
+      <tr><td>キャラクタ</td><td>アイコン（画像アップロード）／名前／口調</td><td>画像＋テキスト</td><td>A-61→A-25</td></tr>
+      <tr><td>振る舞い定義</td><td>プロンプト本文</td><td>テキストエリア</td><td>A-26（上書き保存、監査ログ記録）</td></tr>
+      <tr><td>参照ドキュメント範囲</td><td>フォルダ/文書チェックボックスツリー、指定範囲外の対応方針（厳格に制限／一般回答を許可）</td><td>チェックボックス＋ラジオ</td><td>A-27</td></tr>
+      <tr><td>スキル</td><td>スキル一覧（編集/削除）、＋スキルを追加、引き継ぎ先選択</td><td>一覧＋モーダル＋セレクト</td><td>A-28〜A-30, A-45</td></tr>
+      <tr><td>反応モード</td><td>メンション時のみ応答／投稿に自ら反応</td><td>ラジオ</td><td>A-24</td></tr>
+      <tr><td>自動対応範囲</td><td>依頼内容ごとの対応区分（自動対応可/確認のうえ対応/人が対応）</td><td>テーブル＋ピル選択</td><td>A-31</td></tr>
+      <tr><td>定期投稿</td><td>ルール一覧（編集/削除/一時停止）、追加フォーム（送り主表示名<span class="required-mark">*</span>、アイコン、本文<span class="required-mark">*</span>、頻度、初回送信日時<span class="required-mark">*</span>）</td><td>一覧＋フォーム</td><td>A-53〜A-56</td></tr>
+      <tr><td>自動応答トリガー</td><td>ルール一覧（編集/削除/一時停止）、追加フォーム（種類：キーワード/絵文字<span class="required-mark">*</span>、値<span class="required-mark">*</span>、実行する処理＝固定、投稿本文<span class="required-mark">*</span>、送り主表示名<span class="required-mark">*</span>、アイコン）</td><td>一覧＋フォーム</td><td>A-63〜A-66</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">ヘッダー共通の「保存」ボタンは表示中タブの変更のみを送信する（タブ横断で一括保存はしない）。</p>
+
+  <h3>8.5 S-07 AI操作確認ダイアログ</h3>
+  <table>
+    <thead><tr><th>項目</th><th>種別</th><th>対応API</th></tr></thead>
+    <tbody>
+      <tr><td>実行内容の要約・詳細</td><td>静的表示</td><td>A-33のレスポンスを表示</td></tr>
+      <tr><td>キャンセル</td><td>ボタン</td><td>A-35</td></tr>
+      <tr><td>この内容で実行する</td><td>ボタン</td><td>A-34</td></tr>
+    </tbody>
+  </table>
+
+  <h3>8.6 S-08 管理コンソール</h3>
+  <table>
+    <thead><tr><th>タブ</th><th>項目</th><th>種別</th><th>対応API</th></tr></thead>
+    <tbody>
+      <tr><td>利用者管理</td><td>氏名/メールアドレス/ロール（プルダウン）/チャンネル管理者（参考表示）/ステータス/最終ログイン</td><td>テーブル</td><td>A-36, A-37</td></tr>
+      <tr><td>ドキュメント参照範囲</td><td>フォルダ一覧（削除）、＋フォルダを追加（Google Driveから選択）、今すぐ同期</td><td>一覧＋ボタン</td><td>A-38〜A-41</td></tr>
+      <tr><td>AI利用状況・コスト</td><td>利用者別テーブル（呼び出し件数/トークン数/概算コスト）、上限設定</td><td>テーブル＋フォーム</td><td>A-42, A-43</td></tr>
+      <tr><td>監査ログ</td><td>日時/種別/対象/実行者/詳細、種別・期間・対象者での絞り込み</td><td>テーブル＋フィルタ</td><td>A-44</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">「チャンネル管理者」列は参考表示であり、この画面から編集はできない（chadminの付与・解除はS-06「チャンネル管理者」タブで行う、基本設計書6.2節「設計判断」）。</p>
+
+  <h3>8.7 補足モックアップ</h3>
+  <table>
+    <thead><tr><th>画面</th><th>項目</th><th>種別</th><th>対応API</th></tr></thead>
+    <tbody>
+      <tr><td>補足01 チャンネルに参加</td><td>「参加する」タブ: 公開チャンネル一覧＋参加ボタン</td><td>一覧</td><td>A-05, A-08</td></tr>
+      <tr><td>補足01 チャンネルに参加</td><td>「作成する」タブ: チャンネル名<span class="required-mark">*</span>、説明（任意）、公開範囲</td><td>フォーム</td><td>A-07</td></tr>
+      <tr><td>補足02 DM相手を選ぶ</td><td>相手選択（複数選択可）、DMを開始</td><td>ユーザーピッカー</td><td>A-68（候補取得）→A-17</td></tr>
+      <tr><td>補足03 メンバー一覧</td><td>メンバー一覧（chadminバッジ）、＋メンバーを追加（非公開チャンネルのみ表示）</td><td>一覧＋ボタン</td><td>A-46, A-08</td></tr>
+      <tr><td>補足04 予約中メッセージ</td><td>予約一覧、予約をキャンセル</td><td>一覧＋ボタン</td><td>A-51, A-52</td></tr>
+      <tr><td>補足06 プロフィールを編集</td><td>画像をアップロード、表示名を編集、キャンセル/保存</td><td>画像＋テキスト入力＋ボタン</td><td>A-61→A-62</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 11. フロントエンドコンポーネント設計 ============ -->
+  <h2 id="sec11">11. フロントエンドコンポーネント設計</h2>
+  <p>本章は<code>frontend/src/</code>のReactコンポーネント構成を、責務分割・コンポーネントツリー・各コンポーネントのProps/内部状態・データ取得フック・状態管理方針の観点で定義する。総論2章はディレクトリの役割、本章8節は画面ごとの項目定義を扱うのに対し、本節（11章）は「どのコンポーネントが何を持ち、どう連携するか」を扱う。画面に部品を追加・変更するときは、8章の項目定義とあわせて本章の一覧を更新すること。</p>
+  <div class="callout">
+    <strong>本章を新設した理由:</strong> 画面モックアップの検討過程で、送信予約（S-03）・メンション候補（S-03、F-41）・検索条件モディファイア（S-05、F-42）・プロフィールカード（S-03、F-40）という4つのポップオーバーを、実装方針を決めないままそれぞれ個別のCSS・開閉ロジックとして作ってしまっていた（見た目・余白・閉じ方が画面ごとに微妙に異なる状態）。同様にDM相手選択（補足02）・メンション候補・検索モディファイアのfrom:/with:は、いずれも「アイコン・氏名・メールアドレス付きの一覧から選ぶ」という同じUIをそれぞれ書いていた。共通化すべき部品を実装前に洗い出しておかないと、同じ挙動をコピペや個別実装で再現することになり見た目・動きが画面ごとにずれる、という反省を踏まえ、実装に入る前の本章でコンポーネント設計を確定する。
+  </div>
+
+  <h3>11.1 設計方針</h3>
+  <table>
+    <thead><tr><th>方針</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td>レイヤー分割</td><td><code>pages/</code>（画面＝ルート単位）→ <code>components/</code>（画面横断の部品）→ <code>components/ui/</code>（基礎部品）の3階層。<code>hooks/</code>（データ取得）・<code>lib/</code>（APIクライアント・整形）・<code>types/</code>（API型）はUIを持たない</td></tr>
+      <tr><td>サーバー状態</td><td>SWRで取得・キャッシュする（11.4節）。メッセージ一覧（A-10）・DMメッセージ（A-18）は<code>refreshInterval: 3000</code>のポーリングを既定とする（基本設計書8.1節・9.1節のリアルタイム方針、3秒間隔）。取得ロジックは<code>hooks/</code>のカスタムフックに包み、ページから<code>useSWR</code>を直接呼ぶのは画面固有で再利用しない取得（S-05の検索結果、S-06各タブの定期投稿/トリガー一覧）に限る</td></tr>
+      <tr><td>UI状態</td><td>タブ選択・フォーム入力値・ポップオーバー/モーダル開閉などはコンポーネントローカルの<code>useState</code>に置く。Redux / Zustand等のグローバルストアは導入しない（画面間で共有する状態はログインユーザーとチャンネル一覧程度で、SWRのキャッシュで足りるため）</td></tr>
+      <tr><td>横断的な関心</td><td>React Contextはトースト通知（<code>ToastProvider</code>）と確認ダイアログ（<code>ConfirmProvider</code>）の2つだけとし、<code>main.tsx</code>でアプリ全体を包む。基本設計書4.2節「設計判断」の権限外リダイレクト時のトーストも、この<code>ToastProvider</code>を使う</td></tr>
+      <tr><td>更新の反映</td><td>保存系API（PUT/POST/DELETE）の後は、該当フックの<code>mutate()</code>で再取得する（楽観的更新はしない）。<code>ScheduledMessagesModal</code>（補足04）とヘッダーの予約中バッジは同じ<code>useScheduledMessages()</code>を参照するため、キャンセル成功時に<code>mutate()</code>すれば両方が更新される（子がキャッシュキーを個別に持たなくてよい）</td></tr>
+      <tr><td>Propsの向き</td><td>データは親→子へPropsで渡し、子→親はコールバック（<code>onSaved</code> / <code>onClose</code> / <code>onSelect</code>）で通知する。孫以降へのバケツリレーが3段を超える場合のみContext化を検討する（現状は該当なし）</td></tr>
+      <tr><td>権限による出し分け</td><td><code>useMe()</code>の<code>role</code>、<code>useChannelMembers()</code>から算出する<code>is_channel_admin</code>で判定する（総論5.1節）。判定箇所はルート（<code>App.tsx</code>、総論5.9節のリダイレクト判定）・メニュー（<code>Layout</code>、adminのみ管理コンソールへの導線を表示）・ボタン（<code>ChannelView</code>、chadmin/adminのみチャンネル設定ボタンを表示）の3箇所に限り、権限の正はサーバー側にある（REQ-N-02）</td></tr>
+      <tr><td>スタイル</td><td>Tailwind CSSのユーティリティをJSXに直接書く。共通の見た目は<code>components/ui/shared.tsx</code>のクラス生成関数（<code>avatarClass</code> / <code>badgeClass</code>等）に集約し、CSS Modules・styled-componentsは使わない</td></tr>
+    </tbody>
+  </table>
+
+  <h3>11.2 コンポーネントツリー</h3>
+  <p>ルート（<code>main.tsx</code>）からの包含関係を示す。[S-xx]は対応画面、(hook)は使用するデータ取得フックである。</p>
+  <pre><code>main.tsx
+└── StrictMode › BrowserRouter › ToastProvider › ConfirmProvider
+    └── App (useMe)                              ルーティング・認証ガード（総論5.1節・5.9節）
+        ├── [未認証] Login [S-01]                 Googleでログインボタン・エラー表示
+        └── [認証済] Layout [S-02] (useChannels, useDms, useScheduledMessages)
+            │                                      ヘッダー（検索欄・予約中バッジ・ユーザーメニュー）＋サイドバー
+            ├── Routes
+            │   ├── ChannelView [S-03] (useChannel, useMessages, useChannelMembers)
+            │   │   ├── MessageList
+            │   │   │   └── MessageItem
+            │   │   │       ├── ProfileCard          プロフィールカード（ui/Popover、F-40）
+            │   │   │       └── blocks/*             citation/external_system/quote_reference/pending_action/mention の描画（DB設計3.7節）
+            │   │   ├── Composer
+            │   │   │   ├── MentionPicker             @入力時の候補（ui/Popover＋ui/UserPicker、F-41）
+            │   │   │   └── SchedulePopover            送信予約（ui/Popover、F-35）
+            │   │   └── ThreadPanel [S-04] (useThread)  S-03に重ねて表示。MessageList/Composerを内部で再利用
+            │   ├── SearchResults [S-05] (useSWR直接)
+            │   │   ├── SearchBox
+            │   │   │   └── ModifierPicker             in:/from:/with:の候補（ui/Popover＋ui/UserPicker、F-42）
+            │   │   └── ResultTabs (ui/Tabs)
+            │   ├── ChannelSettings [S-06] (useChannel, useChannelAiSettings)
+            │   │   ├── AdminsTab / RecurringPostsTab / TriggerRulesTab
+            │   │   └── BasicTab / CharacterTab / PromptTab / DocScopeTab / SkillsTab / ReactionTab / AutoResponseTab
+            │   └── AdminConsole [S-08] (useMe)
+            │       ├── UsersTab (useAdminUsers)
+            │       ├── DocFoldersTab (useDocFolders)
+            │       ├── UsageTab (useUsageStats)
+            │       └── AuditLogTab (useAuditLogs)
+            ├── JoinChannelModal [補足01] (useChannels)      サイドバー「＋」から開く（ui/Modal）
+            ├── DmPickerModal [補足02] (useUserSearch)        同上（ui/Modal＋ui/UserPicker）
+            ├── MembersModal [補足03] (useChannelMembers)     S-03ヘッダーの参加人数から開く（ui/Modal）
+            ├── ScheduledMessagesModal [補足04] (useScheduledMessages)  ヘッダーの予約中バッジから開く（ui/Modal）
+            ├── ProfileEditModal [補足06] (useMe)             ヘッダーのユーザーメニューから開く（ui/Modal、F-39・F-37）
+            └── PendingActionModal [S-07]                     A-33〜A-35。S-03/S-04上にモーダル表示（ui/Modal）</code></pre>
+  <p><code>ToastProvider</code> / <code>ConfirmProvider</code>はツリー最上位にあるため、トースト（総論5.9節の権限外リダイレクト通知を含む）と確認ダイアログはどの画面からも同じ見た目で呼べる。モーダル群（補足01〜04・06、S-07）は<code>Layout</code>の子で<code>Routes</code>の外にあるため、開閉してもURLに紐づかず、どのページの上にも重ねて表示できる（S-04のみ<code>?thread=</code>というURL状態に紐づく点が他のモーダルと異なる）。</p>
+
+  <h3>11.3 コンポーネント一覧</h3>
+  <p>種別: Page＝ルートに対応する画面、Tab＝画面内のタブ本体、Shared＝画面横断部品、Local＝ページ内でのみ使う非公開部品。Propsの型は<code>types/index.ts</code>（API設計4章のレスポンス型）に準ずる。</p>
+  <table>
+    <thead><tr><th>コンポーネント<br>種別 / 画面</th><th>Props</th><th>内部状態（useState）<br>使用フック / API</th><th>責務</th></tr></thead>
+    <tbody>
+      <tr><td>App<br>Root / —</td><td>なし</td><td>なし<br>→ <code>useMe</code>（A-04）</td><td>ログイン状態でRoutesを切り替える。認証済みで権限外パスへアクセスした場合のリダイレクト判定を行う（総論5.9節。ガード用にA-06/A-23/A-36を呼ぶ）</td></tr>
+      <tr><td>Login<br>Page / S-01</td><td>なし</td><td>なし<br>→ <code>useMe().mutate</code>、A-01</td><td>URLの<code>?error=</code>を総論7.2節のメッセージに変換して表示。「Googleでログイン」でA-01へ遷移</td></tr>
+      <tr><td>Layout<br>Shared / S-02〜S-08</td><td>me: Me, children</td><td>なし<br>→ <code>useChannels</code>（A-05）, <code>useDms</code>（A-16）, <code>useScheduledMessages</code>（A-51）, A-03（ログアウト）</td><td>ヘッダー（検索欄・予約中バッジ・ユーザーメニュー）とサイドバー（参加中チャンネル・DM一覧、＋ボタン）。adminには管理コンソールへの導線を表示。起動時の初期表示チャンネルは<code>localStorage</code>の最終チャンネルIDを参照（11.5節）</td></tr>
+      <tr><td>ChannelView<br>Page / S-03</td><td>なし（<code>useParams().channelId</code>）</td><td>なし<br>→ <code>useChannel</code>（A-06）, <code>useChannelMembers</code>（A-46）</td><td>ヘッダー（チャンネル名・参加人数・要約ボタン・chadmin/adminのみチャンネル設定ボタン）とMessageList/Composerの配置。遷移時に<code>localStorage</code>へ最終チャンネルIDを保存</td></tr>
+      <tr><td>MessageList / MessageItem<br>Local / S-03・S-04</td><td>messages: Message[], members: Member[]</td><td>openProfileCardId<br>→ なし</td><td>発言の時系列表示。<code>generation_status</code>が<code>"generating"</code>の行はプレースホルダ表示（AIサポート10.3節）。表示名が完全一致する参加者が複数いる場合はmembersを突き合わせてメールアドレスを併記（F-39）。アイコン/表示名クリックでProfileCardを開く（F-40）</td></tr>
+      <tr><td>ProfileCard<br>Local / S-03</td><td>userId, anchorRef, onClose</td><td>なし<br>→ <code>useUserProfile(userId)</code>（A-67）</td><td>ui/Popoverの上に構築。アイコン・表示名・メールアドレス・ロールを表示（F-40。所属チャンネル等は表示しない、基本設計書5.21節「設計判断」）</td></tr>
+      <tr><td>Composer<br>Local / S-03・S-04</td><td>channelId, threadParentId?, onPosted</td><td>body, attachments, mentions: {targetUserId,displayNameSnapshot}[]<br>→ A-11 / A-14, A-21</td><td>投稿欄本体。「@」検知でMentionPickerを開き、選択結果を<code>mentions</code>配列に蓄積してA-11送信時に添える（F-41）。送信予約ボタンでSchedulePopoverを開閉</td></tr>
+      <tr><td>MentionPicker<br>Local / S-03・S-04</td><td>channelId, query, onSelect, onClose</td><td>なし（活性行のみ）<br>→ <code>useChannelMembers</code>（A-46、Composerと共有）</td><td>ui/Popover＋ui/UserPickerの組み合わせ。当該チャンネルの参加者＋チャンネルAIを候補表示し、選択でuser_idを確定する（自由入力の氏名一致に頼らない、F-41）</td></tr>
+      <tr><td>SchedulePopover<br>Local / S-03・S-04</td><td>onConfirm(date), onClose</td><td>date, time<br>→ A-50</td><td>ui/Popover。日時入力と「予約する」ボタンのみ（F-35）</td></tr>
+      <tr><td>ThreadPanel<br>Page / S-04</td><td>なし（<code>useSearchParams().thread</code>）</td><td>なし<br>→ <code>useThread</code>（A-13）</td><td>元発言をハイライトしつつ、返信一覧＋MessageList/Composerを内部で再利用して表示する右側パネル</td></tr>
+      <tr><td>SearchResults<br>Page / S-05</td><td>なし（<code>useSearchParams()</code>）</td><td>tab, activeModifiers<br>→ <code>useSWR</code>直接（A-20）</td><td>SearchBoxとResultTabsの配置。モディファイアを1つ以上含む場合はドキュメント根拠タブを無効化表示する（F-42、API設計6章）</td></tr>
+      <tr><td>SearchBox / ModifierPicker<br>Local / S-05</td><td>value, onSubmit, onModifierResolve</td><td>rawText, popoverOpen<br>→ <code>useChannels</code>（in:候補）, <code>useUserSearch</code>（from:/with:候補、A-68）</td><td>入力文字列をトークン分解し、<code>in:</code>/<code>from:</code>/<code>with:</code>検出時にui/Popover＋ui/UserPickerで候補を出す（API設計6.5節）。確定済み条件をui/Chipで表示し、個別に解除できる</td></tr>
+      <tr><td>ChannelSettings<br>Page / S-06</td><td>なし（<code>useParams().channelId</code>）</td><td>tab<br>→ <code>useChannel</code>（A-06、chadmin判定）, <code>useChannelAiSettings</code>（A-23）</td><td>10タブの切替と、各タブへの<code>onSaved = () => mutate()</code>の配布（ui/Tabs使用）</td></tr>
+      <tr><td>AdminsTab / RecurringPostsTab / TriggerRulesTab<br>Tab / S-06</td><td>channelId, onSaved</td><td>各タブ固有（追加フォーム入力等）<br>→ A-47/A-48、A-53〜A-56、A-63〜A-66</td><td>チャンネル管理者の追加解除（F-33）、定期投稿（F-36）、自動応答トリガー（F-38）の一覧・作成・編集・削除・一時停止</td></tr>
+      <tr><td>BasicTab 〜 AutoResponseTab（7タブ）<br>Tab / S-06</td><td>channelId, settings: ChannelAiSettings, onSaved</td><td>各タブのフォーム入力<br>→ A-24〜A-31、A-45、A-61</td><td>AI有効/無効・キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・自動対応範囲の編集。初期値は<code>settings</code>から生成し、保存成功で<code>onSaved()</code>を呼ぶ（useChannelAiSettingsを再取得）</td></tr>
+      <tr><td>AdminConsole<br>Page / S-08</td><td>なし</td><td>tab<br>→ <code>useMe</code></td><td>4タブの切替のみ（ui/Tabs使用）。各タブは独立してデータを取得する</td></tr>
+      <tr><td>UsersTab<br>Tab / S-08</td><td>なし</td><td>なし<br>→ <code>useAdminUsers</code>（A-36）, A-37, <code>useConfirm</code></td><td>ロール変更・有効/無効化。chadminはチャンネル管理者列に参考表示のみ（基本設計書3.3節）。無効化は確認ダイアログを経由</td></tr>
+      <tr><td>DocFoldersTab<br>Tab / S-08</td><td>なし</td><td>newFolderId<br>→ <code>useDocFolders</code>（A-38）, A-39/A-40, A-41, <code>useConfirm</code></td><td>参照ドキュメントフォルダ候補の追加・削除・「今すぐ同期」</td></tr>
+      <tr><td>UsageTab<br>Tab / S-08</td><td>なし</td><td>month<br>→ <code>useUsageStats</code>（A-42）, A-43</td><td>月次のAI利用状況・概算コスト表示と上限設定</td></tr>
+      <tr><td>AuditLogTab<br>Tab / S-08</td><td>なし</td><td>filters<br>→ <code>useAuditLogs</code>（A-44）</td><td>ログイン・チャンネルAI設定変更の監査ログ一覧</td></tr>
+      <tr><td>JoinChannelModal<br>Shared / 補足01</td><td>onClose</td><td>tab（参加する/作成する）, form<br>→ <code>useChannels</code>（A-05）, A-07, A-08</td><td>公開チャンネル一覧＋参加、またはチャンネル作成フォーム</td></tr>
+      <tr><td>DmPickerModal<br>Shared / 補足02</td><td>onClose</td><td>query, selected: string[]<br>→ <code>useUserSearch</code>（A-68）, A-17</td><td>ui/UserPickerで複数選択し、1人なら一対一・2人以上ならグループDMを開始</td></tr>
+      <tr><td>MembersModal<br>Shared / 補足03</td><td>channelId, onClose</td><td>なし<br>→ <code>useChannelMembers</code>（A-46）, A-08</td><td>参加者一覧とchadminバッジ。非公開チャンネルは参加者なら誰でも「メンバーを追加」できる（F-34）</td></tr>
+      <tr><td>ScheduledMessagesModal<br>Shared / 補足04</td><td>onClose</td><td>なし<br>→ <code>useScheduledMessages</code>（A-51）, A-52</td><td>自分が予約したメッセージの一覧とキャンセル。Layoutのバッジ件数と同じフックを共有</td></tr>
+      <tr><td>ProfileEditModal<br>Shared / 補足06</td><td>me: Me, onClose</td><td>name, selectedFile, previewUrl, saving<br>→ A-61→A-62, <code>useMe().mutate</code></td><td>表示名の編集（F-39）とアイコン画像のアップロード（F-37）。プレビューのObject URLは<code>useEffect</code>のクリーンアップで解放する</td></tr>
+      <tr><td>PendingActionModal<br>Shared / S-07</td><td>pendingActionId, onClose</td><td>なし<br>→ A-33, A-34/A-35</td><td>実行前確認の内容表示と「実行する」「キャンセル」（F-25）</td></tr>
+      <tr><td>ToastProvider / useToast()<br>Shared / 全画面</td><td>children</td><td>toasts: ToastItem[]<br>→ なし</td><td><code>toast(message, kind?)</code>をContextで配布。4秒で自動消去。<code>kind</code>は<code>success</code>（緑）/ <code>error</code>（赤）/ <code>info</code>（グレー、総論5.9節の権限外リダイレクト通知に使用）</td></tr>
+      <tr><td>ConfirmProvider / useConfirm()<br>Shared / 全画面</td><td>children</td><td>表示中のConfirmOptionsとresolve関数<br>→ なし</td><td><code>await confirm({title?, message, confirmLabel?, cancelLabel?, danger?})</code>がbooleanを返すPromiseベースの確認ダイアログ。<code>danger: true</code>で確定ボタンを赤にする（チャンネル削除・発言削除・chadmin解除・予約キャンセル等で使用）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>11.4 データ取得フック（hooks/）</h3>
+  <p>すべて<code>useSWR(key, apiFetch)</code>の薄いラッパーである。キーはAPIパスそのものとし、同じキーを使うコンポーネント間でキャッシュと再検証が共有される。</p>
+  <table>
+    <thead><tr><th>フック</th><th>API</th><th>SWRキー</th><th>戻り値</th><th>備考</th></tr></thead>
+    <tbody>
+      <tr><td><code>useMe()</code></td><td>A-04</td><td><code>/api/auth/me</code></td><td><code>{ me: Me | null, error, isLoading, mutate }</code></td><td>401は例外にせずnull（未ログイン）として返す。ログイン・ログアウト後は<code>mutate()</code>で更新</td></tr>
+      <tr><td><code>useChannels()</code></td><td>A-05</td><td><code>/api/channels</code></td><td><code>{ joined, joinable, error, isLoading, mutate }</code></td><td>Layout（サイドバー）・JoinChannelModal（補足01）・SearchBox（in:候補）で共有</td></tr>
+      <tr><td><code>useChannel(channelId)</code></td><td>A-06</td><td><code>/api/channels/{channelId}</code></td><td><code>{ channel, error, isLoading, mutate }</code></td><td>ChannelView（S-03）・ChannelSettings（S-06）で共有。<code>channelId</code>未定時はキーnullで取得しない。404/403は総論5.9節のガードが処理</td></tr>
+      <tr><td><code>useMessages(channelId)</code></td><td>A-10</td><td><code>/api/channels/{channelId}/messages?since=</code></td><td><code>{ messages, error, isLoading, mutate }</code></td><td><code>usePolling</code>経由で<code>refreshInterval: 3000</code>。<code>since</code>は直前取得時刻を内部で保持・更新する</td></tr>
+      <tr><td><code>useThread(messageId)</code></td><td>A-13</td><td><code>/api/messages/{messageId}/thread</code></td><td><code>{ replies, error, isLoading, mutate }</code></td><td><code>refreshInterval: 3000</code>。S-04表示中（<code>?thread=</code>あり）のみキーを持つ</td></tr>
+      <tr><td><code>useDms()</code></td><td>A-16</td><td><code>/api/dms</code></td><td><code>{ dms, error, isLoading, mutate }</code></td><td>Layout（サイドバー）・DmPickerModal（補足02、既存DM判定用）で共有</td></tr>
+      <tr><td><code>useDmMessages(dmId)</code></td><td>A-18</td><td><code>/api/dms/{dmId}/messages?since=</code></td><td><code>useMessages</code>と同じ構造</td><td><code>refreshInterval: 3000</code>（同上）</td></tr>
+      <tr><td><code>useChannelMembers(channelId)</code></td><td>A-46</td><td><code>/api/channels/{channelId}/members</code></td><td><code>{ members, error, isLoading, mutate }</code></td><td>MembersModal（補足03）・MentionPicker（F-41）・MessageListの同姓同名判定（F-39）で共有</td></tr>
+      <tr><td><code>useUserSearch(q)</code></td><td>A-68</td><td><code>/api/users?q={q}</code></td><td><code>{ users, error, isLoading }</code></td><td>DmPickerModal（補足02）・SearchBoxのModifierPicker（F-42）で共有。<code>q</code>省略時は全利用者</td></tr>
+      <tr><td><code>useUserProfile(userId)</code></td><td>A-67</td><td><code>/api/users/{userId}</code></td><td><code>{ profile, error, isLoading }</code></td><td>ProfileCard（F-40）専用。表示するメッセージ作者ごとに個別のキーで呼ばれる</td></tr>
+      <tr><td><code>useScheduledMessages()</code></td><td>A-51</td><td><code>/api/scheduled-messages</code></td><td><code>{ items, error, isLoading, mutate }</code></td><td>Layoutのヘッダーバッジ件数とScheduledMessagesModal（補足04）本体で共有</td></tr>
+      <tr><td><code>useChannelAiSettings(channelId)</code></td><td>A-23</td><td><code>/api/channels/{channelId}/ai-settings</code></td><td><code>{ settings, error, isLoading, mutate }</code></td><td>ChannelSettings（S-06）の全タブで共有。保存は各タブが個別API（A-24〜A-31等）を呼び<code>mutate()</code></td></tr>
+      <tr><td><code>useAdminUsers()</code></td><td>A-36</td><td><code>/api/admin/users</code></td><td><code>{ users, error, isLoading, mutate }</code></td><td>UsersTab（S-08）専用</td></tr>
+      <tr><td><code>useDocFolders()</code></td><td>A-38</td><td><code>/api/admin/doc-folders</code></td><td><code>{ folders, error, isLoading, mutate }</code></td><td>DocFoldersTab（S-08）専用</td></tr>
+      <tr><td><code>useUsageStats()</code></td><td>A-42</td><td><code>/api/admin/usage</code></td><td><code>{ usage, error, isLoading }</code></td><td>UsageTab（S-08）専用</td></tr>
+      <tr><td><code>useAuditLogs()</code></td><td>A-44</td><td><code>/api/admin/audit-logs</code></td><td><code>{ logs, error, isLoading }</code></td><td>AuditLogTab（S-08）専用</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">フックを作る基準: 2つ以上のコンポーネントから同じAPIを参照する、または保存後に<code>mutate()</code>で再取得する必要がある場合はフック化する。1画面（1タブ）でしか使わない読み取り専用の取得（S-05の検索結果＝A-20、S-06各タブの定期投稿/トリガー一覧＝A-53・A-63）は、そのコンポーネント内で<code>useSWR</code>を直接呼んでよい。</p>
+
+  <h3>11.5 状態管理の分類</h3>
+  <table>
+    <thead><tr><th>分類</th><th>置き場所</th><th>例</th><th>ライフサイクル</th></tr></thead>
+    <tbody>
+      <tr><td>サーバー状態</td><td>SWRキャッシュ（11.4節）</td><td>ログインユーザー、チャンネル一覧、メッセージ、利用者検索結果</td><td>キー単位で共有。フォーカス復帰・保存後の<code>mutate()</code>で再検証。メッセージ/DMメッセージ/スレッドは3秒ポーリングでも再検証</td></tr>
+      <tr><td>フォーム入力</td><td>ページ/タブの<code>useState</code></td><td>Composerの<code>body</code>、S-06各タブのフォーム、ProfileEditModalの<code>name</code></td><td>コンポーネントのマウント中のみ。画面遷移・モーダルを閉じると破棄（下書き保存はしない）</td></tr>
+      <tr><td>UI状態</td><td>コンポーネントの<code>useState</code></td><td>タブ選択、ポップオーバー/モーダル開閉、送信中フラグ</td><td>同上</td></tr>
+      <tr><td>横断的UI</td><td>React Context</td><td>トースト、確認ダイアログ</td><td>アプリ全体。<code>main.tsx</code>のProviderが保持</td></tr>
+      <tr><td>永続UI設定</td><td>localStorage</td><td>下表の1キー</td><td>ブラウザに保持。リロードをまたいで維持</td></tr>
+      <tr><td>URL状態</td><td>react-router（<code>useParams</code> / <code>useSearchParams</code> / <code>useLocation</code>）</td><td><code>:channelId</code>、<code>?thread=:messageId</code>、<code>?q=</code>、<code>/login?error=</code></td><td>URLと同期</td></tr>
+    </tbody>
+  </table>
+  <p>localStorageのキーは以下に限る。個人情報・会話内容・フォーム入力値は保存しない。</p>
+  <table>
+    <thead><tr><th>キー</th><th>値</th><th>保持元</th></tr></thead>
+    <tbody>
+      <tr><td><code>kogack-last-channel-id</code></td><td>チャンネルID（文字列）</td><td>Layout（起動時にAPI取得と並行してこの値を初期表示候補にし、A-06で参加中と確認できたチャンネルへ遷移する。基本設計書3.1節「最後に開いていたチャンネルを表示」の実装方式として本書で新たに定める）</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <strong>設計判断（最終チャンネルをlocalStorageで保持する理由）:</strong> 基本設計書3.1節は「最後に開いていたチャンネルを表示する」とのみ定め、保持場所は未確定だった。サーバー側にカラムを追加して同期する方式も検討したが、複数タブ/複数デバイスをまたいだ一貫性を要求する機能ではなく（要件定義書に明記なし）、Keirekiのサイドバー開閉状態と同様に「ブラウザ単位のUIの便宜」に留まる性質と判断し、localStorageのみで完結させる。参加していないチャンネルが保存されていた場合（退出後等）はA-06が404/403を返すため、Layoutは通常の初期表示（参加チャンネル一覧の先頭）にフォールバックする。
+  </div>
+
+  <h3>11.6 共通UIコンポーネントのProps仕様</h3>
+  <p><code>components/ui/</code>の部品のPropsを定義する。<code>UiSize = 'md' | 'sm' | 'xs'</code>は<code>components/ui/shared.tsx</code>で定義し、各部品で共有する。</p>
+  <table>
+    <thead><tr><th>コンポーネント</th><th>Props</th><th>備考</th></tr></thead>
+    <tbody>
+      <tr><td>Avatar</td><td><code>name: string, pictureUrl?: string, size?: UiSize, className?</code></td><td><code>pictureUrl</code>があれば画像、無ければ<code>name</code>の先頭1文字＋氏名から一意に決まる背景色。メッセージ一覧・サイドバー・メンバー一覧・DM相手選択・メンション候補・検索モディファイア候補・管理コンソールなど全画面で1つの実装を共有する</td></tr>
+      <tr><td>RoleBadge</td><td><code>kind: 'member' | 'chadmin' | 'admin' | 'ai' | 'bot', size?: UiSize</code></td><td>badge-member/chadmin/admin/ai/botの色分けを一元管理する</td></tr>
+      <tr><td>Popover</td><td><code>open: boolean, onClose(): void, anchor?: 'bottom-start' | 'bottom-center' | 'top-center', children</code></td><td>クリックアウト・Escで閉じる。SchedulePopover・MentionPicker・ModifierPicker（S-05）・ProfileCardの4箇所はすべてこの上に構築する（下記「設計判断」）</td></tr>
+      <tr><td>UserPicker</td><td><code>users: {id,name,email,pictureUrl}[], value: string[], onChange(ids: string[]): void, multiple?: boolean, placeholder?</code></td><td>アイコン・氏名・メールアドレス付きの一覧から選ぶ。DmPickerModal（補足02）・MentionPicker（F-41）・ModifierPicker（F-42のfrom:/with:）で共有。表示名が重複していてもメールアドレスで区別できる（F-39と同じ考え方）</td></tr>
+      <tr><td>Modal</td><td><code>open: boolean, onClose(): void, title: string, children, footer?: ReactNode</code></td><td>補足01〜04・06・S-07が共通で使うオーバーレイ＋カード</td></tr>
+      <tr><td>Tabs</td><td><code>tabs: { key: string; label: string; badge?: string | number; disabled?: boolean }[], active: string, onChange(key): void</code></td><td>S-05（4タブ）・S-06（10タブ）・S-08（4タブ）で共有。<code>disabled</code>はF-42のモディファイア指定時のドキュメント根拠タブに使う</td></tr>
+      <tr><td>Chip</td><td><code>label: string, onRemove?(): void</code></td><td>S-05の解決済み検索条件チップ</td></tr>
+      <tr><td>useToast()</td><td>戻り値 <code>(message: string, kind?: 'success' | 'error' | 'info') => void</code></td><td>11.3節ToastProvider参照</td></tr>
+      <tr><td>useConfirm()</td><td>戻り値 <code>(opts: ConfirmOptions) => Promise&lt;boolean&gt;</code></td><td><code>ConfirmOptions = { title?, message, confirmLabel?, cancelLabel?, danger? }</code></td></tr>
+      <tr><td>usePopover()</td><td>開閉状態と参照refを返す</td><td>内部用。クリックアウト・Escで閉じる処理を持ち、Popoverコンポーネントが使用する</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <strong>設計判断（Popover・UserPickerを共通化する理由）:</strong> 画面モックアップの検討時点で、送信予約（S-03）・メンション候補（S-03）・検索条件モディファイア（S-05）・プロフィールカード（S-03）の4つを、位置決め・開閉トリガー・クリックアウト判定をそれぞれ個別のCSS/JSとして実装していた。同様にDM相手選択（補足02）・メンション候補・検索モディファイアのfrom:/with:は、いずれも「アイコン・氏名・メールアドレス付きの一覧から選ぶ」という同一のUIパターンだった。共通化しないまま実装に進むと、同じ見た目のはずの部品が画面ごとに微妙に異なる余白・閉じ方・配色になりかねないため、本節でPopover／UserPickerとして先に共通コンポーネント化し、各画面はこれらを組み合わせるだけにする。
+  </div>
+
+  <h3>11.7 APIクライアントとエラー処理（lib/api.ts）</h3>
+  <p><code>apiFetch&lt;T&gt;(path, init?)</code>: <code>credentials: 'same-origin'</code>・<code>Content-Type: application/json</code>を既定にしたfetchラッパー（セッションはHttpOnly Cookieのため、JS側でトークンを保持・付与する必要はない）。2xxならJSONを<code>T</code>として返し（204は<code>undefined</code>）、それ以外は<code>ApiError(status, detail)</code>をthrowする。<code>detail</code>は総論7.1節のエラーレスポンス形式から取り、JSONでなければ「エラーが発生しました」とする。</p>
+  <ul>
+    <li><strong>401の共通処理:</strong> <code>/api/auth/me</code>以外のパスで401を受けたら<code>window.location.href = '/login'</code>でログイン画面に飛ばす（セッション切れ対策）。<code>useMe</code>が使う<code>/api/auth/me</code>は除外し、401を「未ログイン」として扱う（無限リダイレクトを避ける）。</li>
+    <li><strong>403/404はグローバルには処理しない:</strong> 401と異なり、403/404の意味は呼び出し元によって異なる（例: A-13のスレッド取得404は「スレッドが存在しない」、A-06/A-23/A-36の404/403は「権限外パス」を意味しうる）。総論5.9節のルートガード対象API（A-06・A-23・A-36）に限り、呼び出し元（<code>App.tsx</code>）が個別にステータスを見て総論5.9節の表のとおりリダイレクト＋トーストを行う。それ以外のAPIの403/404は、各コンポーネントがエラー表示または空状態表示に使う。</li>
+    <li><strong><code>apiFetch</code>を使わないケース:</strong> ファイルアップロード（A-21添付ファイル、A-61アイコン。<code>FormData</code>のため<code>Content-Type</code>を自動設定させる）は生の<code>fetch</code>を使う。この場合も401は個別に処理せず、共通の<code>checkAuthError()</code>ヘルパーを呼んで同じリダイレクトを行う。</li>
+  </ul>
+  <p class="muted">表示の使い分け: 取得失敗（SWRの<code>error</code>）は画面内にエラーメッセージを表示、保存・削除の結果は<code>useToast()</code>、破壊的操作（チャンネル削除・発言削除・chadmin解除・予約キャンセル・定期投稿/トリガー削除等）の事前確認は<code>useConfirm()</code>。<code>alert</code> / <code>window.confirm</code>は使わない。</p>
+
+  <h3>11.8 コンポーネント追加・変更時の規約</h3>
+  <ul>
+    <li>新しい画面（S-xx）は<code>pages/</code>に1ファイルで作り、<code>App.tsx</code>のRoutesと<code>Layout</code>の導線（サイドバー/ヘッダー）に追加する。ロールで制限する場合は<code>App.tsx</code>でリダイレクトし（総論5.9節）、同時にサーバー側のガード（総論5.1節）があることを確認する。</li>
+    <li>タブが3つ以上ある画面は<code>pages/&lt;画面&gt;/</code>にタブごとのファイルを分け、親は切替とデータの受け渡し（<code>onSaved</code>等）だけを行う（S-06 / S-08と同じ構造）。</li>
+    <li>2画面以上で使う部品は<code>components/</code>に、1画面内でしか使わない部品は同じファイル内の非公開コンポーネントにする（exportしない）。</li>
+    <li>ポップオーバー・ユーザー選択・アバター・バッジ・タブが必要になったら、必ず<code>components/ui/</code>の共通部品（11.6節）を使う。新しい表示・入力形式が必要になったら<code>ui/</code>に追加し、11.6節の表に追記する（画面ごとの個別実装は禁止。11.1節「共通化」方針）。</li>
+    <li>APIを追加したら<code>types/index.ts</code>にレスポンス型を追加し、2つ以上のコンポーネントから参照するなら<code>hooks/</code>にフックを作る（11.4節の基準）。</li>
+    <li><code>localStorage</code>にキーを追加するときは<code>kogack-</code>プレフィックスを付け、11.5節の表に登録する。個人情報・会話内容・フォーム入力値は保存しない。</li>
+    <li>コンポーネントの冒頭コメントに対応する画面IDと本書の章番号を書く（例: <code>// S-03 チャンネル会話（詳細設計書 画面設計11.3節）</code>）。</li>
+    <li>新しいAPIの403/404がロール限定画面のガードを兼ねる場合（S-06・S-08と同種の画面を追加する場合）は、総論5.9節の表にルートを追加する。</li>
+  </ul>
+
+  <footer class="doc-footer">
+    <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 画面設計</span>
+    <span>Ver 1.0 / 2026-08-24</span>
+  </footer>
+</div>
+</body>
+</html>

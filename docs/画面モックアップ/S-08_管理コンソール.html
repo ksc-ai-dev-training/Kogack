@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理コンソール | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af;
+    --accent-700: #1e3a8a;
+    --accent-100: #dbeafe;
+    --accent-50: #eff6ff;
+    --bg: #ffffff;
+    --bg-subtle: #fafbfc;
+    --bg-muted: #f5f7f9;
+    --border: #e7eaee;
+    --border-strong: #d9dde3;
+    --text: #1a1d21;
+    --text-muted: #60656d;
+    --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9; --member-text: #475569;
+    --chadmin-bg: #ccfbf1; --chadmin-text: #0f766e;
+    --admin-bg: #ede9fe; --admin-text: #6d28d9;
+    --ok-bg: #dcfce7; --ok-text: #15803d;
+    --off-bg: #f1f5f9; --off-text: #94a3b8;
+    --warn-bg: #fffbeb; --warn-border: #fde68a; --warn-text: #b45309;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text); background: var(--bg);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+
+  .screen-tag {
+    position: fixed; top: 14px; left: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    color: #0369a1; background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 5px; padding: 3px 9px; z-index: 30;
+  }
+
+  /* ---- topbar ---- */
+  .topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg); z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .topbar .back-link {
+    font-size: 12px; color: var(--accent-700); text-decoration: none; padding: 5px 10px; border-radius: 6px;
+  }
+  .topbar .back-link:hover { background: var(--bg-muted); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 380px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px; text-decoration: none;
+  }
+  .search-box svg { flex: none; }
+  .topbar .user { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 20px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #ddd6fe; color: var(--admin-text);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+  .badge-chadmin { background: var(--chadmin-bg); color: var(--chadmin-text); }
+  .badge-admin { background: var(--admin-bg); color: var(--admin-text); }
+  .badge-on { background: var(--ok-bg); color: var(--ok-text); }
+  .badge-off { background: var(--off-bg); color: var(--off-text); }
+
+  /* ---- shell ---- */
+  .body-row { flex: 1; display: flex; min-height: 0; }
+  .settings-nav { width: 210px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border); overflow-y: auto; padding: 18px 10px; }
+  .settings-nav .nav-label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; padding: 0 10px 10px; }
+  .tab-btn {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 8px 10px;
+    border-radius: 7px; border: none; background: none; font-size: 13px; color: var(--text); margin: 1px 0; cursor: pointer;
+  }
+  .tab-btn:hover { background: var(--bg-muted); }
+  .tab-btn.active { background: var(--accent-50); color: var(--accent-700); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent-600); }
+  .tab-btn .ic { flex: none; font-size: 14px; }
+
+  .settings-content { flex: 1; min-width: 0; overflow-y: auto; background: var(--bg); }
+  .content-head {
+    position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 16px 28px; display: flex; align-items: center; gap: 10px; z-index: 5;
+  }
+  .content-head .title { font-size: 16px; font-weight: 700; }
+  .content-head .sub { font-size: 12px; color: var(--text-subtle); margin-left: 4px; }
+
+  .tab-panel { display: none; padding: 20px 28px 48px; }
+  .tab-panel.active { display: block; }
+  .panel-lede { font-size: 12.5px; color: var(--text-muted); margin: 0 0 18px; line-height: 1.7; max-width: 640px; }
+
+  /* ---- 利用者管理 ---- */
+  .toolbar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .search-mini {
+    flex: none; width: 260px; display: flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; color: var(--text-subtle);
+  }
+  .table-note { margin-left: auto; font-size: 11px; color: var(--text-subtle); }
+
+  /* ---- 監査ログ ---- */
+  .audit-filters { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .audit-select {
+    display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); border-radius: 8px;
+    padding: 7px 11px; font-size: 12.5px; color: var(--text); background: var(--bg); flex: none;
+  }
+  .audit-tag { font-size: 10.5px; font-weight: 700; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
+  .audit-login { background: var(--member-bg); color: var(--member-text); }
+  .audit-ai { background: var(--accent-50); color: var(--accent-700); }
+  table.audit-table td:first-child { white-space: nowrap; color: var(--text-muted); }
+
+  table.admin-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.admin-table th {
+    text-align: left; font-size: 11px; color: var(--text-subtle); font-weight: 700;
+    padding: 8px 12px; border-bottom: 1px solid var(--border-strong); white-space: nowrap;
+  }
+  table.admin-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .user-cell { display: flex; align-items: center; gap: 9px; }
+  .user-cell .av-sm {
+    width: 26px; height: 26px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 10.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .user-cell .uname-cell { font-weight: 600; }
+  .user-cell .you-tag { font-size: 10px; color: var(--text-subtle); margin-left: 5px; }
+  .email-cell { color: var(--text-muted); }
+  .table-note-cell { color: var(--text-subtle); }
+  .role-select {
+    display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); border-radius: 6px;
+    padding: 4px 8px; font-size: 11.5px; background: var(--bg);
+  }
+  .toggle-mini { width: 32px; height: 18px; border-radius: 9px; background: var(--ok-text); position: relative; display: inline-block; vertical-align: middle; }
+  .toggle-mini .knob { width: 14px; height: 14px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 16px; }
+  .toggle-mini.off { background: var(--border-strong); }
+  .toggle-mini.off .knob { left: 2px; }
+  .row-disabled td { color: var(--text-subtle); }
+  .row-disabled .uname-cell { text-decoration: line-through; color: var(--text-subtle); }
+  .foot-note { font-size: 11px; color: var(--text-subtle); margin-top: 12px; line-height: 1.7; }
+
+  /* ---- ドキュメント参照範囲 ---- */
+  .folder-list { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .folder-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+  .folder-row:last-child { border-bottom: none; }
+  .folder-row .f-name { font-weight: 700; font-size: 13px; }
+  .folder-row .f-meta { font-size: 11.5px; color: var(--text-subtle); margin-top: 1px; }
+  .folder-row .f-del { margin-left: auto; background: none; border: none; color: var(--text-subtle); font-size: 11.5px; cursor: pointer; }
+  .folder-row .f-del:hover { color: #b91c1c; }
+  .add-folder-btn {
+    width: 100%; border: 1.5px dashed var(--border-strong); border-radius: 10px; background: none;
+    padding: 11px; font-size: 12.5px; color: var(--text-subtle); font-weight: 600; cursor: pointer; margin-top: 10px;
+  }
+  .add-folder-btn:hover { border-color: var(--accent-600); color: var(--accent-700); background: var(--accent-50); }
+  .sync-bar {
+    display: flex; align-items: center; justify-content: space-between; margin-top: 18px;
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; background: var(--bg-subtle);
+  }
+  .sync-bar .s-meta { font-size: 12px; color: var(--text-muted); }
+  .sync-btn { background: var(--accent-600); color: #fff; border: none; border-radius: 7px; padding: 7px 16px; font-size: 12.5px; font-weight: 700; }
+
+  /* ---- AI利用状況・コスト ---- */
+  .month-row { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .month-select { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); border-radius: 7px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+
+  .stat-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; max-width: 640px; }
+  .stat-tile { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--bg-subtle); }
+  .stat-tile .s-label { font-size: 11px; color: var(--text-subtle); font-weight: 700; }
+  .stat-tile .s-value { font-size: 21px; font-weight: 700; margin-top: 4px; color: var(--text); }
+  .stat-tile .s-value .unit { font-size: 12px; font-weight: 600; color: var(--text-subtle); margin-left: 2px; }
+  .stat-tile .s-delta { font-size: 11px; color: var(--text-subtle); margin-top: 4px; }
+
+  .section-title { font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin: 22px 0 10px; }
+
+  .bar-list { max-width: 640px; }
+  .bar-row { display: grid; grid-template-columns: 110px 1fr 84px; align-items: center; gap: 10px; padding: 6px 0; }
+  .bar-row .b-label { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { height: 10px; border-radius: 5px; background: var(--bg-muted); overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 5px; background: var(--accent-600); }
+  .bar-row .b-value { font-size: 11.5px; color: var(--text-muted); text-align: right; white-space: nowrap; }
+
+  table.usage-table { width: 100%; max-width: 640px; border-collapse: collapse; font-size: 12.5px; margin-top: 4px; }
+  table.usage-table th { text-align: left; font-size: 11px; color: var(--text-subtle); font-weight: 700; padding: 7px 10px; border-bottom: 1px solid var(--border-strong); }
+  table.usage-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  table.usage-table td.num { text-align: right; }
+
+  .limit-box { max-width: 640px; border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 24px; background: var(--bg-subtle); }
+  .limit-box .lb-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+  .limit-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12.5px; }
+  .limit-row input[type=text] { width: 140px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px 9px; font-size: 12.5px; }
+  .limit-row .toggle-mini { flex: none; }
+  .limit-note { font-size: 11px; color: var(--text-subtle); line-height: 1.7; margin-top: 4px; }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 30;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #93c5fd; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">S-08 管理コンソール</span>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">K</div>
+      <div class="name">Kogack</div>
+    </div>
+    <a class="back-link" href="S-03_チャンネル会話.html">← チャンネルに戻る</a>
+    <div class="search-wrap">
+      <a class="search-box" href="S-05_横断検索.html">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>検索</span>
+      </a>
+    </div>
+    <div class="user">
+      <div class="avatar">石</div>
+      <span class="uname">石井 直樹</span>
+      <span class="badge badge-admin">admin</span>
+    </div>
+  </div>
+
+  <div class="body-row">
+    <nav class="settings-nav">
+      <div class="nav-label">管理コンソール</div>
+      <button class="tab-btn active" data-tab="users" onclick="showTab(this,'users')"><span class="ic">👤</span>利用者管理</button>
+      <button class="tab-btn" data-tab="docs" onclick="showTab(this,'docs')"><span class="ic">📚</span>ドキュメント参照範囲</button>
+      <button class="tab-btn" data-tab="usage" onclick="showTab(this,'usage')"><span class="ic">📊</span>AI利用状況・コスト</button>
+      <button class="tab-btn" data-tab="audit" onclick="showTab(this,'audit')"><span class="ic">🗒️</span>監査ログ</button>
+    </nav>
+
+    <div class="settings-content">
+
+      <!-- 利用者管理 -->
+      <div class="content-head-wrap">
+        <div class="content-head">
+          <span class="title">利用者管理</span>
+          <span class="sub">全12名</span>
+        </div>
+      </div>
+      <div class="tab-panel active" id="panel-users">
+        <p class="panel-lede">利用者のロール付与・変更、アカウントの有効化・無効化を行います。新規作成・削除は行いません。ログインはGoogle認証での初回アクセス時に自動登録されます。ロールは <span class="badge badge-admin">admin</span> / <span class="badge badge-member">member</span> の2種類のみです。チャンネル管理者（chadmin）はチャンネル単位の権限のため、ここでは付与しません（「チャンネル管理者」列に参考表示、変更は各チャンネルのAI設定画面（S-06）で行います）。</p>
+
+        <div class="toolbar-row">
+          <div class="search-mini">
+            <svg width="12" height="12" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+            氏名・メールアドレスで検索
+          </div>
+          <span class="table-note">有効 11名 ／ 無効 1名</span>
+        </div>
+
+        <table class="admin-table">
+          <thead><tr><th>氏名</th><th>メールアドレス</th><th>ロール</th><th>チャンネル管理者</th><th>ステータス</th><th>最終ログイン</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="user-cell"><span class="av-sm" style="background:#ddd6fe;color:#6d28d9;">石</span><span class="uname-cell">石井 直樹</span><span class="you-tag">(本人)</span></div></td>
+              <td class="email-cell">ishii@kogasoftware.com</td>
+              <td><span class="role-select"><span class="badge badge-admin">admin</span> ▾</span></td>
+              <td class="table-note-cell">—</td>
+              <td><span class="badge badge-on">有効</span></td>
+              <td>2026-08-19 09:12</td>
+            </tr>
+            <tr>
+              <td><div class="user-cell"><span class="av-sm" style="background:#99f6e4;color:#0f766e;">田</span><span class="uname-cell">田中 智子</span></div></td>
+              <td class="email-cell">tanaka@kogasoftware.com</td>
+              <td><span class="role-select"><span class="badge badge-member">member</span> ▾</span></td>
+              <td><span class="badge badge-chadmin"># 開発相談</span></td>
+              <td><span class="badge badge-on">有効</span></td>
+              <td>2026-08-19 10:15</td>
+            </tr>
+            <tr>
+              <td><div class="user-cell"><span class="av-sm" style="background:#cbd5f5;color:#1e3a8a;">山</span><span class="uname-cell">山田 太郎</span></div></td>
+              <td class="email-cell">yamada@kogasoftware.com</td>
+              <td><span class="role-select"><span class="badge badge-member">member</span> ▾</span></td>
+              <td class="table-note-cell">—</td>
+              <td><span class="badge badge-on">有効</span></td>
+              <td>2026-08-19 10:11</td>
+            </tr>
+            <tr>
+              <td><div class="user-cell"><span class="av-sm" style="background:#fed7aa;color:#c2410c;">佐</span><span class="uname-cell">佐藤 花子</span></div></td>
+              <td class="email-cell">sato@kogasoftware.com</td>
+              <td><span class="role-select"><span class="badge badge-member">member</span> ▾</span></td>
+              <td class="table-note-cell">—</td>
+              <td><span class="badge badge-on">有効</span></td>
+              <td>2026-08-19 08:50</td>
+            </tr>
+            <tr>
+              <td><div class="user-cell"><span class="av-sm" style="background:#bae6fd;color:#0369a1;">鈴</span><span class="uname-cell">鈴木 一郎</span></div></td>
+              <td class="email-cell">suzuki@kogasoftware.com</td>
+              <td><span class="role-select"><span class="badge badge-member">member</span> ▾</span></td>
+              <td class="table-note-cell">—</td>
+              <td><span class="badge badge-on">有効</span></td>
+              <td>2026-08-19 09:40</td>
+            </tr>
+            <tr>
+              <td><div class="user-cell"><span class="av-sm" style="background:#e9d5ff;color:#7e22ce;">高</span><span class="uname-cell">高橋 美咲</span></div></td>
+              <td class="email-cell">takahashi@kogasoftware.com</td>
+              <td><span class="role-select"><span class="badge badge-member">member</span> ▾</span></td>
+              <td class="table-note-cell">—</td>
+              <td><span class="badge badge-on">有効</span></td>
+              <td>2026-08-18 17:22</td>
+            </tr>
+            <tr class="row-disabled">
+              <td><div class="user-cell"><span class="av-sm" style="background:#e2e8f0;color:#94a3b8;">渡</span><span class="uname-cell">渡辺 健</span></div></td>
+              <td class="email-cell">watanabe@kogasoftware.com</td>
+              <td><span class="role-select"><span class="badge badge-member">member</span> ▾</span></td>
+              <td class="table-note-cell">—</td>
+              <td><span class="badge badge-off">無効</span></td>
+              <td>2026-07-01 11:03</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="foot-note">無効化しても、過去の発言は削除されず表示を維持します（5.2節）。退職者のGoogleアカウントは無効化と連動しログインできなくなります。</div>
+      </div>
+
+      <!-- ドキュメント参照範囲 -->
+      <div class="tab-panel" id="panel-docs">
+        <p class="panel-lede">チャンネルAIが回答の根拠として参照できるフォルダの候補を、システム全体で登録・削除します。各チャンネルは、この範囲の中からS-06で参照先を選びます。</p>
+
+        <div class="folder-list">
+          <div class="folder-row">
+            <span>📁</span>
+            <div><div class="f-name">開発部 ＞ 運用ドキュメント</div><div class="f-meta">12件 ・ 追加: 石井 直樹 ・ 2026-08-01</div></div>
+            <button class="f-del" type="button">削除</button>
+          </div>
+          <div class="folder-row">
+            <span>📁</span>
+            <div><div class="f-name">開発部 ＞ 設計資料</div><div class="f-meta">17件 ・ 追加: 石井 直樹 ・ 2026-08-01</div></div>
+            <button class="f-del" type="button">削除</button>
+          </div>
+          <div class="folder-row">
+            <span>📁</span>
+            <div><div class="f-name">総務</div><div class="f-meta">23件 ・ 追加: 石井 直樹 ・ 2026-08-05</div></div>
+            <button class="f-del" type="button">削除</button>
+          </div>
+          <div class="folder-row">
+            <span>📁</span>
+            <div><div class="f-name">人事</div><div class="f-meta">9件 ・ 追加: 石井 直樹 ・ 2026-08-05</div></div>
+            <button class="f-del" type="button">削除</button>
+          </div>
+        </div>
+        <button class="add-folder-btn" type="button">＋ フォルダを追加（Google Driveから選択）</button>
+
+        <div class="sync-bar">
+          <span class="s-meta">最終同期: 2026-08-18 09:00 ・ 対象 61件</span>
+          <button class="sync-btn" type="button">今すぐ同期</button>
+        </div>
+        <div class="foot-note">同期を実行した時点の内容が回答に反映されます（自動的な定期同期は対象外）。質問者本人がGoogleドライブ上で閲覧権限を持たない文書は、ここで対象に含めていても回答からは除外されます（5.1節）。</div>
+      </div>
+
+      <!-- AI利用状況・コスト -->
+      <div class="tab-panel" id="panel-usage">
+        <p class="panel-lede">AI呼び出しの日時・チャンネル・利用者・トークン数・概算コストを月次で集計・閲覧します（F-29）。</p>
+
+        <div class="month-row">
+          <span class="month-select">📅 2026年8月 ▾</span>
+        </div>
+
+        <div class="stat-tiles">
+          <div class="stat-tile">
+            <div class="s-label">呼び出し件数</div>
+            <div class="s-value">1,842<span class="unit">件</span></div>
+            <div class="s-delta">前月比 +12%</div>
+          </div>
+          <div class="stat-tile">
+            <div class="s-label">総トークン数</div>
+            <div class="s-value">6.4<span class="unit">M</span></div>
+            <div class="s-delta">前月比 +9%</div>
+          </div>
+          <div class="stat-tile">
+            <div class="s-label">概算コスト</div>
+            <div class="s-value">¥38,200</div>
+            <div class="s-delta">月間上限 ¥60,000 の 64%</div>
+          </div>
+        </div>
+
+        <div class="section-title">チャンネル別 概算コスト</div>
+        <div class="bar-list">
+          <div class="bar-row">
+            <span class="b-label"># 開発相談</span>
+            <div class="bar-track"><div class="bar-fill" style="width:82%;"></div></div>
+            <span class="b-value">¥15,600</span>
+          </div>
+          <div class="bar-row">
+            <span class="b-label"># 総務問い合わせ</span>
+            <div class="bar-track"><div class="bar-fill" style="width:58%;"></div></div>
+            <span class="b-value">¥11,100</span>
+          </div>
+          <div class="bar-row">
+            <span class="b-label"># 新人質問</span>
+            <div class="bar-track"><div class="bar-fill" style="width:38%;"></div></div>
+            <span class="b-value">¥7,300</span>
+          </div>
+          <div class="bar-row">
+            <span class="b-label"># 雑談</span>
+            <div class="bar-track"><div class="bar-fill" style="width:22%;"></div></div>
+            <span class="b-value">¥4,200</span>
+          </div>
+        </div>
+
+        <div class="section-title">利用者別（上位5名）</div>
+        <table class="usage-table">
+          <thead><tr><th>利用者</th><th>呼び出し件数</th><th>トークン数</th><th>概算コスト</th></tr></thead>
+          <tbody>
+            <tr><td>鈴木 一郎</td><td class="num">312件</td><td class="num">1.1M</td><td class="num">¥6,800</td></tr>
+            <tr><td>山田 太郎</td><td class="num">288件</td><td class="num">0.9M</td><td class="num">¥5,900</td></tr>
+            <tr><td>佐藤 花子</td><td class="num">241件</td><td class="num">0.8M</td><td class="num">¥5,100</td></tr>
+            <tr><td>高橋 美咲</td><td class="num">198件</td><td class="num">0.6M</td><td class="num">¥3,900</td></tr>
+            <tr><td>田中 智子</td><td class="num">176件</td><td class="num">0.5M</td><td class="num">¥3,200</td></tr>
+          </tbody>
+        </table>
+
+        <div class="limit-box">
+          <div class="lb-title">上限設定・通知</div>
+          <div class="limit-row"><span style="width:120px;">月間コスト上限</span><input type="text" value="¥60,000"></div>
+          <div class="limit-row"><span style="width:120px;">通知先</span><input type="text" value="admin-ml@kogasoftware.com" style="width:220px;"></div>
+          <div class="limit-row"><span class="toggle-mini"><span class="knob"></span></span>上限の80%に達したら通知する</div>
+          <div class="limit-note">上限到達時にAIの応答自体を止めるか、通知のみで応答を継続するかは別途協議中（要件定義書8.2節）。本画面は通知設定までを対象とする。</div>
+        </div>
+      </div>
+
+      <!-- 監査ログ -->
+      <div class="tab-panel" id="panel-audit">
+        <p class="panel-lede">ログインと、チャンネルAI設定の変更（F-09）を記録し、後から確認できます（7章 非機能要件・監査）。変更内容そのもの（過去バージョンの一覧・差分）は対象外で、「いつ・誰が・どの項目を」変更したかのみを記録します。</p>
+
+        <div class="audit-filters">
+          <span class="audit-select">種別: すべて ▾</span>
+          <span class="audit-select">期間: 直近30日 ▾</span>
+          <div class="search-mini" style="flex:1;max-width:240px;">
+            <svg width="12" height="12" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+            実行者・チャンネルで検索
+          </div>
+        </div>
+
+        <table class="admin-table audit-table">
+          <thead><tr><th>日時</th><th>種別</th><th>対象</th><th>実行者</th><th>詳細</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>2026-08-19 10:15</td>
+              <td><span class="audit-tag audit-login">ログイン</span></td>
+              <td>—</td>
+              <td>田中 智子</td>
+              <td>tanaka@kogasoftware.com からログイン</td>
+            </tr>
+            <tr>
+              <td>2026-08-19 09:12</td>
+              <td><span class="audit-tag audit-login">ログイン</span></td>
+              <td>—</td>
+              <td>石井 直樹</td>
+              <td>ishii@kogasoftware.com からログイン</td>
+            </tr>
+            <tr>
+              <td>2026-08-15 14:20</td>
+              <td><span class="audit-tag audit-ai">AI設定変更</span></td>
+              <td># 開発相談 ／ 振る舞い定義</td>
+              <td>田中 智子</td>
+              <td>振る舞い定義のテキストを更新</td>
+            </tr>
+            <tr>
+              <td>2026-08-12 16:40</td>
+              <td><span class="audit-tag audit-ai">AI設定変更</span></td>
+              <td># 総務問い合わせ ／ 自動対応範囲</td>
+              <td>石井 直樹</td>
+              <td>「経費精算に関する相談」を確認のうえ対応に変更</td>
+            </tr>
+            <tr>
+              <td>2026-08-10 11:03</td>
+              <td><span class="audit-tag audit-ai">AI設定変更</span></td>
+              <td># 開発相談 ／ 参照ドキュメント範囲</td>
+              <td>田中 智子</td>
+              <td>「設計資料」フォルダを対象に追加</td>
+            </tr>
+            <tr>
+              <td>2026-08-01 09:00</td>
+              <td><span class="audit-tag audit-ai">AI設定変更</span></td>
+              <td># 開発相談 ／ 基本設定</td>
+              <td>田中 智子</td>
+              <td>AIを有効化</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="foot-note">「対象」列のチャンネル名をクリックすると、そのチャンネルのS-06（チャンネル設定）に遷移する想定（本モックアップではリンク未接続）。</div>
+      </div>
+
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>モックアップ注記</strong><br>
+    画面ID: <code>S-08</code> ／ 対応機能: <code>F-29</code>（AI利用状況・コスト管理）ほか6章 権限要件・7章 監査<br>
+    アクセスできるのは<span class="badge badge-admin">システム管理者</span>のみ。利用者管理のロールは<code>admin</code>/<code>member</code>の2種類のみとし（基本設計書3.3節の設計判断: chadminはT-03 channel_members.is_channel_adminで表現するチャンネル単位の権限のため、グローバルなロール列には含めない）、「チャンネル管理者」列に参考表示する。4タブ構成: 利用者管理（ロール付与・変更、有効/無効化。新規作成・削除は不可）、ドキュメント参照範囲（S-06が選択する候補の全体管理、F-22の同期実行）、AI利用状況・コスト（F-29の月次集計、上限設定・通知）、<strong>監査ログ</strong>（要件定義書4.1節のS-01〜S-08には独立した画面として定義されていないが、7章「監査」の要件「ログイン、チャンネルAI設定の変更を記録し、後から確認できること」を満たすため、S-08内の補足タブとして追加）。左のタブは実際に切り替わります。詳細は<a href="../02_要件定義書.html#sec4">要件定義書4章</a>・<a href="../02_要件定義書.html#sec6">6章</a>・<a href="../02_要件定義書.html#sec7">7章</a>参照。
+  </div>
+
+<script>
+  function showTab(btn, id) {
+    document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+    btn.classList.add('active');
+    document.getElementById('panel-' + id).classList.add('active');
+    var titles = { users: ['利用者管理', '全12名'], docs: ['ドキュメント参照範囲', '4フォルダ'], usage: ['AI利用状況・コスト', '2026年8月'], audit: ['監査ログ', '直近30日'] };
+    document.querySelector('.content-head .title').textContent = titles[id][0];
+    document.querySelector('.content-head .sub').textContent = titles[id][1];
+  }
+</script>
+
+</body>
+</html>

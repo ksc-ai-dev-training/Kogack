@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>詳細設計書 DB設計 | AIネイティブチャットシステム（Kogack）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<script src="_sidenav.js"></script>
+<div class="doc">
+
+  <!-- ============ 表紙 ============ -->
+  <div class="cover">
+    <span class="doc-type">詳細設計書 分冊1</span>
+    <h1>詳細設計書 DB設計</h1>
+    <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
+    <div class="meta">
+      <span>分冊化日: 2026-08-24</span>
+      <span>版数: 1.0（<a href="05_詳細設計書.html">詳細設計書（総論）</a> v1.4から分冊化）</span>
+      <span>作成: コガソフトウェア株式会社</span>
+    </div>
+    <p class="note">本書は<a href="05_詳細設計書.html">詳細設計書（総論）</a>の一部（3章 テーブル定義）を分冊化したもの。改訂履歴・全体の版数は総論を参照。本ドキュメントは新人社員向けAI開発研修の成果物です</p>
+  </div>
+
+  <!-- ============ 改訂履歴（本分冊固有） ============ -->
+  <h2>改訂履歴（本分冊）</h2>
+  <table>
+    <thead><tr><th>版数</th><th>日付</th><th>改訂内容</th></tr></thead>
+    <tbody>
+      <tr><td>1.0</td><td>2026-08-24</td><td>総論v1.4からの分冊化により新設。内容は総論v1.3時点の3章（テーブル定義）と同一。以降、本分冊のみで完結する変更はここに追記し、分冊をまたぐ変更は総論の改訂履歴に記載する。</td></tr>
+      <tr><td>1.1</td><td>2026-08-26</td><td>T-01 usersにlast_login_at列を追加した（S-08利用者管理タブの「最終ログイン」列は05-3画面設計に記載済みだったが、本書・API設計側が未反映だった抜けをbackfill）。</td></tr>
+      <tr><td>1.2</td><td>2026-08-27</td><td>新規T-22 read_states（既読状態）を追加した（基本設計書v1.16「未読管理をメッセージ単位ではなく最終既読時刻1本にした」設計判断）。サイドバーの未読バッジは基本設計書4.2節に記載済みだったが、本書は未反映だった。</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 目次 ============ -->
+  <nav class="toc">
+    <strong>目次（詳細設計書 全体）</strong>
+    <ol>
+      <li><a href="05_詳細設計書.html#sec1">1. はじめに</a>（総論）</li>
+      <li><a href="05_詳細設計書.html#sec2">2. 実装構成</a>（総論）</li>
+      <li><a href="#sec3">3. テーブル定義</a></li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec4">4. API詳細設計</a>（分冊: API設計）</li>
+      <li><a href="05_詳細設計書.html#sec5">5. 権限制御詳細</a>（総論）</li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec6">6. 検索処理詳細</a>（分冊: API設計）</li>
+      <li><a href="05_詳細設計書.html#sec7">7. エラーハンドリング・ログ設計</a>（総論）</li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec8">8. 画面項目定義</a>（分冊: 画面設計）</li>
+      <li><a href="05_詳細設計書.html#sec9">9. 処理シーケンス</a>（総論）</li>
+      <li><a href="05-4_詳細設計書_AIサポート.html#sec10">10. AIサポート機能</a>（分冊: AIサポート）</li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec11">11. フロントエンドコンポーネント設計</a>（分冊: 画面設計）</li>
+    </ol>
+  </nav>
+
+  <!-- ============ 3. テーブル定義 ============ -->
+  <h2 id="sec3">3. テーブル定義</h2>
+  <p>共通方針（基本設計書6.3節）: 主キーは <code>id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY</code>（中間テーブルは複合主キー）。<code>created_at</code> / <code>updated_at</code> は <code>TIMESTAMPTZ NOT NULL DEFAULT now()</code> を全テーブルに付与する（以下の表では省略せず明記する）。全テーブルでRLSを有効にする。コード値カラムはCHECK制約で担保する。</p>
+
+  <h3>3.1 T-01 users（ユーザー）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>email</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>UNIQUE</td></tr>
+      <tr><td>name</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>UNIQUE制約なし（重複を許容）。1〜100文字。初回ログイン時にGoogleの氏名で初期化、以後A-62で本人が上書き可（F-39）。再ログインではGoogle側の値で上書きしない</td></tr>
+      <tr><td>picture_url</td><td>TEXT</td><td>NULL可</td><td>-</td><td>初回ログイン時にGoogleの写真で初期化、以後A-62で上書き可（F-37）</td></tr>
+      <tr><td>role</td><td>TEXT</td><td>NOT NULL</td><td>'member'</td><td>CHECK (role IN ('member','admin'))</td></tr>
+      <tr><td>is_active</td><td>BOOLEAN</td><td>NOT NULL</td><td>true</td><td>falseでログイン不可</td></tr>
+      <tr><td>last_login_at</td><td>TIMESTAMPTZ</td><td>NULL可</td><td>-</td><td>A-02（OAuthコールバック）・dev-loginのログイン成功時に更新（S-08利用者管理「最終ログイン」列用。05-3画面設計に記載済みだったが本書は未反映だった抜けをbackfill）</td></tr>
+      <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.2 T-02 channels（チャンネル）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>name</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>UNIQUE</td></tr>
+      <tr><td>topic</td><td>TEXT</td><td>NULL可</td><td>-</td><td>-</td></tr>
+      <tr><td>is_public</td><td>BOOLEAN</td><td>NOT NULL</td><td>true</td><td>false=非公開（F-34）</td></tr>
+      <tr><td>created_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.3 T-03 channel_members（チャンネル参加・チャンネル管理者）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id、複合PK(channel_id, user_id)</td></tr>
+      <tr><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>is_channel_admin</td><td>BOOLEAN</td><td>NOT NULL</td><td>false</td><td>true=chadmin（3.3節）</td></tr>
+      <tr><td>joined_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">当該チャンネルの <code>is_channel_admin=true</code> 行数が0になる更新（最後の1人の解除）はA-48でアプリ側が400を返し拒否する（F-33）。</p>
+
+  <h3>3.4 T-04 direct_messages（DM本体）/ T-17 direct_message_members（DM参加者）</h3>
+  <table>
+    <thead><tr><th>テーブル</th><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>T-04</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-04</td><td>created_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>T-04</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+      <tr><td>T-17</td><td>dm_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→direct_messages.id、複合PK(dm_id, user_id)</td></tr>
+      <tr><td>T-17</td><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>T-17</td><td>joined_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">1件のDMにつきT-17は2行以上（一対一なら2行、グループDMなら3行以上）。既存DM再利用（A-17）は「参加者の集合が完全一致するT-04を検索する」処理としてAPI側（<code>dms.py</code>）で実装し、DB制約では表現しない（基本設計書6.2節「設計判断」）。</p>
+
+  <h3>3.5 T-05 messages（発言）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>channel_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→channels.id</td></tr>
+      <tr><td>dm_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→direct_messages.id。CHECK ((channel_id IS NULL) &lt;&gt; (dm_id IS NULL))</td></tr>
+      <tr><td>thread_parent_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>自己参照FK→messages.id</td></tr>
+      <tr><td>sender_type</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('human','ai','bot')</td></tr>
+      <tr><td>sender_user_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。ai/botはNULL</td></tr>
+      <tr><td>body</td><td>TEXT</td><td>NOT NULL</td><td>''</td><td>生成中はプレースホルダとして空文字（AIサポート10.3節）</td></tr>
+      <tr><td>generation_status</td><td>TEXT</td><td>NULL可</td><td>NULL</td><td>CHECK IN ('generating')。sender_type='ai'の生成中のみ'generating'、完了時にNULLへ更新（本書で新設。基本設計書8.7節の確定。AIサポート10.3節）</td></tr>
+      <tr><td>bot_display_name / bot_icon / bot_icon_url</td><td>TEXT</td><td>NULL可</td><td>-</td><td>sender_type='bot'のときのみ使用。送信時点のT-19/T-21値をスナップショット</td></tr>
+      <tr><td>recurring_post_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→recurring_posts.id</td></tr>
+      <tr><td>trigger_rule_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→trigger_rules.id。CHECK (recurring_post_id IS NULL OR trigger_rule_id IS NULL)</td></tr>
+      <tr><td>deleted_at / deleted_by</td><td>TIMESTAMPTZ / BIGINT</td><td>NULL可</td><td>-</td><td>論理削除。deleted_byはFK→users.id</td></tr>
+      <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">索引: <code>(channel_id, created_at)</code>、<code>(dm_id, created_at)</code>（A-10/A-18の <code>since</code> 差分取得）、<code>(thread_parent_id)</code>（A-13）。本文検索用に<code>body</code>へpg_trgmのGINインデックスを付与する（API設計6章）。</p>
+
+  <h3>3.6 T-06 message_attachments（添付ファイル）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>message_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→messages.id</td></tr>
+      <tr><td>file_name</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>byte_size</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>20MB(=20971520)上限はAPI側で検証（F-07）</td></tr>
+      <tr><td>storage_path</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>Supabase Storage内パス</td></tr>
+      <tr><td>uploaded_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.7 T-07 message_blocks（発言内の構造化ブロック）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>message_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→messages.id</td></tr>
+      <tr><td>block_type</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('citation','external_system','quote_reference','pending_action','mention')</td></tr>
+      <tr><td>payload</td><td>JSONB</td><td>NOT NULL</td><td>-</td><td>block_typeごとに構造が異なる（下表）</td></tr>
+      <tr><td>sort_order</td><td>INT</td><td>NOT NULL</td><td>0</td><td>同一メッセージ内の表示順</td></tr>
+      <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p><strong>payload構造（本書で確定。フロントは<code>components/blocks/</code>で<code>block_type</code>ごとに専用コンポーネントを描画）:</strong></p>
+  <pre><code>// citation（F-20 根拠文書カード。基本設計書8.2節）
+{ "doc_title": "運用ドキュメント：デプロイ手順書", "doc_url": "https://drive.google.com/...",
+  "folder_path": "開発部 ＞ 運用ドキュメント", "excerpt": "本番デプロイは staging マージ後に..." }
+
+// external_system（F-23 連携先システムの参照結果。基本設計書8.4節）
+{ "system_name": "座席予約システム", "summary": "8/22 13-15時 3階エリアに空席5席",
+  "detail": { "date": "2026-08-22", "time_range": "13:00-15:00", "area": "3階", "available_seats": 5 } }
+
+// quote_reference（過去のやり取りの参照。要件定義書5.3節・基本設計書8.8節）
+{ "message_id": "10245", "sender_display_name": "Kogack AI", "posted_at": "2026-08-10T05:12:00Z",
+  "excerpt": "その節は日次バッチの再実行手順をご案内しました。", "anchor": "#msg-10245" }
+
+// pending_action（実行前確認への導線。F-25、S-07）
+{ "pending_action_id": "88", "system_name": "座席予約システム", "action_type": "reserve_seat",
+  "summary": "8/22 13-15時 3階B-12席の予約" }
+
+// mention（人間への@メンション参照。F-41、基本設計書5.22節）
+{ "target_user_id": "15", "display_name_snapshot": "田中 智子" }</code></pre>
+  <p class="muted">'mention'のみ、選択されたメンション1件につき1行（同一メッセージに複数メンションがあれば複数行、sort_orderは本文中の出現順）。表示時はtarget_user_idを解決して<strong>現在の</strong>表示名・アイコンを描画し、display_name_snapshotは対象アカウントが削除・無効化された場合のフォールバック表示にのみ用いる。</p>
+
+  <h3>3.8 T-08 channel_ai_settings（チャンネルAI設定）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id、UNIQUE</td></tr>
+      <tr><td>is_ai_enabled</td><td>BOOLEAN</td><td>NOT NULL</td><td>true</td><td>F-08</td></tr>
+      <tr><td>persona_name</td><td>TEXT</td><td>NULL可</td><td>'AI'</td><td>F-10</td></tr>
+      <tr><td>persona_icon_url</td><td>TEXT</td><td>NULL可</td><td>-</td><td>未設定時は「AI」の2文字アバターで代替</td></tr>
+      <tr><td>persona_tone</td><td>TEXT</td><td>NULL可</td><td>-</td><td>F-10</td></tr>
+      <tr><td>behavior_prompt</td><td>TEXT</td><td>NULL可</td><td>''</td><td>F-09。上書き保存、過去バージョンは持たない</td></tr>
+      <tr><td>reaction_mode</td><td>TEXT</td><td>NOT NULL</td><td>'mention_only'</td><td>CHECK IN ('mention_only','proactive')</td></tr>
+      <tr><td>out_of_scope_policy</td><td>TEXT</td><td>NOT NULL</td><td>'strict'</td><td>CHECK IN ('strict','general')（F-11）</td></tr>
+      <tr><td>fallback_handoff_user_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。NULL時は当該チャンネルchadminへ引き継ぐ（F-17）</td></tr>
+      <tr><td>updated_by</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。監査ログの参照元</td></tr>
+      <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.9 T-09 doc_folders / T-10 channel_doc_folders（参照ドキュメント範囲）</h3>
+  <table>
+    <thead><tr><th>テーブル</th><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>T-09</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-09</td><td>drive_folder_id</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>UNIQUE</td></tr>
+      <tr><td>T-09</td><td>drive_folder_name</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-09</td><td>added_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>T-09</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+      <tr><td>T-10</td><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id、複合PK(channel_id, folder_id)</td></tr>
+      <tr><td>T-10</td><td>folder_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→doc_folders.id</td></tr>
+      <tr><td>T-10</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.10 T-11 channel_skills / T-12 channel_auto_response_rules</h3>
+  <table>
+    <thead><tr><th>テーブル</th><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>T-11</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-11</td><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id</td></tr>
+      <tr><td>T-11</td><td>title</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-11</td><td>instructions</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-11</td><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+      <tr><td>T-12</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-12</td><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id</td></tr>
+      <tr><td>T-12</td><td>request_category</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>UNIQUE(channel_id, request_category)</td></tr>
+      <tr><td>T-12</td><td>response_level</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('auto','confirm','human')</td></tr>
+      <tr><td>T-12</td><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.11 T-13 ai_usage_logs / T-14 ai_usage_limits</h3>
+  <table>
+    <thead><tr><th>テーブル</th><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>T-13</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-13</td><td>channel_id / dm_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK。いずれか一方</td></tr>
+      <tr><td>T-13</td><td>requested_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>T-13</td><td>model</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>呼び出し時の <code>AI_MODEL</code> 値</td></tr>
+      <tr><td>T-13</td><td>input_tokens / output_tokens</td><td>INT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-13</td><td>estimated_cost_yen</td><td>NUMERIC(10,4)</td><td>NOT NULL</td><td>-</td><td>AIサポート10.5節の単価表で算出</td></tr>
+      <tr><td>T-13</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>質問文・回答文は保持しない</td></tr>
+      <tr><td>T-14</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-14</td><td>scope</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('global','channel')</td></tr>
+      <tr><td>T-14</td><td>channel_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→channels.id。scope='channel'時は必須（API側で検証）</td></tr>
+      <tr><td>T-14</td><td>monthly_limit_yen</td><td>NUMERIC(10,2)</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-14</td><td>notify_threshold_pct</td><td>INT</td><td>NOT NULL</td><td>80</td><td>-</td></tr>
+      <tr><td>T-14</td><td>notify_email</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-14</td><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">索引: <code>(channel_id, created_at)</code>（S-08のAI利用状況タブでの月次集計、A-42）。</p>
+
+  <h3>3.12 T-15 pending_actions / T-16 audit_logs</h3>
+  <table>
+    <thead><tr><th>テーブル</th><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>T-15</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-15</td><td>message_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→messages.id</td></tr>
+      <tr><td>T-15</td><td>requested_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>T-15</td><td>system_name / action_type</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-15</td><td>action_payload</td><td>JSONB</td><td>NOT NULL</td><td>-</td><td>連携先ごとに異なるパラメータ</td></tr>
+      <tr><td>T-15</td><td>status</td><td>TEXT</td><td>NOT NULL</td><td>'pending'</td><td>CHECK IN ('pending','confirmed','cancelled')</td></tr>
+      <tr><td>T-15</td><td>decided_by / decided_at</td><td>BIGINT / TIMESTAMPTZ</td><td>NULL可</td><td>-</td><td>-</td></tr>
+      <tr><td>T-15</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+      <tr><td>T-16</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>T-16</td><td>event_type</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('login','channel_ai_setting_change')</td></tr>
+      <tr><td>T-16</td><td>actor_user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>T-16</td><td>target_channel_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→channels.id</td></tr>
+      <tr><td>T-16</td><td>target_field</td><td>TEXT</td><td>NULL可</td><td>-</td><td>例: 'behavior_prompt', 'reaction_mode'</td></tr>
+      <tr><td>T-16</td><td>summary</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>本文差分は保持しない</td></tr>
+      <tr><td>T-16</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>索引: (created_at)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.13 T-18 scheduled_messages（予約メッセージ）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>channel_id / dm_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK。T-05と同じCHECK制約（いずれか一方）</td></tr>
+      <tr><td>thread_parent_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→messages.id（スレッド返信の予約時）</td></tr>
+      <tr><td>sender_user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>body</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>scheduled_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>-</td><td>API側で未来日時のみ許可</td></tr>
+      <tr><td>status</td><td>TEXT</td><td>NOT NULL</td><td>'pending'</td><td>CHECK IN ('pending','sent','cancelled')</td></tr>
+      <tr><td>created_at / sent_at</td><td>TIMESTAMPTZ</td><td>sent_atはNULL可</td><td>createdはnow()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">索引: <code>(status, scheduled_at)</code>（ディスパッチャの <code>WHERE status='pending' AND scheduled_at &lt;= now()</code> 検索用）。</p>
+
+  <h3>3.14 T-19 recurring_posts（定期投稿ルール）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id</td></tr>
+      <tr><td>created_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>body</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>bot_display_name</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>未指定時はAPI側で既定値（例: 'お知らせBot'）を補う</td></tr>
+      <tr><td>bot_icon</td><td>TEXT</td><td>NULL可</td><td>'📌'</td><td>絵文字</td></tr>
+      <tr><td>bot_icon_url</td><td>TEXT</td><td>NULL可</td><td>-</td><td>設定時はbot_iconより優先表示</td></tr>
+      <tr><td>frequency</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('once','daily','weekly','monthly')</td></tr>
+      <tr><td>anchor_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>-</td><td>初回送信日時（weekly/monthlyの曜日・日にちの基準）</td></tr>
+      <tr><td>next_run_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>=anchor_at</td><td>ディスパッチャが参照・更新</td></tr>
+      <tr><td>is_active</td><td>BOOLEAN</td><td>NOT NULL</td><td>true</td><td>falseで一時停止</td></tr>
+      <tr><td>last_sent_at</td><td>TIMESTAMPTZ</td><td>NULL可</td><td>-</td><td>-</td></tr>
+      <tr><td>updated_by</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">索引: <code>(is_active, next_run_at)</code>。「毎月」で該当日が存在しない月（例: 31日起点の2月）は月末に繰り下げる（基本設計書6.2節「設計判断」）。</p>
+
+  <h3>3.15 T-20（欠番）</h3>
+  <p class="muted">T-20 recurring_post_recipients はv1.6で新設、個人宛て定期投稿（destination_type='individuals'）の対象外化に伴いv1.9で廃止された。要件定義書3.2節「対象外機能」のとおり、次フェーズで個人宛てを再検討する際に同じIDで再利用する方針とし、欠番のまま採番し直さない（基本設計書6.2節「設計判断」）。</p>
+
+  <h3>3.16 T-21 trigger_rules（自動応答トリガー）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id</td></tr>
+      <tr><td>created_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>trigger_type</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('keyword','emoji')</td></tr>
+      <tr><td>trigger_value</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>一致判定に使う文字列（部分一致。API設計6.2節）</td></tr>
+      <tr><td>action_type</td><td>TEXT</td><td>NOT NULL</td><td>'post_message'</td><td>CHECK IN ('post_message')</td></tr>
+      <tr><td>action_body</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>bot_display_name / bot_icon / bot_icon_url</td><td>TEXT</td><td>bot_display_nameはNOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>is_active</td><td>BOOLEAN</td><td>NOT NULL</td><td>true</td><td>falseで一時停止</td></tr>
+      <tr><td>updated_by</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">索引: <code>(channel_id, is_active)</code>。A-11の投稿処理内で当該チャンネルの有効なルールのみを取得し部分一致判定する（想定件数は1チャンネルあたり数十件、基本設計書9.1節）。</p>
+
+  <h3>3.17 T-22 read_states（既読状態）</h3>
+  <table>
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
+      <tr><td>channel_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→channels.id。dm_idと排他（CHECK、T-05と同じパターン）</td></tr>
+      <tr><td>dm_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→direct_messages.id</td></tr>
+      <tr><td>last_read_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>この利用者がこのチャンネル/DMを最後に既読にした時刻</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">索引: <code>(user_id, channel_id)</code>・<code>(user_id, dm_id)</code>の部分UNIQUEインデックス（channel_id/dm_idがNULLでない方のみ対象。1利用者につき1チャンネル/DMあたり1行）。メッセージ単位の既読管理はせず「最後に読んだ時刻」のみを保持する簡易な方式（基本設計書6.2節「設計判断」）。行が存在しない参加者は、参加時刻（T-03.joined_at／T-17.joined_at）を既読時刻の代わりに使う。</p>
+
+  <footer class="doc-footer">
+    <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 DB設計</span>
+    <span>Ver 1.0 / 2026-08-24</span>
+  </footer>
+</div>
+</body>
+</html>

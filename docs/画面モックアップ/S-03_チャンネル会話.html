@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>開発相談 | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af;
+    --accent-700: #1e3a8a;
+    --accent-100: #dbeafe;
+    --accent-50: #eff6ff;
+    --bg: #ffffff;
+    --bg-subtle: #fafbfc;
+    --bg-muted: #f5f7f9;
+    --border: #e7eaee;
+    --border-strong: #d9dde3;
+    --text: #1a1d21;
+    --text-muted: #60656d;
+    --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9;
+    --member-text: #475569;
+    --chadmin-bg: #ccfbf1;
+    --chadmin-text: #0f766e;
+    --ai-bg: #dbeafe;
+    --ai-text: #1d4ed8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .screen-tag {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #0369a1;
+    background: #e0f2fe;
+    border: 1px solid #bae6fd;
+    border-radius: 5px;
+    padding: 3px 9px;
+    z-index: 30;
+  }
+
+  /* ---- topbar ---- */
+  .topbar {
+    height: 56px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 460px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px; text-decoration: none;
+  }
+  .search-box:hover { border-color: var(--border-strong); background: var(--bg); }
+  .search-box svg { flex: none; }
+  .search-box .kbd {
+    margin-left: auto; font-size: 10.5px; color: var(--text-subtle);
+    border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px; background: var(--bg);
+  }
+  .topbar .user {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px 4px 4px; border-radius: 20px; text-decoration: none; color: inherit;
+  }
+  .topbar .user:hover { background: var(--bg-muted); }
+  .scheduled-btn {
+    flex: none; display: flex; align-items: center; gap: 6px; text-decoration: none;
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 20px; padding: 6px 12px;
+  }
+  .scheduled-btn:hover { background: var(--bg-muted); }
+  .scheduled-btn .count { background: var(--accent-600); color: #fff; border-radius: 10px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+  .badge-chadmin { background: var(--chadmin-bg); color: var(--chadmin-text); }
+  .badge-ai { background: var(--ai-bg); color: var(--ai-text); }
+  .badge-bot { background: #fef3c7; color: #92400e; }
+
+  /* ---- body row ---- */
+  .body-row { flex: 1; display: flex; min-height: 0; }
+
+  /* ---- sidebar ---- */
+  .sidebar {
+    width: 260px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 14px 10px 20px;
+  }
+  .sidebar-section { margin-bottom: 18px; }
+  .sidebar-section-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px; }
+  .sidebar-section-head .label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; }
+  .add-btn {
+    width: 20px; height: 20px; border-radius: 5px; border: none; background: transparent;
+    color: var(--text-subtle); font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .add-btn:hover { background: var(--accent-100); color: var(--accent-700); }
+  .nav-list { list-style: none; margin: 0; padding: 0; }
+  .nav-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px;
+    font-size: 13px; color: var(--text); margin: 1px 0;
+  }
+  .nav-item:hover { background: var(--bg-muted); }
+  .nav-item.active {
+    background: var(--accent-50); color: var(--accent-700); font-weight: 700;
+    box-shadow: inset 3px 0 0 var(--accent-600);
+  }
+  .nav-item .hash { color: var(--text-subtle); flex: none; font-weight: 400; }
+  .nav-item.active .hash { color: var(--accent-600); }
+  .nav-item .chname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item.unread .chname { font-weight: 700; }
+  .unread-badge {
+    flex: none; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+    background: var(--accent-600); color: #fff; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dm-avatar {
+    width: 20px; height: 20px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex: none; color: #fff; position: relative;
+  }
+  .dot-online {
+    position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 50%;
+    background: #22c55e; border: 1.5px solid var(--bg-subtle);
+  }
+  .sidebar-footer { margin-top: 8px; padding: 8px; border-top: 1px solid var(--border); }
+
+  /* ---- main pane ---- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .main-head {
+    height: 52px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 20px; border-bottom: 1px solid var(--border);
+  }
+  .main-head .hash { color: var(--text-subtle); font-size: 16px; }
+  .main-head .cname { font-size: 15px; font-weight: 700; }
+  .main-head .members { font-size: 12px; color: var(--text-subtle); margin-left: 4px; text-decoration: none; }
+  .main-head .members:hover { color: var(--accent-700); text-decoration: underline; }
+  .summarize-btn {
+    margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600;
+    color: var(--accent-700); background: var(--accent-50); border: 1px solid var(--accent-100);
+    border-radius: 7px; padding: 5px 11px;
+  }
+
+  .msg-list { flex: 1; overflow-y: auto; padding: 12px 0 8px; }
+  .day-sep {
+    display: flex; align-items: center; gap: 10px; margin: 6px 20px 10px; font-size: 11px;
+    color: var(--text-subtle); font-weight: 600;
+  }
+  .day-sep::before, .day-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .msg { display: flex; gap: 10px; padding: 7px 20px; }
+  .msg:hover { background: var(--bg-subtle); }
+  .msg .av {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff;
+  }
+  .msg .av.ai { border-radius: 9px; background: linear-gradient(135deg, var(--accent-600), var(--accent-700)); }
+  .msg .av.bot { border-radius: 9px; background: #fef3c7; font-size: 16px; }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-head { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+  .msg-head .name { font-size: 13px; font-weight: 700; color: var(--text); }
+  .msg-head .name.clickable, .msg .av.clickable { cursor: pointer; }
+  .msg-head .name.clickable:hover { text-decoration: underline; }
+  .msg .av.clickable:hover { box-shadow: 0 0 0 2px var(--accent-100); }
+  .msg-head .dup-email { font-size: 11px; font-weight: 600; color: var(--text-subtle); }
+  .msg-head .time { font-size: 11px; color: var(--text-subtle); }
+  .msg-text { font-size: 13.5px; line-height: 1.75; color: var(--text); margin-top: 2px; white-space: pre-wrap; }
+  .mention { background: var(--accent-100); color: var(--accent-700); border-radius: 4px; padding: 0 4px; font-weight: 600; }
+  .msg { position: relative; }
+
+  /* ---- profile popover (F-40) ---- */
+  .profile-popover {
+    display: none;
+    position: absolute; top: 40px; left: 20px; width: 250px; background: var(--bg);
+    border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 30px rgba(16,24,40,0.18);
+    padding: 16px; z-index: 45; text-align: left;
+  }
+  .profile-popover.show { display: block; }
+  .profile-popover .pp-av {
+    width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 16px; font-weight: 700; margin-bottom: 8px;
+  }
+  .profile-popover .pp-name { font-size: 14px; font-weight: 700; color: var(--text); }
+  .profile-popover .pp-email { font-size: 12px; color: var(--text-subtle); margin-top: 2px; }
+  .profile-popover .pp-role { margin-top: 8px; }
+
+  .typing-dots { display: inline-flex; gap: 3px; vertical-align: middle; margin-right: 4px; }
+  .typing-dots span {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--text-subtle); display: inline-block;
+    animation: blink 1.2s infinite ease-in-out;
+  }
+  .typing-dots span:nth-child(2) { animation-delay: .2s; }
+  .typing-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .msg-text.generating { color: var(--text-subtle); font-size: 12.5px; }
+
+  .ai-disclaimer { display: flex; align-items: center; gap: 5px; margin-top: 7px; font-size: 11px; color: var(--text-subtle); }
+
+  .cite-card { margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; background: var(--bg-subtle); font-size: 12px; max-width: 460px; }
+  .cite-card .cite-head { font-weight: 700; color: var(--text-muted); margin-bottom: 4px; font-size: 11px; }
+  .cite-card a { color: var(--accent-700); text-decoration: none; }
+  .cite-card a:hover { text-decoration: underline; }
+  .cite-card .excerpt { color: var(--text-muted); margin-top: 2px; }
+
+  .ext-card { margin-top: 8px; border: 1px solid var(--accent-100); border-radius: 8px; overflow: hidden; font-size: 12px; max-width: 460px; }
+  .ext-card .ext-head {
+    background: var(--accent-50); color: var(--accent-700); font-weight: 700; padding: 7px 12px;
+    font-size: 11.5px; display: flex; align-items: center; gap: 6px;
+  }
+  .ext-card table { width: 100%; border-collapse: collapse; }
+  .ext-card td, .ext-card th { padding: 6px 12px; border-top: 1px solid var(--border); text-align: left; font-size: 12px; }
+  .ext-card th { color: var(--text-subtle); font-weight: 600; }
+
+  .quote-ref {
+    margin-top: 8px; border-left: 3px solid var(--border-strong); padding: 6px 10px;
+    background: var(--bg-subtle); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--text-muted); max-width: 460px;
+  }
+  .quote-ref .qlabel { font-size: 10.5px; font-weight: 700; color: var(--text-subtle); margin-bottom: 2px; display: block; }
+
+  .thread-link {
+    margin-top: 6px; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+    color: var(--accent-700); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 9px;
+    text-decoration: none;
+  }
+  .thread-link:hover { background: var(--bg-subtle); border-color: var(--border-strong); }
+  .thread-link .todo { color: #0369a1; font-weight: 700; }
+
+  /* ---- composer ---- */
+  .composer { border-top: 1px solid var(--border); padding: 10px 20px 14px; flex: none; position: relative; }
+  .composer-box { border: 1px solid var(--border-strong); border-radius: 10px; padding: 9px 12px; }
+  .composer-input { font-size: 13px; color: var(--text-subtle); }
+  .composer-toolbar { display: flex; align-items: center; gap: 2px; margin-top: 8px; }
+  .composer-toolbar .icon-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: none; background: none;
+    display: flex; align-items: center; justify-content: center; color: var(--text-subtle);
+  }
+  .composer-toolbar .icon-btn:hover { background: var(--bg-muted); }
+  .composer-toolbar .schedule-btn { margin-left: auto; }
+  .composer-toolbar .schedule-btn.active { background: var(--accent-50); color: var(--accent-700); }
+  .schedule-btn.active svg circle, .schedule-btn.active svg path { stroke: var(--accent-600); }
+  .send-btn {
+    background: var(--accent-600); color: #fff; border: none; border-radius: 7px;
+    padding: 6px 16px; font-size: 12.5px; font-weight: 700;
+  }
+  .composer-hint { font-size: 11px; color: var(--text-subtle); margin-top: 6px; }
+
+  /* ---- schedule popover ---- */
+  .schedule-popover {
+    display: none;
+    position: absolute; bottom: 64px; right: 20px; width: 250px; background: var(--bg);
+    border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 30px rgba(16,24,40,0.18);
+    padding: 14px 16px; z-index: 40;
+  }
+  .schedule-popover.show { display: block; }
+  .schedule-popover .sp-title { font-size: 12.5px; font-weight: 700; margin-bottom: 10px; }
+  .schedule-popover .sp-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  .schedule-popover input[type=date], .schedule-popover input[type=time] {
+    border: 1px solid var(--border-strong); border-radius: 7px; padding: 6px 8px; font-size: 12px;
+    font-family: inherit; color: var(--text); flex: 1; min-width: 0;
+  }
+  .schedule-popover .sp-hint { font-size: 10.5px; color: var(--text-subtle); line-height: 1.6; margin-bottom: 12px; }
+  .schedule-popover .sp-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .sp-btn-cancel { background: none; border: 1px solid var(--border-strong); border-radius: 7px; padding: 6px 12px; font-size: 12px; color: var(--text-muted); }
+  .sp-btn-confirm { background: var(--accent-600); color: #fff; border: none; border-radius: 7px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
+
+  /* ---- mention autocomplete (F-41) ---- */
+  .mention-popover {
+    display: none;
+    position: absolute; bottom: 64px; left: 20px; width: 300px; max-height: 260px; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border-strong); border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(16,24,40,0.18); padding: 6px; z-index: 40;
+  }
+  .mention-popover.show { display: block; }
+  .mention-popover .mp-hint { font-size: 10.5px; color: var(--text-subtle); padding: 6px 8px 4px; }
+  .mp-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+  .mp-row:hover, .mp-row.active { background: var(--bg-subtle); }
+  .mp-row .mp-av {
+    width: 28px; height: 28px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .mp-row .mp-av.ai { border-radius: 8px; background: linear-gradient(135deg, var(--accent-600), var(--accent-700)); }
+  .mp-row .mp-info { flex: 1; min-width: 0; }
+  .mp-row .mp-name { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 5px; }
+  .mp-row .mp-email { font-size: 10.5px; color: var(--text-subtle); }
+
+  /* ---- toast（権限外パスへのリダイレクト通知） ---- */
+  .toast {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 55;
+    display: flex; align-items: center; gap: 10px; background: #1a1d21; color: #f4f5f7;
+    border-radius: 10px; padding: 11px 16px; font-size: 12.5px; font-weight: 600;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.28);
+  }
+  .toast .ic { flex: none; }
+  .toast button {
+    flex: none; background: none; border: none; color: #a8adb5; font-size: 12px; cursor: pointer; margin-left: 4px;
+  }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 30;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #93c5fd; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">S-03 チャンネル会話</span>
+
+  <div class="toast" id="permToast">
+    <span class="ic">⚠</span>
+    <span>このページを表示する権限がありません（チャンネル管理者のみ利用できます）</span>
+    <button type="button" onclick="document.getElementById('permToast').style.display='none'">✕</button>
+  </div>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">K</div>
+      <div class="name">Kogack</div>
+    </div>
+    <div class="search-wrap">
+      <a class="search-box" href="S-05_横断検索.html">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>メッセージ・ファイル・ドキュメントを検索</span>
+        <span class="kbd">S-05</span>
+      </a>
+    </div>
+    <a class="scheduled-btn" href="補足04_予約中メッセージ.html">🕐 予約中<span class="count">2</span></a>
+    <a class="user" href="補足06_プロフィール画像を変更.html">
+      <div class="avatar">山</div>
+      <span class="uname">山田 太郎</span>
+      <span class="badge badge-member">member</span>
+    </a>
+  </div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-head">
+          <span class="label">チャンネル</span>
+          <a class="add-btn" href="補足01_チャンネルに参加.html" title="チャンネルに参加／作成" style="text-decoration:none;">＋</a>
+        </div>
+        <ul class="nav-list">
+          <li class="nav-item unread">
+            <span class="hash">#</span><span class="chname">総務問い合わせ</span><span class="unread-badge">3</span>
+          </li>
+          <li class="nav-item active">
+            <span class="hash">#</span><span class="chname">開発相談</span>
+          </li>
+          <li class="nav-item unread">
+            <span class="hash">#</span><span class="chname">新人質問</span><span class="unread-badge">1</span>
+          </li>
+          <li class="nav-item">
+            <span class="hash">#</span><span class="chname">雑談</span>
+          </li>
+        </ul>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-head">
+          <span class="label">ダイレクトメッセージ</span>
+          <a class="add-btn" href="補足02_DM相手を選ぶ.html" title="DMを開始" style="text-decoration:none;">＋</a>
+        </div>
+        <ul class="nav-list">
+          <li class="nav-item unread">
+            <span class="dm-avatar" style="background:#f97316;">佐</span><span class="chname">佐藤 花子</span><span class="unread-badge">2</span>
+          </li>
+          <li class="nav-item">
+            <span class="dm-avatar" style="background:#0ea5e9;">鈴<span class="dot-online"></span></span><span class="chname">鈴木 一郎</span>
+          </li>
+          <li class="nav-item">
+            <span class="dm-avatar" style="background:#a855f7;">高</span><span class="chname">高橋 美咲</span>
+          </li>
+        </ul>
+      </div>
+      <div class="sidebar-footer">
+        <div class="nav-item">
+          <span class="avatar" style="width:22px;height:22px;font-size:10px;">山</span><span class="chname">山田 太郎</span>
+        </div>
+      </div>
+    </nav>
+
+    <div class="main">
+      <div class="main-head">
+        <span class="hash">#</span>
+        <span class="cname">開発相談</span>
+        <a class="members" href="補足03_メンバー一覧.html">12名</a>
+        <button class="summarize-btn" type="button">
+          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h7" stroke="#1e3a8a" stroke-width="1.6" stroke-linecap="round"/></svg>
+          要約
+        </button>
+        <a class="summarize-btn" href="S-06_チャンネル設定.html" title="このチャンネルの設定（chadmin/adminのみ表示）" style="text-decoration:none;">
+          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="2.6" stroke="#1e3a8a" stroke-width="1.6"/><path d="M10 3.5v2M10 14.5v2M16.5 10h-2M5.5 10h-2M14.6 5.4l-1.4 1.4M6.8 13.2l-1.4 1.4M14.6 14.6l-1.4-1.4M6.8 6.8L5.4 5.4" stroke="#1e3a8a" stroke-width="1.5" stroke-linecap="round"/></svg>
+          チャンネル設定
+        </a>
+      </div>
+
+      <div class="msg-list">
+        <div class="day-sep">2026年8月19日</div>
+
+        <div class="msg">
+          <div class="av bot">📢</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">お知らせBot</span>
+              <span class="badge badge-bot">BOT</span>
+              <span class="time">09:00</span>
+            </div>
+            <div class="msg-text">今週も一週間よろしくお願いします！今週の全体会議は水曜15時からです。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av bot" style="background:#e2e8f0;">🔔</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">システム通知</span>
+              <span class="badge badge-bot">BOT</span>
+              <span class="time">09:12</span>
+            </div>
+            <div class="msg-text">高橋 美咲 さんが参加しました。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#f97316;">佐</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">佐藤 花子</span><span class="time">10:02</span></div>
+            <div class="msg-text">本番デプロイの前に、DBマイグレーションの手順を確認したいです。</div>
+            <a class="thread-link" href="S-04_スレッド表示.html">
+              <span>💬 3件の返信</span>
+              <span class="todo">S-04で表示</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av clickable" style="background:#0ea5e9;" onclick="document.getElementById('profileCard1').classList.toggle('show')">鈴</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name clickable" onclick="document.getElementById('profileCard1').classList.toggle('show')">鈴木 一郎</span><span class="time">10:05</span></div>
+            <div class="msg-text"><span class="mention">@Kogack AI</span> 直近のデプロイ手順書のリンクを教えて</div>
+          </div>
+          <div class="profile-popover" id="profileCard1">
+            <div class="pp-av" style="background:#0ea5e9;">鈴</div>
+            <div class="pp-name">鈴木 一郎</div>
+            <div class="pp-email">suzuki@kogasoftware.com</div>
+            <div class="pp-role"><span class="badge badge-member">member</span></div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av ai">AI</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">Kogack AI</span>
+              <span class="badge badge-ai">AI</span>
+              <span class="time">10:05</span>
+            </div>
+            <div class="msg-text generating"><span class="typing-dots"><span></span><span></span><span></span></span>生成中…</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av ai">AI</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">Kogack AI</span>
+              <span class="badge badge-ai">AI</span>
+              <span class="time">10:06</span>
+            </div>
+            <div class="msg-text">デプロイ手順は次の3ステップです。①ステージングでマイグレーションを検証 ②バックアップ取得 ③本番マイグレーション実行→デプロイ。詳細は根拠文書をご確認ください。</div>
+            <div class="cite-card">
+              <div class="cite-head">📄 回答の根拠</div>
+              <a href="#">デプロイ手順書.md ＞ 3. 本番反映手順</a>
+              <div class="excerpt">「…マイグレーションは必ずステージング環境での検証後、バックアップを取得してから本番に適用する…」</div>
+            </div>
+            <div class="ai-disclaimer">⚠ AIの回答には誤りが含まれる場合があります。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#cbd5f5;color:#1e3a8a;">山</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">山田 太郎</span><span class="time">10:10</span></div>
+            <div class="msg-text"><span class="mention">@Kogack AI</span> 明日09:00〜12:00の3F会議エリアの空き状況を教えて</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av ai">AI</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">Kogack AI</span>
+              <span class="badge badge-ai">AI</span>
+              <span class="time">10:10</span>
+            </div>
+            <div class="msg-text">3F会議エリアの明日09:00〜12:00の空き状況は以下のとおりです。</div>
+            <div class="ext-card">
+              <div class="ext-head">🔗 座席予約システム参照結果</div>
+              <table>
+                <tr><th>座席・エリア</th><th>09:00〜12:00</th></tr>
+                <tr><td>会議室 3A</td><td>空き</td></tr>
+                <tr><td>会議室 3B</td><td>10:00まで使用中</td></tr>
+                <tr><td>フリーアドレス席（3F）</td><td>空き 6席</td></tr>
+              </table>
+            </div>
+            <div class="ai-disclaimer">⚠ AIの回答には誤りが含まれる場合があります。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av ai">AI</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">Kogack AI</span>
+              <span class="badge badge-ai">AI</span>
+              <span class="time">10:12</span>
+            </div>
+            <div class="msg-text">なお、本番デプロイのタイミングについて、以前このチャンネルで触れられたやり取りがあります。</div>
+            <div class="quote-ref">
+              <span class="qlabel">↩ 過去の発言を参照（2026-07-02 #開発相談・参考情報）</span>
+              「本番デプロイは金曜17時以降に行う運用にしています」
+            </div>
+            <div class="ai-disclaimer">⚠ 過去のやり取りの参照であり、現時点の正答を保証するものではありません。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#a855f7;">高</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">高橋 美咲</span><span class="time">10:15</span></div>
+            <div class="msg-text">契約書のフォーマットを変更したいのですが、承認が必要そうです。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av ai">AI</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">Kogack AI</span>
+              <span class="badge badge-ai">AI</span>
+              <span class="time">10:15</span>
+            </div>
+            <div class="msg-text">このご依頼は自動対応範囲外のため、担当の <span class="mention">@田中 智子</span><span class="badge badge-chadmin" style="margin-left:3px;">chadmin</span> にご確認をお願いします。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#0ea5e9;">鈴</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">鈴木 一郎</span><span class="time">10:19</span></div>
+            <div class="msg-text">すみません、サポートってどこに連絡すればいいでしたっけ？</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av bot" style="background:#e0f2fe;">📎</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">ヘルプ案内Bot</span>
+              <span class="badge badge-bot">BOT</span>
+              <span class="time">10:19</span>
+            </div>
+            <div class="msg-text">お困りごとは <span class="mention">サポート窓口 (社内Wiki)</span> をご確認ください。緊急の場合は #総務問い合わせ へどうぞ。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#99f6e4;color:#0f766e;">田</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">田中 智子<span class="dup-email">（tanaka.dev@kogasoftware.com）</span></span><span class="time">10:21</span></div>
+            <div class="msg-text">サポート窓口、今確認しますね。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#fbcfe8;color:#9d174d;">田</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">田中 智子<span class="dup-email">（tanaka.soumu@kogasoftware.com）</span></span><span class="time">10:22</span></div>
+            <div class="msg-text">総務の田中です、私の方でも確認します。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-box">
+          <div class="composer-input">@田中<span style="animation: blink 1s step-end infinite; color:var(--text-subtle);">|</span></div>
+          <div class="composer-toolbar">
+            <button class="icon-btn" title="ファイルを添付" type="button">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M14.5 8.5l-6 6a3 3 0 1 1-4.2-4.2l6.7-6.7a2 2 0 1 1 2.8 2.8L7.1 12.2a1 1 0 1 1-1.4-1.4l5.7-5.7" stroke="#8a8f98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="icon-btn mention-btn" id="mentionBtn" title="メンション候補を表示" type="button" onclick="document.getElementById('mentionPopover').classList.toggle('show'); this.classList.toggle('active');">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.2" stroke="#8a8f98" stroke-width="1.5"/><path d="M13 10a3 3 0 1 1-1-2.2M13 10v1.3a1.7 1.7 0 0 0 3.4 0V10" stroke="#8a8f98" stroke-width="1.4" stroke-linecap="round"/></svg>
+            </button>
+            <button class="icon-btn schedule-btn" id="schedBtn" title="送信日時を指定" type="button" onclick="document.getElementById('schedPopover').classList.toggle('show'); this.classList.toggle('active');">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.2" stroke="#8a8f98" stroke-width="1.5"/><path d="M10 6v4l3 2" stroke="#8a8f98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="send-btn" type="button">送信</button>
+          </div>
+
+          <div class="mention-popover show" id="mentionPopover">
+            <div class="mp-hint">当該チャンネルの参加者＋チャンネルAI（F-41）</div>
+            <div class="mp-row active">
+              <div class="mp-av ai">AI</div>
+              <div class="mp-info"><div class="mp-name">Kogack AI</div><div class="mp-email">このチャンネルのAI</div></div>
+            </div>
+            <div class="mp-row">
+              <div class="mp-av" style="background:#99f6e4;color:#0f766e;">田</div>
+              <div class="mp-info"><div class="mp-name">田中 智子 <span class="badge badge-chadmin" style="font-size:9px;">chadmin</span></div><div class="mp-email">tanaka.dev@kogasoftware.com</div></div>
+            </div>
+            <div class="mp-row">
+              <div class="mp-av" style="background:#fbcfe8;color:#9d174d;">田</div>
+              <div class="mp-info"><div class="mp-name">田中 智子</div><div class="mp-email">tanaka.soumu@kogasoftware.com</div></div>
+            </div>
+            <div class="mp-row">
+              <div class="mp-av" style="background:#0ea5e9;">鈴</div>
+              <div class="mp-info"><div class="mp-name">鈴木 一郎</div><div class="mp-email">suzuki@kogasoftware.com</div></div>
+            </div>
+          </div>
+
+          <div class="schedule-popover" id="schedPopover">
+            <div class="sp-title">送信日時を指定</div>
+            <div class="sp-row">
+              <input type="date" value="2026-08-21">
+              <input type="time" value="09:00">
+            </div>
+            <div class="sp-hint">指定した日時に自動的に送信されます。送信されるまでは自分だけが内容を確認・キャンセルできます（<a href="補足04_予約中メッセージ.html">予約中のメッセージ</a>）。</div>
+            <div class="sp-actions">
+              <button class="sp-btn-cancel" type="button" onclick="document.getElementById('schedPopover').classList.remove('show'); document.getElementById('schedBtn').classList.remove('active');">キャンセル</button>
+              <button class="sp-btn-confirm" type="button">予約する</button>
+            </div>
+          </div>
+        </div>
+        <div class="composer-hint">ファイルは1件あたり20MBまで添付できます（予約送信では添付は利用できません）。</div>
+      </div>
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>モックアップ注記</strong><br>
+    画面ID: <code>S-03</code> ／ 対応機能: <code>F-03,F-04,F-13,F-14,F-17,F-18,F-19,F-20,F-23,F-30,F-31,F-35,F-36,F-37,F-38,F-39,F-40,F-41,F-43</code><br>
+    AI発言には常時 <span class="badge badge-ai">AI</span> バッジ（F-18）と誤りを含みうる旨の注記（F-30）を表示。ドキュメント根拠（F-20）・連携先システム参照結果（F-23 座席予約）・過去のやり取りの参照（5.3節、断定的正答として見せない）をそれぞれカードで区別。人への引き継ぎ（F-17）は同一チャンネル内でメンションしDMは使わない。要約ボタン（F-14）は手動実行のみで、押した時点までの内容（スレッドは全体／チャンネル本体は直近100件）を要約する。「💬 3件の返信」をクリックすると<a href="S-04_スレッド表示.html">S-04（スレッド表示）</a>が開く。ヘッダー右の「チャンネル設定」（旧称「AI設定」）は本来<span class="badge badge-chadmin">chadmin</span>・システム管理者のみに表示され、<a href="S-06_チャンネル設定.html">S-06（チャンネル設定）</a>へ遷移する（本モックアップでは説明のため常時表示）。ヘッダーの参加人数（「12名」）をクリックすると<a href="補足03_メンバー一覧.html">メンバー一覧（補足03）</a>が開き、誰がチャンネル管理者かを確認できる（変更はS-06基本設定タブから行う）。サイドバーの「＋」は<a href="補足01_チャンネルに参加.html">チャンネルに参加／作成</a>・<a href="補足02_DM相手を選ぶ.html">DM相手を選ぶ</a>（いずれも要件定義書4.1節のS-01〜S-08には含まれない補足モックアップ）へ遷移する。詳細は<a href="../02_要件定義書.html#sec3">要件定義書3章</a>・<a href="../02_要件定義書.html#sec5">5章</a>参照。<br>
+    <span style="color:#fbbf24;">1.9版で追加:</span> 投稿欄の送信ボタン隣に🕐（送信日時を指定）ボタンを追加した（<code>F-35</code>）。既定では非表示で、🕐ボタンを押すと日時ピッカーのポップオーバーが開閉する（本モックアップでも実際にクリックして開閉を確認できる）。「予約する」を押すとその時刻まで送信されない。予約送信ではファイル添付は利用できない。ヘッダーの「🕐 予約中」から<a href="補足04_予約中メッセージ.html">予約中のメッセージ一覧（補足04）</a>を開き、送信前に内容確認・キャンセルができる。<a href="../02_要件定義書.html#sec3">要件定義書F-35</a>参照。<br>
+    冒頭の「お知らせBot」の発言は<code>F-36</code>（定期投稿）の例。日時・頻度を指定してチャンネルに自動投稿されるメッセージで、<span class="badge badge-bot">BOT</span>バッジと専用のアイコン・名前（人間・AIとは別の見た目）で区別する。AIへの質問応答は行わない。チャンネル宛ての設定は<a href="S-06_チャンネル設定.html">S-06「定期投稿」タブ</a>で行う（chadmin/adminのみ）。<a href="../02_要件定義書.html#sec3">要件定義書F-36</a>参照。<br>
+    <span style="color:#fbbf24;">1.12版で追加:</span> ヘッダー右のユーザーメニュー（自分のアバター）から<a href="補足06_プロフィール画像を変更.html">プロフィール画像を変更（補足06）</a>を開けるようにした（<code>F-37</code>）。同じ画像アップロードの仕組みをチャンネルAIのアイコン（S-06）・定期投稿の送り主アイコン（S-06）にも使う。<br>
+    <span style="color:#fbbf24;">1.14版で削除:</span> F-36の宛先を個人（複数可）に拡張していたが（1.11版）、チャンネル運用への注力を優先し対象外に戻した。ヘッダーの「🔁 リマインダー」ボタンと補足05「リマインダー」も削除した。定期投稿（チャンネル宛て）はS-06「定期投稿」タブから引き続き利用できる。<br>
+    <span style="color:#fbbf24;">1.13版で追加:</span> 鈴木一郎の発言「サポート」に反応した「ヘルプ案内Bot」の発言は<code>F-38</code>（自動応答トリガー）の例。特定のキーワード・絵文字を含む人間の発言に反応し、即座に自動投稿される（AIのように内容を理解して答えるのではなく、単純な一致判定）。<span class="badge badge-bot">BOT</span>バッジ・専用アイコンで区別し、AIへの質問応答やAIメンションは連鎖的に発生しない。設定は<a href="S-06_チャンネル設定.html">S-06「自動応答トリガー」タブ</a>で行う（chadmin/adminのみ）。<a href="../02_要件定義書.html#sec3">要件定義書F-38</a>参照。<br>
+    <span style="color:#fbbf24;">1.15版で改称:</span> ヘッダーのボタン名を「AI設定」から「チャンネル設定」に変更した。チャンネル管理者・定期投稿・自動応答トリガーとAI設定以外の項目が増え、旧名称が実態と合わなくなったための対応（S-06自体の画面名も同様に改称）。<br>
+    <span style="color:#fbbf24;">1.16版で追加:</span> 200名規模の運用では利用者の氏名（Googleアカウントの表示名）が重複しうるにもかかわらず、発言者表示・@メンションが氏名の文字列一致に依存しており、同姓同名時に取り違えが起きる課題が判明したため、F-39〜F-41を追加した（詳細は<a href="../../検討資料/README.md">検討資料</a>「発言者表示・メンションの識別性改善」）。(1) 発言者のアイコン・表示名（クリック可能な下線表示）をクリックするとプロフィールカード（アイコン・表示名・メールアドレス・ロール）がポップオーバー表示される（F-40。鈴木一郎の発言で実際にクリックして確認できる）。(2) 同一チャンネル内に表示名が完全一致する参加者が複数いる場合、発言者表示に自動でメールアドレスを併記する（F-39。末尾の「田中 智子」2名の例。所属の異なる同姓同名者）。(3) 投稿欄の「@」ボタン（🔗アイコン）を押すと、当該チャンネルの参加者＋チャンネルAIを候補としたメンション候補（アイコン・表示名・メールアドレス付き。補足02のユーザーピッカーと同じ見せ方）がポップオーバー表示され、選択して確定する（F-41。自由入力の氏名一致には頼らず、内部的には選択したuser_idで宛先を保持するため、同姓同名でも取り違えない。表示名を変更してもメンションの参照は壊れない）。<a href="../02_要件定義書.html#sec3">要件定義書F-39・F-40・F-41</a>参照。<br>
+    <span style="color:#fbbf24;">基本設計書1.14版で追加:</span> 画面右上のトースト通知は、chadminでない参加者が<a href="S-06_チャンネル設定.html">S-06（チャンネル設定）</a>のURLを直接開いた場合の例（本来は表示されない状態だが、本モックアップでは説明のため常時表示。✕で閉じられる）。この場合、S-06は表示されず自動的に当該チャンネルのS-03（この画面）へリダイレクトされ、権限がない旨がトーストで明示される。一方、参加していない非公開チャンネルのURLを直接開いた場合や、非adminが<a href="S-08_管理コンソール.html">S-08</a>のURLを直接開いた場合は、トーストなしでワークスペース（サイドバー）へ静かにリダイレクトされる（存在を伏せるべき対象か、権限不足を明示してよい対象かで挙動を使い分ける。基本設計書4.2節「設計判断」）。<br>
+    <span style="color:#fbbf24;">1.18版で追加:</span> 新規F-43「チャンネル参加の通知」。誰かがチャンネルに参加すると「（氏名）さんが参加しました。」という発言が自動的にタイムラインへ追加される（冒頭の「システム通知」の例）。既存のBOT投稿（F-36定期投稿・F-38自動応答トリガー）と同じ<code>sender_type='bot'</code>の仕組みをそのまま流用し、新しいDBカラムは追加していない（表示名は固定で「システム通知」、送り主を選ぶ設定項目は無い）。チャンネル作成時に作成者が自動参加する場合は対象外（そのチャンネルに他の参加者がまだいないため通知の意味がない）。<a href="../02_要件定義書.html#sec3">要件定義書F-43</a>参照。
+  </div>
+
+</body>
+</html>

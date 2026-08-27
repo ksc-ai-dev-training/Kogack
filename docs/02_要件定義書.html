@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>要件定義書 | AIネイティブチャットシステム（Kogack）</title>
+<style>
+/* AIネイティブチャットシステム「Kogack」設計ドキュメント共通スタイル */
+:root {
+  --accent-600: #1e40af;
+  --accent-700: #1e3a8a;
+  --accent-100: #dbeafe;
+  --accent-50: #eff6ff;
+  --bg: #ffffff;
+  --bg-subtle: #fafbfc;
+  --bg-muted: #f5f7f9;
+  --border: #e7eaee;
+  --border-strong: #d9dde3;
+  --text: #1a1d21;
+  --text-muted: #60656d;
+  --text-subtle: #8a8f98;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+  background: var(--bg-muted);
+}
+
+.doc {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 48px 56px 96px;
+  background: var(--bg);
+  min-height: 100vh;
+  box-shadow: 0 0 24px rgba(16, 24, 40, 0.06);
+}
+
+/* 表紙 */
+.cover {
+  border-bottom: 3px solid var(--accent-600);
+  padding-bottom: 24px;
+  margin-bottom: 40px;
+}
+.cover .doc-type {
+  display: inline-block;
+  background: var(--accent-600);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+}
+.cover h1 { font-size: 26px; font-weight: 700; margin: 0 0 4px; }
+.cover .subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
+.cover .meta {
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.cover .note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 48px 0 16px;
+  padding: 6px 0 6px 12px;
+  border-left: 4px solid var(--accent-600);
+  color: var(--accent-700);
+}
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 32px 0 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+h4 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; }
+
+p { margin: 8px 0; }
+ul, ol { margin: 8px 0; padding-left: 24px; }
+li { margin: 3px 0; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0 20px;
+  font-size: 13px;
+}
+th, td {
+  border: 1px solid var(--border-strong);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: var(--accent-50);
+  color: var(--accent-700);
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+tbody tr:nth-child(even) { background: var(--bg-subtle); }
+td .muted { color: var(--text-muted); }
+
+code {
+  font-family: "SF Mono", ui-monospace, "Consolas", monospace;
+  font-size: 12.5px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+pre {
+  background: #1e2530;
+  color: #dce3ec;
+  border-radius: 8px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+pre code { background: none; border: none; color: inherit; padding: 0; }
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.badge-get { background: #dcfce7; color: #15803d; }
+.badge-post { background: #dbeafe; color: #1d4ed8; }
+.badge-put { background: #fef3c7; color: #b45309; }
+.badge-delete { background: #fee2e2; color: #b91c1c; }
+.badge-admin { background: #ede9fe; color: #6d28d9; }
+.badge-chadmin { background: #ccfbf1; color: #0f766e; }
+.badge-member { background: #f1f5f9; color: #475569; }
+.badge-ai { background: #dbeafe; color: #1d4ed8; }
+.badge-mvp { background: #dcfce7; color: #15803d; }
+.badge-next { background: #f1f5f9; color: #60656d; }
+.badge-core { background: #1e40af; color: #fff; }
+.badge-should { background: #dcfce7; color: #15803d; }
+.badge-maybe { background: #fef3c7; color: #b45309; }
+.badge-skip { background: #f1f5f9; color: #60656d; }
+
+.callout {
+  background: var(--accent-50);
+  border: 1px solid var(--accent-100);
+  border-left: 4px solid var(--accent-600);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.callout.warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  border-left-color: #d97706;
+}
+
+.diagram {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin: 16px 0;
+  overflow-x: auto;
+}
+.diagram svg { display: block; margin: 0 auto; max-width: 100%; }
+
+/* 画面キャプチャ（操作マニュアル） */
+figure.shot {
+  margin: 16px 0 24px;
+}
+figure.shot img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+figure.shot figcaption {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+figure.shot figcaption .fig-no {
+  font-weight: 600;
+  color: var(--accent-700);
+  margin-right: 6px;
+}
+
+/* 操作手順（番号付き。各ステップの見出しを強調する） */
+ol.steps { padding-left: 22px; }
+ol.steps > li { margin: 10px 0; }
+ol.steps > li > strong { color: var(--accent-700); }
+
+/* 画面IDバッジ */
+.badge-screen { background: #e0f2fe; color: #0369a1; }
+
+/* 必須項目マーク（画面上の「*」を本文中で示すとき） */
+.required-mark { color: #dc2626; }
+
+/* 変更差分マーク（レビュー用に変更箇所を赤字で示すとき） */
+.diff-new { color: #dc2626; }
+
+/* 目次 */
+.toc {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 24px;
+  margin: 24px 0;
+  font-size: 13px;
+}
+.toc ol { margin: 4px 0; }
+.toc a { color: var(--accent-700); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+a { color: var(--accent-700); }
+
+footer.doc-footer {
+  margin-top: 64px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-subtle);
+  display: flex;
+  justify-content: space-between;
+}
+
+@media print {
+  body { background: #fff; }
+  .doc { box-shadow: none; max-width: none; padding: 0; }
+  h2 { break-after: avoid; }
+  table, .diagram, .callout { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<script src="_sidenav.js"></script>
+<div class="doc">
+
+  <div class="cover">
+    <span class="doc-type">要件定義書</span>
+    <h1>AIネイティブチャットシステム 要件定義書</h1>
+    <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
+    <div class="meta">
+      <span>作成日: 2026-08-18</span>
+      <span>版数: 1.17</span>
+      <span>作成: コガソフトウェア株式会社</span>
+    </div>
+    <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
+  </div>
+
+  <h2>改訂履歴</h2>
+  <table>
+    <thead>
+      <tr><th>版数</th><th>日付</th><th>改訂内容</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1.0〜1.4</td><td>2026-08-18</td><td>初版作成後、9月末リリースのスコープ判定（4段階の優先度分類）とあいまい表現の具体化を重ねた。判定の経緯・比較した代替案は <a href="../検討資料/README.md">検討資料</a> 各ファイルを参照。</td></tr>
+      <tr><td>1.5</td><td>2026-08-18</td><td>章構成をKeireki（社員経歴書管理システム）の要求定義書の書き方に合わせて全面的に整理した。「はじめに」のREQ→F対応表を1本の表に統合し、機能要件は実装する機能（3.1）と対象外機能（3.2）の2本立てにした。会話履歴・退職者・過去回答の扱いと、AIエージェント連携（座席予約システムの参照）をまとめて「5. AI回答・エージェント連携要件」とした。スコープ判定の詳細な理由づけ（4段階の優先度・判定表）は本文からは外し、検討資料に一本化した。</td></tr>
+      <tr><td>1.6</td><td>2026-08-19</td><td>画面モックアップの検討過程で見つかった不足・改善点を要件に反映（変更箇所は本文中に赤字で表示）。F-11に指定範囲外の質問への対応方針、F-17に引き継ぎ先の変更可否を追加。新規F-33「チャンネル管理者の変更」を追加し、S-06に「チャンネル管理者」タブ、S-08に「監査ログ」タブを反映。チャンネル参加・DM選択・メンバー一覧はS-02/S-03から開くモーダルとして4.3節に位置づけた。</td></tr>
+      <tr><td>1.7</td><td>2026-08-20</td><td>要求仕様書1.1節の改訂を受け、F-05を複数人でのDM（グループDM）に対応する形に改訂（変更箇所は本文中に赤字で表示）。REQ-F-04の対応表記述、F-05・F-06・権限マトリクスの記載を更新。DM相手の選択（補足02）を複数選択に変更。</td></tr>
+      <tr><td>1.8</td><td>2026-08-20</td><td>非公開チャンネルを対象範囲に追加（変更箇所は本文中に赤字で表示）。3.2節「対象外機能」から「非公開チャンネル」を削除し、新規F-34「チャンネルの公開範囲」を追加。作成時に公開／非公開を選択でき、チャンネル管理者が後から変更できる。非公開チャンネルは参加者以外に一覧・検索されず、参加は既存の参加者による追加が必要（誰でも追加可）とした。<a href="../検討資料/README.md">検討資料</a>「MVPスコープ決定」で一度見送りとした判断を覆すもの。F-02・権限マトリクスの記載を更新。</td></tr>
+      <tr><td>1.9</td><td>2026-08-20</td><td>新規F-35「メッセージの送信予約」を追加（変更箇所は本文中に赤字で表示）。投稿欄で送信日時を指定でき、指定時刻に自動送信される。送信前は本人のみが内容確認・キャンセルできる。チャンネル・DM・スレッド返信のいずれからも利用可能。権限マトリクスに関連行を追加。</td></tr>
+      <tr><td>1.10</td><td>2026-08-20</td><td>新規F-36「定期投稿（bot投稿）」を追加（変更箇所は本文中に赤字で表示）。日時・頻度（1回のみ／毎日／毎週／毎月）とメッセージ本文、送り主の表示名・アイコンをチャンネルごとに設定し、自動投稿できる。人間・チャンネルAIの発言と区別するBOTバッジを表示する。設定はチャンネル管理者・システム管理者に限定。権限マトリクスに関連行を追加。</td></tr>
+      <tr><td>1.11</td><td>2026-08-20</td><td>F-36の宛先をチャンネルに加えて個人（複数人指定可）に拡張（変更箇所は本文中に赤字で表示）。個人宛てはロールを問わず全利用者が自分用に作成でき、指定した相手にそれぞれDM形式で個別に届く。作成したリマインダーは作成者本人のみが閲覧・編集・削除できる（チャンネル宛ての既存の権限＝chadmin/admin限定は変更なし）。権限マトリクスに個人宛て用の行を追加。</td></tr>
+      <tr><td>1.12</td><td>2026-08-20</td><td>新規F-37「プロフィール画像のアップロード」を追加し、F-10（AIキャラクタ設定）・F-36（定期投稿・リマインダー）のアイコンを画像アップロードに対応させた（変更箇所は本文中に赤字で表示）。個人アイコン・チャンネルAIアイコン・BOT/リマインダーアイコンの3種を対象とする。3.2節にアップロード画像の内容審査（モデレーション）を対象外として追記。権限マトリクスに関連行を追加。</td></tr>
+      <tr><td>1.13</td><td>2026-08-20</td><td>新規F-38「トリガーによる自動応答」を追加（変更箇所は本文中に赤字で表示）。特定のキーワード・絵文字を含む発言に反応して、チャンネルへメッセージを自動投稿する。トリガー・チャンネル・実行する処理（現時点ではメッセージ投稿のみ）をそれぞれ設定する。設定はチャンネル管理者・システム管理者に限定。3.2節に対象外項目（他のaction種別、クールダウン設定）を追記。権限マトリクスに関連行を追加。</td></tr>
+      <tr><td>1.14</td><td>2026-08-20</td><td>F-36の宛先を、v1.11で拡張した個人（複数可）からチャンネルのみに戻した。チャンネル運用への注力を優先するための方針転換で、ヘッダーの「🔁 リマインダー」ボタンも削除する。権限マトリクスから個人宛て用の行を削除し、3.2節に「個人宛てのリマインダー」を対象外機能として追記した（配送方式の設計は次フェーズ向けに基本設計書へ残す）。</td></tr>
+      <tr><td>1.15</td><td>2026-08-20</td><td>画面S-06の名称を「チャンネルAI設定」から「チャンネル設定」に改称した（機能追加ではなく名称の見直し）。チャンネル管理者・定期投稿・自動応答トリガーなどAI設定以外の項目が増え、旧名称が実態と合わなくなったための対応。4.1節の画面一覧・4.2節の見出し・S-03からの導線の説明を更新した。</td></tr>
+      <tr class="diff-new"><td>1.16</td><td>2026-08-24</td><td>200名規模の運用では利用者の氏名（Googleアカウントの表示名）が重複しうるにもかかわらず、発言者表示・@メンションのいずれも氏名の文字列一致に依存しており、同姓同名時に発言者が判別できない／メンション先が曖昧になるという課題が判明したため、新規F-39「表示名の変更・同姓同名時の自動識別」・F-40「発言者・メンバーのプロフィール確認」・F-41「@メンションの候補選択・ID参照化」を追加した（変更箇所は本文中に赤字で表示）。F-37の「氏名は変更できない」という記述を見直し、表示名（Googleの氏名は初期値）は本人が変更できることとした（メールアドレスは引き続き変更不可）。表示名の一意性は強制せず、重複時はメールアドレスの自動併記で識別する方針を3.2節に明記。3.1節・3.2節・6章権限マトリクスを更新した。詳細な検討経緯は<a href="../検討資料/README.md">検討資料</a>「発言者表示・メンションの識別性改善」を参照。</td></tr>
+      <tr class="diff-new"><td>1.17</td><td>2026-08-24</td><td>新規F-42「検索条件モディファイア」を追加（変更箇所は本文中に赤字で表示）。横断検索（F-06）に、Slackを参考にした<code>in:</code>（チャンネル指定）・<code>from:</code>（投稿者指定）・<code>with:</code>（DM相手指定）・<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>（日付指定）・<code>"完全一致"</code>（フレーズ検索）の各条件を追加できるようにした。3.1節・3.2節（相対日付・OR/NOT演算子・ドキュメント根拠への適用は対象外）・4章画面要件を更新した。</td></tr>
+      <tr class="diff-new"><td>1.18</td><td>2026-08-26</td><td>新規F-43「チャンネル参加の通知」を追加（変更箇所は本文中に赤字で表示）。誰かがチャンネルに参加すると「（氏名）さんが参加しました。」という発言がそのチャンネルのタイムラインに自動投稿される。F-36（定期投稿）・F-38（自動応答トリガー）と同じ<code>sender_type='bot'</code>の仕組みを流用し、新規テーブル・列は追加しない。チャンネル作成時に作成者が自動参加する場合は対象外（他の参加者がまだいないため）。詳細な検討経緯は<a href="../検討資料/README.md">検討資料</a>「チャンネル入室通知の追加」を参照。</td></tr>
+    </tbody>
+  </table>
+
+  <nav class="toc">
+    <strong>目次</strong>
+    <ol>
+      <li><a href="#sec1">はじめに</a></li>
+      <li><a href="#sec2">業務要件</a></li>
+      <li><a href="#sec3">機能要件</a></li>
+      <li><a href="#sec4">画面要件</a></li>
+      <li><a href="#sec5">AI回答・エージェント連携要件</a></li>
+      <li><a href="#sec6">権限要件</a></li>
+      <li><a href="#sec7">非機能要件</a></li>
+      <li><a href="#sec8">前提条件・制約</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="sec1">1. はじめに</h2>
+  <p>本書は「要求仕様書」（版数<span class="diff-new">1.1</span>）で示された要求事項を、システムで実現すべき要件として定義するものである。要求事項（REQ-F-xx / REQ-N-xx）と機能要件（F-xx）は以下のとおり対応する。設計の詳細（データベース定義・API仕様・画面レイアウト等）は基本設計書以降で定める。本システムの4層構造（第0層 土台〜第3層 AIが動く）は <a href="01_要求仕様書.html#sec1">要求仕様書1.4節</a> を参照。</p>
+  <table>
+    <thead>
+      <tr><th>要求ID</th><th>要求</th><th>対応する機能要件</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>REQ-N-01</td><td>Google認証・許可ドメイン制限</td><td>F-01</td></tr>
+      <tr><td>REQ-F-01</td><td>チャンネルで会話ができること</td><td>F-02<span class="diff-new">, F-34</span></td></tr>
+      <tr><td>REQ-F-02</td><td>スレッドで会話を分けられること</td><td>F-03</td></tr>
+      <tr><td>REQ-F-03</td><td>メンションで相手を指定できること</td><td>F-04</td></tr>
+      <tr><td>REQ-F-04</td><td><span class="diff-new">個別のやり取り（DM。複数人でのグループDMを含む）</span>ができること</td><td>F-05</td></tr>
+      <tr><td>REQ-F-05</td><td>過去のやり取りを検索できること</td><td>F-06</td></tr>
+      <tr><td>REQ-F-06</td><td>ファイルを共有できること</td><td>F-07</td></tr>
+      <tr><td>REQ-F-07</td><td>チャンネルごとにAIの振る舞いを定義できること</td><td>F-08</td></tr>
+      <tr><td>REQ-F-08</td><td>振る舞いの定義をテキストで記述・改訂できること</td><td>F-09</td></tr>
+      <tr><td>REQ-F-09</td><td>キャラクタを設定できること</td><td>F-10</td></tr>
+      <tr><td>REQ-F-10</td><td>参照するドキュメントの範囲を定められること</td><td>F-11（実処理はF-19・F-21）</td></tr>
+      <tr><td>REQ-F-11</td><td>スキルを登録し、AIに持たせられること</td><td>F-12</td></tr>
+      <tr><td>REQ-F-12</td><td>過去のやりとりを参照して回答できること</td><td>F-13（正しさの扱いは5.3節）</td></tr>
+      <tr><td>REQ-F-13</td><td>やりとりを要約できること</td><td>F-14</td></tr>
+      <tr><td>REQ-F-14</td><td>反応の仕方を定められること</td><td>F-15</td></tr>
+      <tr><td>REQ-F-15</td><td>AIが自動で対応してよい範囲を定められること</td><td>F-16</td></tr>
+      <tr><td>REQ-F-16</td><td>対応できない依頼を人に引き継げること</td><td>F-17</td></tr>
+      <tr><td>REQ-F-17</td><td>AIの発言であることが常に判別できること</td><td>F-18</td></tr>
+      <tr><td>REQ-F-18</td><td>社内ドキュメントに関する質問に回答できること</td><td>F-19</td></tr>
+      <tr><td>REQ-F-19</td><td>回答の根拠となる文書を示せること</td><td>F-20</td></tr>
+      <tr><td>REQ-F-20</td><td>質問者が閲覧権限を持つ文書のみを対象とすること</td><td>F-21（5.1節）</td></tr>
+      <tr><td>REQ-F-21</td><td>対象とする文書の範囲を管理者が指定できること</td><td>F-22</td></tr>
+      <tr><td>REQ-F-22</td><td>チャットから社内システムの情報を参照できること</td><td>F-23（座席予約システムのみ。5.4節）</td></tr>
+      <tr><td>REQ-F-23</td><td>チャットから社内システムの登録・変更ができること</td><td>F-24（対象外。3.2節）</td></tr>
+      <tr><td>REQ-F-24</td><td>登録・変更の実行前に内容を確認できること</td><td>F-25（仕組みのみ用意。5.5節）</td></tr>
+      <tr><td>REQ-F-25</td><td>AIが行った操作の履歴が残ること</td><td>F-26（対象外。3.2節）</td></tr>
+      <tr><td>REQ-F-26</td><td>対象システムと操作範囲を定められること</td><td>F-27（対象外。3.2節）</td></tr>
+      <tr><td>REQ-F-27</td><td>利用者本人の権限を超えないこと</td><td>F-28（対象外。3.2節）</td></tr>
+      <tr><td>REQ-N-02</td><td>会話の参照範囲を制御できること</td><td>F-02, F-06（および6章 権限要件）</td></tr>
+      <tr><td>REQ-N-03</td><td>AIの利用コストを把握・制限できること</td><td>F-29</td></tr>
+      <tr><td>REQ-N-04</td><td>AIの回答が正しいとは限らないことを利用者が認識できること</td><td>F-30</td></tr>
+      <tr><td>REQ-N-05</td><td>会話の応答が妨げられないこと</td><td>F-31</td></tr>
+      <tr><td>REQ-N-06</td><td>スマートフォンからも利用できること</td><td>F-32（対象外。3.2節）</td></tr>
+      <tr><td>REQ-N-07</td><td>既存システム（LCC CRM）の技術構成踏襲</td><td>8章 前提条件・制約</td></tr>
+      <tr class="diff-new"><td>（新規）</td><td>チャンネル設定画面からチャンネル管理者を変更したい（画面モックアップ検討時の気づき）</td><td>F-33</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="sec2">2. 業務要件</h2>
+  <p>本システムが支える会話の流れは以下のとおりである。利用者はチャンネルで発言し、チャンネルAIにメンションして質問・依頼する。AIはチャンネルごとの振る舞い定義に従って応答する。</p>
+  <div class="diagram">
+    <svg viewBox="0 0 780 245" width="780" height="245" role="img" aria-label="Kogackの会話・対応フロー図">
+      <defs>
+        <marker id="arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="#60656d"/>
+        </marker>
+      </defs>
+      <rect x="290" y="10" width="200" height="55" rx="8" fill="#eff6ff" stroke="#1e40af"/>
+      <text x="390" y="33" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1e3a8a">利用者がチャンネルで発言</text>
+      <text x="390" y="52" text-anchor="middle" font-size="11.5" fill="#1a1d21">AIにメンション</text>
+
+      <line x1="390" y1="65" x2="390" y2="85" stroke="#60656d" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+      <rect x="190" y="87" width="400" height="55" rx="8" fill="#dbeafe" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="390" y="110" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1e3a8a">チャンネルAI</text>
+      <text x="390" y="129" text-anchor="middle" font-size="11.5" fill="#1a1d21">振る舞い定義（キャラクタ・参照範囲・スキル・反応・自動対応範囲）に従う</text>
+
+      <line x1="390" y1="142" x2="130" y2="172" stroke="#60656d" stroke-width="1.5" marker-end="url(#arrow2)"/>
+      <line x1="390" y1="142" x2="390" y2="172" stroke="#60656d" stroke-width="1.5" marker-end="url(#arrow2)"/>
+      <line x1="390" y1="142" x2="650" y2="172" stroke="#60656d" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+      <rect x="15" y="175" width="230" height="60" rx="8" fill="#eff6ff" stroke="#1e40af"/>
+      <text x="130" y="197" text-anchor="middle" font-size="12" font-weight="700" fill="#1e3a8a">ドキュメント質問</text>
+      <text x="130" y="215" text-anchor="middle" font-size="11" fill="#1a1d21">根拠を示して回答</text>
+
+      <rect x="275" y="175" width="230" height="60" rx="8" fill="#eff6ff" stroke="#1e40af"/>
+      <text x="390" y="197" text-anchor="middle" font-size="12" font-weight="700" fill="#1e3a8a">連携システム参照</text>
+      <text x="390" y="215" text-anchor="middle" font-size="11" fill="#1a1d21">座席予約の空き状況等</text>
+
+      <rect x="535" y="175" width="230" height="60" rx="8" fill="#eff6ff" stroke="#1e40af"/>
+      <text x="650" y="197" text-anchor="middle" font-size="12" font-weight="700" fill="#1e3a8a">対応できない依頼</text>
+      <text x="650" y="215" text-anchor="middle" font-size="11" fill="#1a1d21">担当者へメンションで引き継ぎ</text>
+    </svg>
+  </div>
+  <ul>
+    <li>利用者はチャンネル・スレッド・DMで会話し、AIへの依頼はメンションを主たる手段とする。</li>
+    <li>チャンネルAIは、そのチャンネルの担当部署が定めた振る舞い定義（キャラクタ・参照範囲・スキル・反応の仕方・自動対応範囲）に従って応答する。同じ仕組みで、総務問い合わせ・開発相談・新人質問など性格の異なるチャンネルを扱う。</li>
+    <li>依頼はドキュメントを根拠にした回答（5.1節）、連携先システムの参照（5.4節）で対応する。対応できない依頼は担当者に引き継ぐ（3.1節 F-17）。</li>
+    <li>チャンネル管理者・システム管理者は、AIの振る舞い・参照範囲の設定と、AI利用状況の把握を行う。</li>
+  </ul>
+
+  <h2 id="sec3">3. 機能要件</h2>
+  <h3>3.1 機能一覧</h3>
+  <table>
+    <thead>
+      <tr><th>機能ID</th><th>機能名</th><th>概要</th><th>対応要求</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>F-01</td><td>Google認証</td><td>Google OAuth 2.0によるログイン。許可ドメイン制限、セッション発行。許可ドメイン外のアカウントはログイン不可。</td><td>REQ-N-01</td></tr>
+      <tr><td>F-02</td><td>チャンネル</td><td>目的ごとのチャンネル作成・参加。<span class="diff-new">作成時に公開・非公開を選択できる。公開チャンネルは誰でも検索・即時参加できる。非公開チャンネルの詳細はF-34。</span></td><td>REQ-F-01, REQ-N-02</td></tr>
+      <tr><td>F-03</td><td>スレッド</td><td>特定の発言への返信をスレッドとしてまとめる。AIとのやり取りを他の会話と分離する。</td><td>REQ-F-02</td></tr>
+      <tr><td>F-04</td><td>メンション</td><td>人間・チャンネルAIを指定して呼びかける。AIを呼び出す主たる手段。</td><td>REQ-F-03</td></tr>
+      <tr><td>F-05</td><td>ダイレクトメッセージ（DM）</td><td><span class="diff-new">特定の相手との会話。相手は1人（一対一）に限らず、複数人をまとめて指定して開始できる（グループDM）。参加者は開始時に指定した固定メンバーとし、開始後の追加・削除は対象外とする。</span></td><td>REQ-F-04</td></tr>
+      <tr><td>F-06</td><td>横断検索</td><td>過去の発言を検索。検索結果は利用者の参照権限（参加チャンネル・<span class="diff-new">DM。グループDMは自分が参加者に含まれるものに限る</span>）の範囲に限定する。<span class="diff-new">検索条件（in:/from:/with:/before:/after:/on:/during:/完全一致）の指定はF-42を参照。</span></td><td>REQ-F-05, REQ-N-02</td></tr>
+      <tr><td>F-07</td><td>ファイル共有</td><td>会話中でのファイル添付・共有。1ファイルあたり20MBまで（目安）。保存・共有のみで、AIによる内容参照（テキスト抽出等）は対象外（3.2節）。</td><td>REQ-F-06</td></tr>
+      <tr><td>F-08</td><td>チャンネルAI設定</td><td>チャンネルごとにAIの有効/無効を切り替える。AIを置かないチャンネルがあってもよい。</td><td>REQ-F-07</td></tr>
+      <tr><td>F-09</td><td>振る舞い定義の編集</td><td>AIの振る舞い定義（プロンプト）をテキストで記述・編集する。編集のたびに上書き保存し、変更者・日時は監査ログ（7章）に記録する。過去バージョンの一覧・差分表示は対象外（3.2節）。</td><td>REQ-F-08</td></tr>
+      <tr><td>F-10</td><td>AIキャラクタ設定</td><td>AIの名前・アイコン・口調を設定する。<span class="diff-new">アイコンは画像ファイルをアップロードして設定できる（F-37）。</span></td><td>REQ-F-09</td></tr>
+      <tr><td>F-11</td><td>参照ドキュメント範囲設定</td><td>チャンネルAIが回答の根拠とする社内ドキュメントの範囲（フォルダ・文書単位）を選択する。実際の回答処理はF-19・F-21で行う。<span class="diff-new">あわせて、指定範囲外の質問が来た場合の対応方針（「厳格に制限」＝範囲外の質問には対応せずお断りする／「一般回答を許可」＝AIの一般的な知識で回答する）をチャンネルごとに設定する。</span></td><td>REQ-F-10</td></tr>
+      <tr><td>F-12</td><td>スキル登録・アサイン</td><td>「依頼を受けたらこう進める」手順をスキルとしてテキストで登録し、チャンネルAIに割り当てる。F-09と同じ仕組みを流用する。</td><td>REQ-F-11</td></tr>
+      <tr><td>F-13</td><td>チャンネル履歴参照</td><td>チャンネルの過去のやりとり（直近30日、かつ直近200件までのいずれか少ない方）を踏まえて応答する。参照した過去の発言が正しいとは限らない扱いは5.3節による。</td><td>REQ-F-12</td></tr>
+      <tr><td>F-14</td><td>やりとりの要約</td><td>要約ボタンを押した時点までの内容を要約する。スレッド内であればそのスレッド全体、チャンネル本体であれば直近100件を対象とする。自動要約はしない。</td><td>REQ-F-13</td></tr>
+      <tr><td>F-15</td><td>反応モード設定</td><td>「メンション時のみ応答」「投稿に自ら反応」をチャンネルごとに設定する。</td><td>REQ-F-14</td></tr>
+      <tr><td>F-16</td><td>自動対応範囲の設定</td><td>依頼内容ごとに「自動対応可」「確認のうえ対応」「人が対応」を区分して設定する。</td><td>REQ-F-15</td></tr>
+      <tr><td>F-17</td><td>人への引き継ぎ</td><td>AIが対応できない依頼を、同じチャンネル内でメンションして引き継ぐ（DMは使わない。経緯が他の参加者からも見えるようにするため）。引き継ぎ先は既定でチャンネル管理者とするが、<span class="diff-new">チャンネルごとに特定の参加者へ変更できる（スキルにない業務依頼の引き継ぎ先として設定）。</span></td><td>REQ-F-16</td></tr>
+      <tr><td>F-18</td><td>AI発言の明示</td><td>AIの発言に常時バッジ（<span class="badge badge-ai">AI</span> 等）を表示し、人間の発言と判別できるようにする。</td><td>REQ-F-17</td></tr>
+      <tr><td>F-19</td><td>ドキュメント質問応答</td><td>チャットでの質問に対し、F-11で定めた範囲の社内ドキュメントを根拠に回答する。</td><td>REQ-F-18</td></tr>
+      <tr><td>F-20</td><td>回答根拠の提示</td><td>回答の根拠とした文書名・該当箇所へのリンクを示す。</td><td>REQ-F-19</td></tr>
+      <tr><td>F-21</td><td>閲覧権限に基づく回答フィルタリング</td><td>質問者がGoogleドライブ上で閲覧権限を持たない文書は、検索・回答生成の対象から除外する。本システムで最も注意を要する機能（5.1節）。</td><td>REQ-F-20</td></tr>
+      <tr><td>F-22</td><td>ドキュメント参照範囲の管理・同期</td><td>回答の知識源とする文書範囲を管理者が指定する。管理者が「今すぐ同期」を実行した時点で回答に反映される（自動的な定期同期は対象外。3.2節）。</td><td>REQ-F-21</td></tr>
+      <tr><td>F-23</td><td>社内システム情報参照</td><td>座席予約システムの空き状況をチャットから参照する。e-learningシステムは対象外（3.2節）。</td><td>REQ-F-22</td></tr>
+      <tr><td>F-25</td><td>実行前確認の仕組み</td><td>登録・変更の実行前に、実行内容を利用者に提示し同意を得る仕組み。参照のみの操作は既定で確認を求めない（5.5節）。</td><td>REQ-F-24</td></tr>
+      <tr><td>F-29</td><td>AI利用状況・コスト管理</td><td>AI呼び出しごとに日時・チャンネル・利用者・トークン数・概算コストを記録し、月次で集計・閲覧できる（S-08）。想定を超える利用に対して上限設定・通知ができる。</td><td>REQ-N-03</td></tr>
+      <tr><td>F-30</td><td>AI回答への注意喚起表示</td><td>AIの回答には誤りが含まれうる旨を利用者が認識できるよう表示する。</td><td>REQ-N-04</td></tr>
+      <tr><td>F-31</td><td>非同期応答</td><td>AIの応答生成中も人間同士の会話が滞らないようにし、処理に時間を要する場合は「生成中」であることを表示する。新着メッセージは5秒以内に画面に反映される（画面を開き直す必要はない）。</td><td>REQ-N-05</td></tr>
+      <tr class="diff-new"><td>F-33</td><td>チャンネル管理者の変更</td><td>チャンネルの参加者の中からチャンネル管理者（chadmin）を追加・解除する。チャンネル作成時に自動付与される既定の管理者に加え、既存の管理者がS-06から他の参加者を管理者に追加できる。管理者不在を防ぐため、最後の1人は解除できない。</td><td>新規（画面モックアップ検討時の気づきにより本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-34</td><td>チャンネルの公開範囲</td><td>チャンネルは公開・非公開のいずれかで運用する。公開チャンネルは一覧・検索の対象となり、誰でも即時参加できる。非公開チャンネルは参加していない者には一覧・検索に表示されず、参加にはすでに参加している者による追加が必要（チャンネル管理者に限らず、参加者なら誰でも追加できる）。公開・非公開の別は作成時に選択し、作成後もチャンネル管理者が変更できる。</td><td>REQ-F-01, REQ-N-02</td></tr>
+      <tr class="diff-new"><td>F-35</td><td>メッセージの送信予約</td><td>投稿欄で送信日時を指定して予約できる。送信ボタンの隣に日時指定の操作を設け、指定した日時になると自動的に送信される（通常のメッセージと同じ扱いになり、@メンションによるAI呼び出しも送信時点で通常どおり動作する）。送信前は予約した本人のみが内容を確認・キャンセルでき、他の参加者には見えない。チャンネル・DM・スレッド返信のいずれの投稿欄からも利用できる。ファイル添付との併用は対象外（3.2節）。</td><td>新規（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-36</td><td>定期投稿（bot投稿）</td><td>日時・頻度（1回のみ／毎日／毎週／毎月）とメッセージ本文をチャンネルごとに設定し、指定したタイミングで自動的にそのチャンネルへ投稿する（設定はチャンネル管理者・システム管理者のみ）。F-35（送信予約）が本人になりすまして1回送るのに対し、F-36は繰り返しの告知・リマインダー用途で、送り主は投稿者本人ではなく専用のBOT表示（表示名・アイコンは設定時に指定）となる。BOTの発言には専用バッジを常時表示し、人間の発言・チャンネルAIの発言と判別できるようにする（F-18のAI明示と同じ考え方）。本文に@メンションを含めることはできるが、チャンネルAIへのメンションを含めても応答は発生しない（繰り返し投稿のたびにAI呼び出しが走ることを避けるため）。<span class="diff-new">送り主のアイコンは画像ファイルをアップロードして設定できる（F-37）。</span></td><td>新規（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-37</td><td>プロフィール画像のアップロード</td><td>利用者は自分の画像ファイルをアップロードして、表示アイコンを変更できる。初回ログイン時はGoogleアカウントの写真で初期化されるが、変更後はGoogle側の更新を自動追従しない。<span class="diff-new">メールアドレスはGoogleアカウントの情報を正とし変更できないが、氏名（表示名）は本改訂でF-39により変更できるようになった。</span>同じアップロードの仕組みを、チャンネルAIのアイコン（F-10）・定期投稿の送り主アイコン（F-36）にも利用する。</td><td>新規（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-38</td><td>トリガーによる自動応答</td><td>特定の用語（キーワード）または絵文字を含む発言がチャンネルに投稿されたとき、自動的に処理を実行する。設定する項目は、反応するきっかけ（トリガーの種類と値）・対象のチャンネル・実行する処理（現時点ではメッセージの自動投稿のみ。本文にURLを含めることもできる）の3つ。実行結果はF-36と同様、専用のBOT表示（表示名・アイコン）で人間・チャンネルAIの発言と区別する。トリガーとなった発言がスレッド内であればそのスレッドへ、チャンネル本体であればチャンネル本体へ投稿する。人間の発言のみを判定対象とし、AIやBOTの発言はトリガー・AIメンションのどちらも呼び出さない（連鎖的な自動投稿を防ぐため）。設定はチャンネル管理者・システム管理者のみが行える。</td><td>新規（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-39</td><td>表示名の変更・同姓同名時の自動識別</td><td>利用者は自分の表示名を変更できる（Googleアカウントの氏名は初回ログイン時の初期値として使うのみで、以後の変更・再ログインでも自動的には同期しない）。社員番号・かな/ローマ字表記などを含めて自分で識別しやすい表示名にしてよい。表示名は組織内での重複を禁止しない（3.2節）が、同一チャンネル・DM等の発言者一覧の中で表示名が完全に一致する利用者が複数いる場合は、発言者表示にメールアドレスを自動的に併記し区別できるようにする（例:「田中太郎（tanaka@kogasoftware.com）」）。</td><td>新規（同姓同名時に発言者・メンション先が判別できない課題の解消のため本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-40</td><td>発言者・メンバーのプロフィール確認</td><td>発言のアイコンまたは表示名をクリックすると、アイコン・表示名・メールアドレス・ロールを確認できるプロフィール表示を開く。同姓同名の相手かどうかを、会話を離れずその場で確認できるようにする。</td><td>新規（同上）</td></tr>
+      <tr class="diff-new"><td>F-41</td><td>@メンションの候補選択・ID参照化</td><td>投稿欄で@を入力すると、当該チャンネルの参加者およびチャンネルAIを候補として一覧表示し、選択して確定する（自由入力の表示名の文字列一致には頼らない）。メンションは内部的に対象利用者のユーザーIDで保持するため、対象者が後から表示名を変更しても、既存メッセージのメンション（表示・通知先）は影響を受けない。候補一覧は氏名・メールアドレス・アイコンを併記し、補足02（DM相手を選ぶ）と同じ選び方にする。</td><td>新規（同姓同名時のメンション先の曖昧さ・氏名変更時のメンション破損を解消するため本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-42</td><td>検索条件モディファイア</td><td>横断検索（F-06）の検索欄に、条件を絞り込むモディファイアを入力できる。<code>in:チャンネル名</code>（対象チャンネルを指定）、<code>from:氏名またはメール</code>（投稿者を指定）、<code>with:氏名またはメール</code>（DMの相手を指定）、<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>＋日付（投稿日時で絞り込み）、<code>"キーワード"</code>（引用符で囲むと完全一致のフレーズ検索になる）の各条件を組み合わせて指定できる（すべてAND条件）。<code>from:</code>/<code>with:</code>は入力時に候補（氏名・メールアドレス・アイコン）から選ぶ方式とし、F-41と同じくユーザーIDで解決する（同姓同名の曖昧さを避けるため）。モディファイアは発言・ファイルの検索結果に適用され、ドキュメント根拠は対象外（3.2節）。</td><td>新規（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td></tr>
+      <tr class="diff-new"><td>F-43</td><td>チャンネル参加の通知</td><td>誰かがチャンネルに参加すると、「（氏名）さんが参加しました。」という発言がそのチャンネルのタイムラインに自動的に追加される。F-36（定期投稿）・F-38（自動応答トリガー）と同じBOT発言（BOTバッジ表示）として表示され、送り主の表示名は固定で「システム通知」とする（チャンネルAI・人間の発言とは区別される）。チャンネル作成時に作成者が自動参加する場合は対象外（他に参加者がいないため通知の意味がない）。</td><td>新規（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    AIに読み込ませる文脈には上限を設ける。F-13（履歴参照）は直近30日・直近200件、F-14（要約）はスレッド全体またはチャンネル直近100件を対象とする。これは横断検索（F-06）や発言の保存期間（無期限。5.2節）とは別の、AI呼び出しのコストを抑えるための制約である。
+  </div>
+
+  <h3>3.2 対象外機能</h3>
+  <p>本システムでは対象外とする機能を以下に示す。次フェーズ以降の拡張候補として残すもの（F-xxが付いているもの）と、要求仕様書の対象外（2.2節）に基づき今回は作らないものを含む。</p>
+  <table>
+    <thead><tr><th>機能</th><th>対象外とする理由</th></tr></thead>
+    <tbody>
+      <tr class="diff-new"><td>予約送信でのファイル添付（F-35の一部）</td><td>予約中は発言（T-05）としてまだ存在しないため、添付ファイルの保存先を別途用意する必要があり複雑化する。まずはテキスト＋メンションのみで価値を検証する。</td></tr>
+      <tr class="diff-new"><td>定期投稿の複数曜日・複数日にち指定（F-36の一部）</td><td>「毎週」「毎月」は初回日時から1つの曜日・日にちのみを繰り返す。複数指定が必要な場合はルールを複数作成する運用とする。</td></tr>
+      <tr class="diff-new"><td>個人宛てのリマインダー（F-36の一部）</td><td>一時期、宛先をチャンネルに加えて個人（複数可）に拡張したが、チャンネル運用への注力を優先し対象外に戻した。次フェーズで再検討する。</td></tr>
+      <tr class="diff-new"><td>アップロード画像の内容審査（モデレーション）・旧ファイルの自動削除（F-37の一部）</td><td>不適切画像の検知は外部サービス連携を要し過大。旧ファイルはストレージ容量の点で当面許容する。</td></tr>
+      <tr class="diff-new"><td>メッセージ投稿以外の実行処理・外部Webhook通知（F-38の一部）</td><td>今回の要求は「メッセージ・URLの送付」のみで、チャット内投稿として実現できる。社内システムへの書き込みや外部通知は対象外（F-24と同様の理由）。</td></tr>
+      <tr class="diff-new"><td>トリガーの正規表現指定・連続発火のクールダウン設定（F-38の一部）</td><td>単純な部分一致で当面の要求は満たせる。連続発火の抑制は次フェーズで検討する。</td></tr>
+      <tr class="diff-new"><td>表示名の一意性を強制する仕組み（登録・変更時の重複禁止。F-39の一部）</td><td>利用者が表示名を選ぶ際に「既に使われている」という摩擦を発生させたくないため、重複自体は許容する。同姓同名の識別はメールアドレスの自動併記（F-39）で担保し、表示名側での一意性チェック・早い者勝ちの調整UIは設けない。</td></tr>
+      <tr class="diff-new"><td>検索モディファイアの相対日付指定（「昨日」「今週」等。F-42の一部）</td><td>絶対日付（YYYY-MM-DD）のみ対応する。相対日付は基準時刻（タイムゾーン・業務時間の境界等）の定義が絡み実装が複雑化するため、必要な場合は具体的な日付を入力する運用とする。</td></tr>
+      <tr class="diff-new"><td>検索モディファイアのOR・NOT演算子（F-42の一部）</td><td>今回はモディファイア・キーワードいずれもAND条件のみに限定する。除外検索・いずれかに一致の要求は今のところ無く、UIも複雑化するため次フェーズで検討する。</td></tr>
+      <tr class="diff-new"><td>ドキュメント根拠タブへの検索モディファイア適用（F-42の一部）</td><td>in:/from:/with:はチャンネル・DMの発言・添付ファイルに紐づく情報であり、Google Drive文書には対応する属性がない。モディファイアを含む検索では、ドキュメント根拠タブを検索対象から除外する。</td></tr>
+      <tr><td>F-24 社内システム登録・変更操作</td><td>書き込みは誤操作時の影響が大きい。座席予約の参照（F-23）を先に実装し、知見を踏まえて次フェーズで着手する。</td></tr>
+      <tr><td>F-26 AI操作履歴の記録</td><td>登録・変更操作（F-24）が無いため、今回は優先度が低い。F-24と合わせて次フェーズで実装する。</td></tr>
+      <tr><td>F-27 対象システム・操作範囲の管理設定</td><td>今回は連携先を座席予約システムの参照のみに固定するため、複数システムを管理する一般化した設定機能は不要。連携先が増える次フェーズで実装する。</td></tr>
+      <tr><td>F-28 利用者権限の継承の作り込み</td><td>参照のみ（F-23）では影響が小さいため今回は簡易な扱いとする。書き込み操作を追加する次フェーズで作り込む。</td></tr>
+      <tr><td>F-32 モバイル対応レイアウト</td><td>初期運用は対象チャンネルの担当者・利用者を絞ってPCブラウザで検証する。次フェーズで対応する。</td></tr>
+      <tr><td>e-learningシステムとの連携</td><td>座席予約システムでの実装知見を踏まえ、次フェーズ以降に着手する（5.4節）。</td></tr>
+      <tr><td>代理AI（個人に紐づき本人の代わりに応答するAI）</td><td>要求仕様書の前提条件により、AIはチャンネルに紐づくものに一本化する。</td></tr>
+      <tr><td>音声通話・ビデオ会議・画面共有</td><td>対象外（要求仕様書2.2）。</td></tr>
+      <tr><td>ワークフロー・承認フローの構築機能</td><td>対象外（要求仕様書2.2）。承認が必要な依頼はF-17で人に引き継ぐ運用とする。</td></tr>
+      <tr><td>社内ドキュメントの作成・編集機能（AIによる編集を含む）</td><td>対象外（要求仕様書2.2）。本システムは参照のみを対象とする。</td></tr>
+      <tr><td>AIエージェントが操作する社内システム自体の機能追加・改修</td><td>対象外（要求仕様書2.2）。連携先システムの実装は各システムの開発計画に従う。</td></tr>
+      <tr><td>既存Slackからの自動移行・通知連携</td><td>要否は別途協議（要求仕様書5. 前提条件）。</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="sec4">4. 画面要件</h2>
+  <h3>4.1 画面一覧</h3>
+  <table>
+    <thead><tr><th>画面ID</th><th>画面名</th><th>アクセス可能ロール</th><th>概要</th></tr></thead>
+    <tbody>
+      <tr><td>S-01</td><td>ログイン</td><td>全員（未認証）</td><td>Googleでログインボタンのみのシンプルな画面。</td></tr>
+      <tr><td>S-02</td><td>ワークスペース（チャンネル・DM一覧）</td><td>全ロール</td><td>参加中のチャンネル・DMの一覧を表示するサイドバー。</td></tr>
+      <tr><td>S-03</td><td>チャンネル会話</td><td>チャンネル参加者</td><td>メッセージ一覧・投稿欄。AIの発言はバッジ（F-18）で明示。連携先システムの参照結果もここに表示する。要約ボタンあり。</td></tr>
+      <tr><td>S-04</td><td>スレッド表示</td><td>チャンネル参加者</td><td>特定の発言に対する返信をまとめて表示するパネル。</td></tr>
+      <tr><td>S-05</td><td>横断検索</td><td>全ロール</td><td>発言・ファイル・ドキュメント根拠の横断検索。結果は利用者の参照権限の範囲に限定。<span class="diff-new">検索欄にin:/from:/with:/before:/after:/on:/during:/完全一致（"…"）のモディファイアを入力して絞り込める（F-42）。</span></td></tr>
+      <tr><td>S-06</td><td><span class="diff-new">チャンネル設定</span></td><td>本人が管理者権限を持つチャンネルの<span class="badge badge-chadmin">チャンネル管理者</span>, <span class="badge badge-admin">システム管理者</span></td><td>キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・自動対応範囲を設定するタブ構成の画面（4.2節）。<span class="diff-new">「チャンネル管理者」タブ（F-33）を別グループとして持ち、このチャンネルの管理者を追加・解除できる。画面名は当初「チャンネルAI設定」だったが、AI設定以外の項目（チャンネル管理者・定期投稿・自動応答トリガー）が増えたため「チャンネル設定」に改称した。</span></td></tr>
+      <tr><td>S-07</td><td>AI操作確認ダイアログ</td><td>依頼した本人</td><td>AIが社内システムへの登録・変更を実行する前に、実行内容を提示し同意を得るモーダル（F-25）。</td></tr>
+      <tr><td>S-08</td><td>管理コンソール</td><td><span class="badge badge-admin">システム管理者</span></td><td>タブ構成: 「利用者管理」（ロール付与・変更、アカウント有効/無効化<span class="diff-new">。ロールは<code>member</code>/<code>admin</code>の2種のみを扱い、チャンネル管理者はチャンネル単位の権限（6章）のため参考表示にとどめる</span>）、「ドキュメント参照範囲」（参照対象フォルダの追加・削除）、「AI利用状況・コスト」（F-29の集計閲覧）<span class="diff-new">、「監査ログ」（ログイン・チャンネルAI設定の変更履歴の閲覧。7章）</span>。</td></tr>
+    </tbody>
+  </table>
+  <h3>4.2 <span class="diff-new">チャンネル設定</span>の項目（S-06）</h3>
+  <p>S-06 は「チャンネル管理者」と「AI設定の項目」の2グループで構成する<span class="diff-new">（画面モックアップでの検討により、チャンネル管理者の変更をAI設定と別グループに整理した）</span>。</p>
+  <ul>
+    <li class="diff-new">チャンネル管理者: このチャンネルの管理者（chadmin）の追加・解除（F-33）</li>
+  </ul>
+  <p>「AI設定の項目」グループでは、以下をチャンネルごとに設定できる。</p>
+  <ul>
+    <li>キャラクタ: 名前・アイコン・口調（F-10）</li>
+    <li>振る舞い定義: テキストで記述するプロンプト（F-09）</li>
+    <li>参照ドキュメント範囲: 回答の根拠とするフォルダ・文書、<span class="diff-new">および指定範囲外の質問への対応方針</span>（F-11）</li>
+    <li>スキル: 「依頼を受けたらこう進める」手順のテキスト、<span class="diff-new">およびスキルにない業務依頼の引き継ぎ先</span>（F-12, F-17）</li>
+    <li>反応モード: 「メンション時のみ応答」「投稿に自ら反応」の2択（F-15）</li>
+    <li>自動対応範囲: 依頼内容ごとの「自動対応可／確認のうえ対応／人が対応」の区分（F-16）</li>
+  </ul>
+  <h3>4.3 画面遷移の概要</h3>
+  <p>S-01 →（ログイン成功）→ S-02 → S-03（チャンネル選択またはDM選択）⇄ S-04（スレッドを開く）。ヘッダーから S-05（検索）はいつでもアクセス可能。チャンネル管理者は自分が管理するチャンネルの S-03 から S-06 を開く。AIが登録・変更を実行する直前は S-03/S-04 上に S-07 をモーダル表示する。システム管理者はヘッダーから S-08 を開く（管理者以外はメニュー非表示）。<span class="diff-new">チャンネルへの参加・作成、DM相手の選択、メンバー一覧の確認、予約中メッセージの確認は、S-02のサイドバーやS-03/S-04のヘッダーから開くモーダルとして提供する（独立した画面IDは付与せず、画面モックアップの「補足」として扱う）。</span></p>
+  <div class="callout">
+    画面レイアウト・入力項目の詳細は、画面モックアップおよび基本設計書にて定義する。本書では画面の構成と遷移の概要のみを定める。
+  </div>
+
+  <h2 id="sec5">5. AI回答・エージェント連携要件</h2>
+
+  <h3>5.1 ドキュメント質問応答と閲覧権限の担保</h3>
+  <div class="callout warn">
+    要求仕様書で「本システムで最も注意を要する要求」とされた事項（REQ-F-20）。質問者がGoogleドライブ上で閲覧権限を持たない文書の内容を、AIが回答に含めてはならない。実現方式（検索対象の絞り込みを質問者の権限で都度行うか、権限を持つ文書のみを索引化するか等）は基本設計書で定めるが、要件として以下を満たすこと。
+  </div>
+  <ul>
+    <li>回答生成の前に、質問者本人のGoogleドライブ上の閲覧権限を確認し、権限のない文書は検索・回答生成の対象から除外する（F-21）。</li>
+    <li>「管理者がF-22で登録した範囲」と「質問者本人の閲覧権限」は独立した制約であり、両方を満たす文書のみを対象とする。管理者が範囲に含めた文書であっても、質問者に閲覧権限がなければ対象外とする。</li>
+    <li>権限確認はAIへの依頼のたびに行う（キャッシュする場合も、権限変更が反映されるまでの遅延を許容範囲として定める）。</li>
+  </ul>
+
+  <h3>5.2 会話履歴の保存期間・退職者の発言の扱い</h3>
+  <ul>
+    <li>チャンネル・DMの発言は既定で無期限保存する。横断検索（F-06）とAIのチャンネル履歴参照（F-13）を成立させる前提とする。</li>
+    <li>発言の削除は、投稿者本人またはシステム管理者が行える。削除された発言は表示から除かれ、AIの参照対象（検索・要約・履歴参照）からも除外する。</li>
+    <li>退職者のGoogleアカウントは無効化され、本システムへのログインもできなくなる（REQ-N-01のGoogle認証に連動）。無効化後も、既存の発言は削除せず表示を維持する（会話の文脈・引き継ぎ情報としての価値を優先する）。</li>
+  </ul>
+
+  <h3>5.3 過去のやりとりを参照する際の正しさの扱い</h3>
+  <p>「参照する」ことと「正しいとみなす」ことは区別する。AIが過去のやりとり（F-13）を根拠に回答する場合、それを確定した正解として扱わない。</p>
+  <ul>
+    <li>AIが過去の発言（AI自身の過去の回答を含む）を参照して回答するときは、それが「過去にそう回答した／やり取りされた」という参考情報であることが分かる形で提示する（該当発言の引用・日時・リンクを示す）。</li>
+    <li>過去のAI発言はF-18のバッジで判別でき、加えてそれを引用した回答であることも示す。現在の質問に対する断定的な正答であるかのようには見せない。</li>
+    <li>社内ドキュメントを根拠にできる質問については、過去のやりとりのみに頼らず、可能な範囲でF-20の文書根拠による裏付けを優先する。</li>
+  </ul>
+
+  <h3>5.4 連携先システムと優先順位</h3>
+  <table>
+    <thead><tr><th>連携先システム</th><th>操作範囲</th><th>備考</th></tr></thead>
+    <tbody>
+      <tr><td>座席予約システム</td><td>参照（空き状況）</td><td>要求仕様書の例示のうち、参照は誤操作時の影響がなく最初に着手しやすい。登録（予約）は次フェーズ（3.2節）。</td></tr>
+      <tr><td>e-learningシステム</td><td>次フェーズ</td><td>座席予約での参照実装の知見を踏まえて着手する（未受講教材の確認を想定）。</td></tr>
+      <tr><td>今後追加される社内システム</td><td>システムごとに設定</td><td>利用頻度・連携可能なAPI等のインタフェースの有無・誤操作時の影響の小ささを基準に、管理者が対応システムを追加していく。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>5.5 実行前確認・利用者権限の扱い</h3>
+  <ul>
+    <li>社内システムへの登録・変更操作は、内容にかかわらず必ず実行前確認（F-25・S-07）を行う。参照のみの操作は既定で確認を求めない（要求仕様書REQ-F-24の「参照のみの操作について確認を求めるかは、利用者の負担を考慮して定めてよい」を採用）。今回実装するF-23（座席予約の参照）にも、この既定が適用される。</li>
+    <li>AIによる社内システムの参照・操作は、依頼した利用者本人の資格・権限に基づいて行い、AI専用の特権アカウントで一括して操作しないことを原則とする。F-23（座席の空き状況参照）は個人に紐づかない情報を想定しており、この原則の作り込みは簡易な扱いとするが、連携先システムの認可方式によっては前提が崩れる可能性があるため、実装前に連携先システム側の担当者と参照できる情報の範囲を必ず確認する。</li>
+  </ul>
+
+  <h2 id="sec6">6. 権限要件</h2>
+  <p>利用者のロールは以下の3ロール制とする（REQ-N-02）。チャンネル管理者はチャンネル単位で付与される点が、Keirekiのようなグローバルなロールと異なる。</p>
+  <table>
+    <thead><tr><th>ロール</th><th>コード</th><th>想定利用者</th><th>できること</th></tr></thead>
+    <tbody>
+      <tr><td>一般利用者</td><td><span class="badge badge-member">member</span></td><td>全社員（許可ドメインのGoogleアカウント保有者）</td><td>参加チャンネル・DMでの会話、チャンネルAIへの質問（本人の閲覧権限の範囲内）</td></tr>
+      <tr><td>チャンネル管理者</td><td><span class="badge badge-chadmin">chadmin</span></td><td>チャンネルの担当部署（総務・情シス等）</td><td>member権限＋自分が担当するチャンネルのAI設定（S-06）の編集、当該チャンネルの引き継ぎ依頼（F-17）への対応</td></tr>
+      <tr><td>システム管理者</td><td><span class="badge badge-admin">admin</span></td><td>情報システム部門</td><td>chadmin権限＋全チャンネルのAI設定、参照対象フォルダの追加・削除、利用者のロール付与・変更とアカウントの有効化・無効化（新規作成・削除は行わない。ログインはGoogle認証での初回アクセス時に自動登録される）、AI利用状況の閲覧</td></tr>
+    </tbody>
+  </table>
+  <h3>権限マトリクス</h3>
+  <table>
+    <thead><tr><th>操作</th><th><span class="badge badge-member">member</span></th><th><span class="badge badge-chadmin">chadmin</span></th><th><span class="badge badge-admin">admin</span></th></tr></thead>
+    <tbody>
+      <tr><td>参加チャンネル・DMでの会話</td><td>○</td><td>○</td><td>○</td></tr>
+      <tr><td>チャンネルAIへの質問（ドキュメント・連携先システムの参照とも）</td><td>○（本人の閲覧権限の範囲）</td><td>○</td><td>○</td></tr>
+      <tr><td>横断検索</td><td>○（自分が参照可能な範囲）</td><td>○</td><td>○</td></tr>
+      <tr><td>自分が担当するチャンネルのAI設定編集</td><td>×</td><td>○</td><td>○</td></tr>
+      <tr><td>担当外チャンネルのAI設定編集</td><td>×</td><td>×</td><td>○</td></tr>
+      <tr><td>参照対象フォルダの追加・削除（全体）</td><td>×</td><td>×</td><td>○</td></tr>
+      <tr><td>AI利用状況・コストの確認</td><td>×</td><td>×</td><td>○</td></tr>
+      <tr><td>利用者のロール付与・変更、アカウント有効化・無効化</td><td>×</td><td>×</td><td>○</td></tr>
+      <tr class="diff-new"><td>チャンネルの作成</td><td>○</td><td>○</td><td>○</td></tr>
+      <tr class="diff-new"><td>チャンネルの削除</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>チャンネルの公開／非公開の切り替え</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>非公開チャンネルへのメンバー追加</td><td>○（自分が参加しているチャンネルのみ）</td><td>○</td><td>○</td></tr>
+      <tr class="diff-new"><td>非公開チャンネルの一覧表示・検索・閲覧</td><td>○（自分が参加しているもののみ。未参加のチャンネルは存在自体が見えない）</td><td>○（同左）</td><td>○（同左。全チャンネルの一覧管理はS-08の対象外）</td></tr>
+      <tr class="diff-new"><td>メッセージの送信予約・予約中メッセージの確認とキャンセル</td><td>○（自分が予約したものだけ）</td><td>○（同左）</td><td>○（同左。他者が予約したメッセージはadminも見えない）</td></tr>
+      <tr class="diff-new"><td>チャンネル宛て定期投稿（BOT投稿）の作成・編集・削除・一時停止</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>自分のプロフィールの変更（表示名・画像）</td><td>○</td><td>○</td><td>○</td></tr>
+      <tr class="diff-new"><td>自動応答トリガーの作成・編集・削除・一時停止</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>他の利用者のプロフィール確認（アイコン・表示名・メールアドレス・ロール）</td><td>○</td><td>○</td><td>○</td></tr>
+    </tbody>
+  </table>
+  <p class="note">連携先システムの参照（F-23）は、ドキュメント質問と同じ扱い（全ロールが利用可）とする。座席の空き状況のような非個人情報を想定しているため（5.5節）。</p>
+  <p class="note diff-new">チャンネルの作成は全ロールが行え、作成した利用者は自動的に当該チャンネルのチャンネル管理者（<span class="badge badge-chadmin">chadmin</span>）となる。チャンネルの削除は、そのチャンネルのチャンネル管理者とシステム管理者のみが行える。</p>
+  <p class="note diff-new">チャンネル管理者は、既存のチャンネル管理者がS-06「チャンネル管理者」タブから他の参加者を追加・解除する形でも変更できる（F-33）。管理者不在を防ぐため、最後の1人は解除できない。</p>
+  <p class="note diff-new">非公開チャンネルへのメンバー追加は、チャンネル管理者に限らず参加者なら誰でも行える（F-34）。システム管理者はロール上どのチャンネルにも操作が及ぶが、参加していない非公開チャンネルの一覧・内容が既定で見えるわけではない点はmember・chadminと同様であり、必要な場合は当該チャンネルの参加者から追加してもらう運用とする。</p>
+
+  <h2 id="sec7">7. 非機能要件</h2>
+  <table>
+    <thead><tr><th>分類</th><th>要件</th></tr></thead>
+    <tbody>
+      <tr><td>性能</td><td>チャンネル・DMの発言表示、検索は2秒以内（200名規模）を目安とする。新着メッセージは5秒以内に画面に反映される。AIの応答生成中は「生成中」であることを表示する。</td></tr>
+      <tr><td>可用性</td><td>業務時間内（平日9-18時）の利用を前提。計画停止は3営業日前までにチャンネルで周知する。</td></tr>
+      <tr><td>セキュリティ</td><td>HTTPS必須（本番）。許可ドメイン外のGoogleアカウントはログイン不可。APIは全てサーバー側で権限検証。秘密情報は環境変数管理。外部AI APIへ送信する内容は質問に必要な範囲に限定する。</td></tr>
+      <tr><td>コスト管理</td><td>AI利用量・概算コストを月次で把握できること（F-29）。要約（F-14）は手動実行のみとし、自動起動によるコスト増を避ける。想定を超える利用が見込まれる場合にチャンネル単位・全体単位で上限設定・通知ができること。上限到達時にAIの応答自体を止めるかどうかは8.2節のとおり別途協議とする。</td></tr>
+      <tr><td>監査</td><td>ログイン、チャンネルAI設定の変更（F-09、変更者・日時）を記録し、後から確認できること。<span class="diff-new">閲覧はS-08管理コンソールの「監査ログ」タブで行う。</span></td></tr>
+      <tr><td>保守性</td><td>LCC CRMのコード規約に準拠。設計ドキュメントをdocs/で管理し、ID体系（REQ-xx/F-xx/S-xx/T-xx/A-xx）でトレーサビリティを保つ。</td></tr>
+      <tr><td>認証</td><td>Google OAuth 2.0によるログイン（REQ-N-01）。許可ドメイン: kogasoftware.com。</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="sec8">8. 前提条件・制約</h2>
+  <h3>8.1 技術スタック（LCC CRM 踏襲）</h3>
+  <p>REQ-N-07に基づき、既存システムLCC CRMの技術構成を踏襲する。構成の詳細は基本設計書で定義し、本書では構成一覧のみ示す。</p>
+  <table>
+    <thead><tr><th>レイヤー</th><th>技術</th></tr></thead>
+    <tbody>
+      <tr><td>Frontend</td><td>React 19 + TypeScript + Vite + Tailwind CSS + react-router + SWR</td></tr>
+      <tr><td>Backend</td><td>FastAPI (Python) + Uvicorn + asyncpg</td></tr>
+      <tr><td>Database</td><td>PostgreSQL (Supabase)、全テーブルRLS有効</td></tr>
+      <tr><td>認証</td><td>Google OAuth 2.0 + セッションJWT（HttpOnly Cookie）、許可ドメインによる制限</td></tr>
+      <tr><td>AI</td><td>社内で用意した外部AI APIを利用（提供元・モデルは基本設計書で定める）</td></tr>
+      <tr><td>ドキュメント連携</td><td>Google Drive API（文書の参照・権限確認）</td></tr>
+      <tr><td>ファイルストレージ</td><td>会話添付ファイル（F-07）の保存先。方式は基本設計書で定める</td></tr>
+      <tr><td>連携先システム</td><td>座席予約システムの参照API（またはそれに代わる手段。方式は連携先の実装状況次第で基本設計書にて確定）</td></tr>
+      <tr><td>ホスティング</td><td>LCC CRMと同様の構成を踏襲（基本設計書で確定）</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    LCC CRMにはチャットのリアルタイム配信の実装例がないため、この部分の技術選定のみ基本設計書で別途行う（他のレイヤーはLCC CRMを踏襲）。7章の目標値（5秒以内）を満たせればポーリング等の簡易な方式でよく、WebSocket等の高度な実装を必須としない。
+  </div>
+  <h3>8.2 前提条件</h3>
+  <ul>
+    <li>想定規模: 利用者200名程度。初期リリースは対象チャンネルの担当部署・利用者を絞って先行運用する。対象部署・想定人数は千田氏との別途協議により確定する。</li>
+    <li>社内ドキュメントはGoogleドライブ上にあり、文書ごとの閲覧権限を前提として扱う（5.1節）。</li>
+    <li>AIエージェントの連携先システム（座席予約・e-learning等）は開発中・未着手のものを含み、連携の可否は各システムの状況に依存する（5.4節）。座席予約システムが参照可能な手段を9月末までに用意できるかは、連携先の状況に依存する外部要因であり、確認が取れない場合はF-23の実装可否を見直す。</li>
+    <li>AI利用コストが想定を超えた場合にAIの応答自体を止めるか、通知のみで応答は継続するかは、千田氏との別途協議により確定する（7章）。</li>
+    <li>既存Slackとの併存を前提とし、本システムでSlackを置き換えることは行わない。どの用途を本システムで扱うかは運用開始時に別途定める。</li>
+    <li>本システムから既存Slackへの通知・連携の要否は別途協議する。</li>
+  </ul>
+
+  <footer class="doc-footer">
+    <span>AIネイティブチャットシステム（Kogack）</span>
+    <span>版数 1.6 / 2026-08-19</span>
+  </footer>
+
+</div>
+</body>
+</html>

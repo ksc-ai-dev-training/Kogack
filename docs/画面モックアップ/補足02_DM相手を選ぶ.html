@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMの相手を選ぶ | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af; --accent-700: #1e3a8a; --accent-100: #dbeafe; --accent-50: #eff6ff;
+    --bg: #ffffff; --bg-subtle: #fafbfc; --bg-muted: #f5f7f9;
+    --border: #e7eaee; --border-strong: #d9dde3;
+    --text: #1a1d21; --text-muted: #60656d; --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9; --member-text: #475569;
+    --chadmin-bg: #ccfbf1; --chadmin-text: #0f766e;
+    --admin-bg: #ede9fe; --admin-text: #6d28d9;
+    --off-bg: #f1f5f9; --off-text: #94a3b8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text); background: var(--bg);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  .screen-tag {
+    position: fixed; top: 14px; left: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 5px; padding: 3px 9px; z-index: 60;
+  }
+
+  .topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg); z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 460px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px;
+  }
+  .topbar .user { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 20px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+  .badge-chadmin { background: var(--chadmin-bg); color: var(--chadmin-text); }
+  .badge-admin { background: var(--admin-bg); color: var(--admin-text); }
+  .badge-off { background: var(--off-bg); color: var(--off-text); }
+
+  .body-row { flex: 1; display: flex; min-height: 0; }
+  .sidebar {
+    width: 260px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 14px 10px 20px;
+  }
+  .sidebar-section-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px; }
+  .sidebar-section-head .label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; }
+  .add-btn {
+    width: 20px; height: 20px; border-radius: 5px; border: none; display: flex; align-items: center; justify-content: center;
+    color: #fff; background: var(--accent-600); font-size: 15px; line-height: 1;
+    box-shadow: 0 0 0 4px var(--accent-100);
+  }
+  .nav-list { list-style: none; margin: 0; padding: 0; }
+  .nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 13px; margin: 1px 0; }
+  .dm-avatar {
+    width: 20px; height: 20px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex: none; color: #fff;
+  }
+  .main { flex: 1; background: var(--bg-subtle); }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(20, 24, 33, 0.45);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal {
+    width: 100%; max-width: 440px; max-height: 82vh; background: var(--bg); border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(16,24,40,0.28); overflow: hidden; display: flex; flex-direction: column;
+  }
+  .modal-head { display: flex; align-items: center; gap: 10px; padding: 18px 22px 4px; }
+  .modal-head h2 { font-size: 15.5px; margin: 0; flex: 1; }
+  .modal-close { background: none; border: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; }
+  .modal-sub { font-size: 12px; color: var(--text-subtle); margin: 0 22px 12px; }
+
+  .search-mini {
+    margin: 0 22px 8px; display: flex; align-items: center; gap: 8px;
+    border: 1.5px solid var(--accent-600); border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--text);
+    box-shadow: 0 0 0 3px var(--accent-50);
+  }
+
+  .user-list { overflow-y: auto; padding: 4px 10px 18px; }
+  .u-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 9px; }
+  .u-row:hover { background: var(--bg-subtle); }
+  .u-row .check {
+    width: 17px; height: 17px; border-radius: 5px; border: 1.6px solid var(--border-strong); flex: none;
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px;
+  }
+  .u-row.selected .check { background: var(--accent-600); border-color: var(--accent-600); }
+  .u-row .av {
+    width: 32px; height: 32px; border-radius: 50%; font-size: 12px; font-weight: 700; color: #fff;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .u-row .info { flex: 1; min-width: 0; }
+  .u-row .uname2 { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .u-row .uemail { font-size: 11px; color: var(--text-subtle); margin-top: 1px; }
+  .dm-tag { flex: none; font-size: 10.5px; color: var(--accent-700); }
+  .u-row.disabled { opacity: 0.55; }
+  .u-row.disabled .uname2 { text-decoration: line-through; }
+  .disabled-note { flex: none; font-size: 10.5px; color: var(--text-subtle); max-width: 120px; text-align: right; line-height: 1.5; }
+
+  .modal-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 22px; border-top: 1px solid var(--border);
+  }
+  .selected-count { font-size: 12px; color: var(--text-muted); }
+  .selected-count strong { color: var(--accent-700); }
+  .start-btn {
+    border: none; border-radius: 8px; background: var(--accent-600); color: #fff;
+    font-size: 13px; font-weight: 700; padding: 9px 20px; cursor: pointer;
+  }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 60;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #fbbf24; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">補足 DMの相手を選ぶ</span>
+
+  <div class="topbar">
+    <div class="brand"><div class="mark">K</div><div class="name">Kogack</div></div>
+    <div class="search-wrap">
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>メッセージ・ファイル・ドキュメントを検索</span>
+      </div>
+    </div>
+    <div class="user"><div class="avatar">山</div><span class="uname">山田 太郎</span><span class="badge badge-member">member</span></div>
+  </div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <div class="sidebar-section-head"><span class="label">ダイレクトメッセージ</span><button class="add-btn" type="button">＋</button></div>
+      <ul class="nav-list">
+        <li class="nav-item"><span class="dm-avatar" style="background:#64748b;">3</span>佐藤花子・鈴木一郎・高橋美咲</li>
+        <li class="nav-item"><span class="dm-avatar" style="background:#f97316;">佐</span>佐藤 花子</li>
+        <li class="nav-item"><span class="dm-avatar" style="background:#0ea5e9;">鈴</span>鈴木 一郎</li>
+        <li class="nav-item"><span class="dm-avatar" style="background:#a855f7;">高</span>高橋 美咲</li>
+      </ul>
+    </nav>
+    <div class="main"></div>
+  </div>
+
+  <div class="modal-overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>DMの相手を選ぶ</h2>
+        <button class="modal-close" type="button">✕</button>
+      </div>
+      <p class="modal-sub">氏名またはメールアドレスで検索してください。1人選べば一対一のDM、2人以上選べばグループDMになります。</p>
+      <div class="search-mini">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#1e40af" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#1e40af" stroke-width="1.6" stroke-linecap="round"/></svg>
+        田中
+      </div>
+      <div class="user-list">
+        <div class="u-row selected">
+          <div class="check">✓</div>
+          <div class="av" style="background:#f97316;">佐</div>
+          <div class="info"><div class="uname2">佐藤 花子</div><div class="uemail">sato@kogasoftware.com</div></div>
+        </div>
+        <div class="u-row selected">
+          <div class="check">✓</div>
+          <div class="av" style="background:#0ea5e9;">鈴</div>
+          <div class="info"><div class="uname2">鈴木 一郎</div><div class="uemail">suzuki@kogasoftware.com</div></div>
+        </div>
+        <div class="u-row">
+          <div class="check"></div>
+          <div class="av" style="background:#99f6e4;color:#0f766e;">田</div>
+          <div class="info"><div class="uname2">田中 智子 <span class="badge badge-chadmin">chadmin</span></div><div class="uemail">tanaka@kogasoftware.com</div></div>
+        </div>
+        <div class="u-row">
+          <div class="check"></div>
+          <div class="av" style="background:#ddd6fe;color:#6d28d9;">石</div>
+          <div class="info"><div class="uname2">石井 直樹 <span class="badge badge-admin">admin</span></div><div class="uemail">ishii@kogasoftware.com</div></div>
+        </div>
+        <div class="u-row">
+          <div class="check"></div>
+          <div class="av" style="background:#e9d5ff;color:#7e22ce;">高</div>
+          <div class="info"><div class="uname2">高橋 美咲</div><div class="uemail">takahashi@kogasoftware.com</div></div>
+          <span class="dm-tag">既存のDM（一対一）あり</span>
+        </div>
+        <div class="u-row disabled">
+          <div class="check"></div>
+          <div class="av" style="background:#e2e8f0;color:#94a3b8;">渡</div>
+          <div class="info"><div class="uname2">渡辺 健 <span class="badge badge-off">無効</span></div><div class="uemail">watanabe@kogasoftware.com</div></div>
+          <span class="disabled-note">アカウントが無効なため新規DMは開始できません</span>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <span class="selected-count">選択中: <strong>2名</strong>（佐藤 花子, 鈴木 一郎）→ グループDM</span>
+        <button class="start-btn" type="button">DMを開始</button>
+      </div>
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>補足モックアップ</strong>（要件定義書4.1節の画面一覧S-01〜S-08には含まれない）<br>
+    サイドバー「ダイレクトメッセージ」見出し横の「＋」から開く想定。<code>F-05</code>（DM。<span style="color:#fbbf24;">1.7版でグループDMに対応</span>）の相手選択UI。行はチェックボックスで複数選択可能とし、1人選べば一対一のDM、2人以上選べばグループDMとして「DMを開始」で作成する。選んだ参加者の集合と完全に一致する既存DMがある場合はタグで区別表示し、新規作成せず既存のDMを開く（一対一の例のみ図示。グループDMでも同じ扱い）。一覧は同一許可ドメイン内の利用者（アカウント自動登録済み）。無効化されたアカウント（5.2節・退職者等）は選択不可とし、新規DM開始の対象外とした。参加者は開始時点で固定し、開始後の追加・削除はできない。<a href="../02_要件定義書.html#sec3">要件定義書F-05</a>参照。
+  </div>
+
+</body>
+</html>

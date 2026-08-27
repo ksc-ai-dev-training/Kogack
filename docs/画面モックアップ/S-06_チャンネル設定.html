@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>開発相談 — チャンネル設定 | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af;
+    --accent-700: #1e3a8a;
+    --accent-100: #dbeafe;
+    --accent-50: #eff6ff;
+    --bg: #ffffff;
+    --bg-subtle: #fafbfc;
+    --bg-muted: #f5f7f9;
+    --border: #e7eaee;
+    --border-strong: #d9dde3;
+    --text: #1a1d21;
+    --text-muted: #60656d;
+    --text-subtle: #8a8f98;
+    --chadmin-bg: #ccfbf1;
+    --chadmin-text: #0f766e;
+    --ok-bg: #dcfce7; --ok-text: #15803d;
+    --warn-bg: #fef3c7; --warn-text: #b45309;
+    --human-bg: #f1f5f9; --human-text: #475569;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .screen-tag {
+    position: fixed; top: 14px; left: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    color: #0369a1; background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 5px; padding: 3px 9px; z-index: 30;
+  }
+
+  /* ---- topbar ---- */
+  .topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg); z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 460px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px; text-decoration: none;
+  }
+  .search-box:hover { border-color: var(--border-strong); background: var(--bg); }
+  .search-box svg { flex: none; }
+  .search-box .kbd {
+    margin-left: auto; font-size: 10.5px; color: var(--text-subtle);
+    border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px; background: var(--bg);
+  }
+  .topbar .user { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 20px; }
+  .topbar .user:hover { background: var(--bg-muted); }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #99f6e4; color: var(--chadmin-text);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-chadmin { background: var(--chadmin-bg); color: var(--chadmin-text); }
+  .badge-bot { background: #fef3c7; color: #92400e; }
+
+  /* ---- shell ---- */
+  .body-row { flex: 1; display: flex; min-height: 0; }
+
+  .settings-nav {
+    width: 230px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 18px 10px;
+  }
+  .settings-nav .nav-label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; padding: 0 10px 10px; }
+  .settings-nav .nav-label.group2 { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .tab-btn {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 8px 10px;
+    border-radius: 7px; border: none; background: none; font-size: 13px; color: var(--text); margin: 1px 0; cursor: pointer;
+  }
+  .tab-btn:hover { background: var(--bg-muted); }
+  .tab-btn.active { background: var(--accent-50); color: var(--accent-700); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent-600); }
+  .tab-btn .ic { flex: none; font-size: 14px; }
+
+  .settings-content { flex: 1; min-width: 0; overflow-y: auto; background: var(--bg); }
+  .content-head {
+    position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 14px 28px; display: flex; align-items: center; gap: 10px; z-index: 5;
+  }
+  .content-head .back { font-size: 12px; color: var(--accent-700); text-decoration: none; flex: none; }
+  .content-head .back:hover { text-decoration: underline; }
+  .content-head .title { font-size: 15px; font-weight: 700; margin-left: 4px; }
+  .content-head .meta { font-size: 11px; color: var(--text-subtle); margin-left: auto; margin-right: 4px; text-align: right; }
+  .save-btn { background: var(--accent-600); color: #fff; border: none; border-radius: 7px; padding: 7px 18px; font-size: 12.5px; font-weight: 700; flex: none; }
+
+  .tab-panel { display: none; padding: 22px 28px 48px; max-width: 700px; }
+  .tab-panel.active { display: block; }
+  .panel-lede { font-size: 12.5px; color: var(--text-muted); margin: 0 0 20px; line-height: 1.7; }
+
+  .field-group { margin-bottom: 22px; }
+  .field-label { font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; display: block; }
+  .field-hint { font-size: 11.5px; color: var(--text-subtle); margin-top: 6px; line-height: 1.7; }
+  .field-hint a { color: var(--accent-700); }
+  input[type=text], textarea {
+    width: 100%; border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 11px;
+    font-size: 13px; font-family: inherit; color: var(--text); background: var(--bg);
+  }
+  textarea { resize: vertical; line-height: 1.7; }
+
+  /* toggle */
+  .toggle-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); }
+  .switch { width: 38px; height: 22px; border-radius: 11px; background: var(--accent-600); position: relative; flex: none; }
+  .switch .knob { width: 18px; height: 18px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+  .toggle-row .t-title { font-size: 13px; font-weight: 700; }
+  .toggle-row .t-sub { font-size: 11.5px; color: var(--text-subtle); margin-top: 2px; }
+
+  /* character */
+  .char-row { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
+  .char-avatar {
+    width: 56px; height: 56px; border-radius: 14px; flex: none;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 20px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .char-change-btn { font-size: 12px; font-weight: 600; color: var(--accent-700); background: var(--accent-50); border: 1px solid var(--accent-100); border-radius: 6px; padding: 5px 12px; }
+
+  /* 引き継ぎ先ピッカー */
+  .picker-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .picker-row .av-sm { width: 26px; height: 26px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+  .picker-row .p-name { font-size: 13px; font-weight: 600; }
+  .picker-row .change-btn { margin-left: auto; }
+
+  /* doc tree */
+  .doc-tree { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .doc-row { display: flex; align-items: center; gap: 9px; padding: 9px 14px; font-size: 13px; border-bottom: 1px solid var(--border); background: var(--bg); }
+  .doc-row:last-child { border-bottom: none; }
+  .doc-row.child { padding-left: 38px; background: var(--bg-subtle); font-size: 12.5px; }
+  .doc-row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent-600); flex: none; }
+  .doc-row .folder-ic { flex: none; }
+  .sync-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; font-size: 11.5px; color: var(--text-subtle); }
+  .sync-meta a { color: var(--accent-700); }
+
+  /* skills */
+  .skill-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; background: var(--bg-subtle); }
+  .skill-card .skill-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .skill-card .skill-title { font-size: 13px; font-weight: 700; flex: 1; }
+  .skill-card .skill-del { background: none; border: none; color: var(--text-subtle); font-size: 12px; cursor: pointer; }
+  .skill-card textarea { background: var(--bg); font-size: 12.5px; }
+  .add-skill-btn {
+    width: 100%; border: 1.5px dashed var(--border-strong); border-radius: 10px; background: none;
+    padding: 11px; font-size: 12.5px; color: var(--text-subtle); font-weight: 600; cursor: pointer;
+  }
+  .add-skill-btn:hover { border-color: var(--accent-600); color: var(--accent-700); background: var(--accent-50); }
+
+  /* recurring posts (bot broadcasts) */
+  .recur-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; background: var(--bg-subtle); }
+  .recur-card .recur-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .recur-card .bot-av { width: 30px; height: 30px; border-radius: 50%; background: #fef3c7; display: flex; align-items: center; justify-content: center; font-size: 15px; flex: none; }
+  .recur-card .bot-name { font-size: 13px; font-weight: 700; }
+  .recur-card .recur-sched { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--accent-700); background: var(--accent-50); border-radius: 6px; padding: 3px 9px; }
+  .trigger-type-badge { font-size: 10.5px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 5px; padding: 2px 8px; }
+  .trigger-type-badge.emoji { color: #92400e; background: #fef3c7; }
+  .recur-card .trigger-value { font-size: 13px; font-weight: 700; }
+  .recur-card .recur-body { font-size: 12.5px; color: var(--text); line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; margin-bottom: 10px; }
+  .recur-card .recur-foot { display: flex; align-items: center; gap: 10px; }
+  .recur-card .switch-sm { width: 30px; height: 17px; border-radius: 9px; background: var(--accent-600); position: relative; flex: none; }
+  .recur-card .switch-sm .knob-sm { width: 13px; height: 13px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+  .recur-card .switch-label { font-size: 11px; color: var(--text-muted); }
+  .recur-card .recur-actions { margin-left: auto; display: flex; gap: 12px; }
+  .recur-card .recur-actions button { background: none; border: none; color: var(--text-subtle); font-size: 12px; cursor: pointer; }
+  .recur-card .recur-actions button.danger { color: #b91c1c; }
+  .recur-form { border: 1.5px dashed var(--border-strong); border-radius: 10px; padding: 16px; margin-top: 4px; }
+  .recur-form .field-row { display: flex; gap: 10px; }
+  .recur-form .field-row .field-group { flex: 1; }
+  .icon-input-row { display: flex; align-items: center; gap: 10px; }
+  .icon-input-row .bot-av { }
+  .icon-input-row input[type=text] { flex: 1; }
+  select {
+    width: 100%; border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 11px; font-size: 13px; font-family: inherit; color: var(--text); background: var(--bg);
+  }
+
+  /* radio card (reaction mode) */
+  .radio-card {
+    display: flex; gap: 12px; border: 1px solid var(--border-strong); border-radius: 10px;
+    padding: 13px 15px; margin-bottom: 10px;
+  }
+  .radio-card.selected { border-color: var(--accent-600); background: var(--accent-50); }
+  .radio-dot { width: 17px; height: 17px; border-radius: 50%; border: 2px solid var(--border-strong); flex: none; margin-top: 2px; position: relative; background: var(--bg); }
+  .radio-card.selected .radio-dot { border-color: var(--accent-600); }
+  .radio-card.selected .radio-dot::after {
+    content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent-600);
+  }
+  .radio-card .r-title { font-size: 13.5px; font-weight: 700; }
+  .radio-card .r-sub { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.6; }
+
+  /* auto-response table */
+  .auto-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .auto-table th { text-align: left; font-size: 11px; color: var(--text-subtle); font-weight: 700; padding: 6px 10px; border-bottom: 1px solid var(--border-strong); }
+  .auto-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .pill-group { display: flex; gap: 6px; }
+  .pill { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--border-strong); color: var(--text-subtle); }
+  .pill.on-ok { background: var(--ok-bg); color: var(--ok-text); border-color: transparent; }
+  .pill.on-warn { background: var(--warn-bg); color: var(--warn-text); border-color: transparent; }
+  .pill.on-human { background: var(--human-bg); color: var(--human-text); border-color: transparent; }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 30;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #93c5fd; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">S-06 チャンネル設定</span>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">K</div>
+      <div class="name">Kogack</div>
+    </div>
+    <div class="search-wrap">
+      <a class="search-box" href="S-05_横断検索.html">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>メッセージ・ファイル・ドキュメントを検索</span>
+        <span class="kbd">S-05</span>
+      </a>
+    </div>
+    <div class="user">
+      <div class="avatar">田</div>
+      <span class="uname">田中 智子</span>
+      <span class="badge badge-chadmin">chadmin</span>
+    </div>
+  </div>
+
+  <div class="body-row">
+    <nav class="settings-nav">
+      <div class="nav-label">チャンネル設定</div>
+      <button class="tab-btn active" data-tab="admin" onclick="showTab(this,'admin')"><span class="ic">👤</span>チャンネル管理者</button>
+      <button class="tab-btn" data-tab="recurring" onclick="showTab(this,'recurring')"><span class="ic">🔁</span>定期投稿</button>
+      <button class="tab-btn" data-tab="trigger" onclick="showTab(this,'trigger')"><span class="ic">⚡</span>自動応答トリガー</button>
+
+      <div class="nav-label group2">AI設定の項目</div>
+      <button class="tab-btn" data-tab="general" onclick="showTab(this,'general')"><span class="ic">⚙️</span>基本設定</button>
+      <button class="tab-btn" data-tab="character" onclick="showTab(this,'character')"><span class="ic">🎭</span>キャラクタ</button>
+      <button class="tab-btn" data-tab="prompt" onclick="showTab(this,'prompt')"><span class="ic">📝</span>振る舞い定義</button>
+      <button class="tab-btn" data-tab="docs" onclick="showTab(this,'docs')"><span class="ic">📚</span>参照ドキュメント範囲</button>
+      <button class="tab-btn" data-tab="skills" onclick="showTab(this,'skills')"><span class="ic">🛠️</span>スキル</button>
+      <button class="tab-btn" data-tab="reaction" onclick="showTab(this,'reaction')"><span class="ic">💬</span>反応モード</button>
+      <button class="tab-btn" data-tab="auto" onclick="showTab(this,'auto')"><span class="ic">🎚️</span>自動対応範囲</button>
+    </nav>
+
+    <div class="settings-content">
+      <div class="content-head">
+        <a class="back" href="S-03_チャンネル会話.html">← # 開発相談 に戻る</a>
+        <span class="title">チャンネル設定</span>
+        <span class="meta">最終更新: 田中 智子<br>2026-08-15 14:20</span>
+        <button class="save-btn" type="button">保存</button>
+      </div>
+
+      <!-- チャンネル管理者 -->
+      <div class="tab-panel active" id="panel-admin">
+        <p class="panel-lede">このチャンネルの管理者（chadmin）を設定します。チャンネル管理者はAI設定（この画面）の編集と、対応できない依頼の引き継ぎ先になります。</p>
+        <div class="field-hint" style="margin:0 0 16px;">対象チャンネル: # 開発相談（公開チャンネル・<a href="補足03_メンバー一覧.html">12名参加</a>）</div>
+
+        <div class="field-group">
+          <label class="field-label">公開範囲</label>
+          <div class="toggle-row">
+            <div class="switch" style="background:var(--border-strong);"><div class="knob" style="left:2px;"></div></div>
+            <div>
+              <div class="t-title">このチャンネルを非公開にする</div>
+              <div class="t-sub">オンにすると、参加者以外には一覧・検索に表示されなくなります。参加には既存の参加者による追加が必要になります（F-34）。今は「公開」のためオフ。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">現在のチャンネル管理者</label>
+          <div class="field-hint" style="margin:0 0 10px;">複数人指定できます。最後の1人は解除できません（管理者不在の防止）。</div>
+          <div class="picker-row">
+            <span class="av-sm" style="background:#99f6e4;color:#0f766e;">田</span>
+            <span class="p-name">田中 智子</span>
+            <span class="badge badge-chadmin" style="margin-left:2px;">chadmin</span>
+            <button class="char-change-btn change-btn" type="button">解除</button>
+          </div>
+          <button class="add-skill-btn" type="button" style="margin-top:10px;">＋ 管理者を追加</button>
+          <div class="field-hint">追加できるのはこのチャンネルの参加者のみです。システム管理者は全チャンネルのAI設定を編集できるため、ここへの追加は不要です。</div>
+        </div>
+      </div>
+
+      <!-- 定期投稿（bot投稿） -->
+      <div class="tab-panel" id="panel-recurring">
+        <p class="panel-lede">日時・頻度を指定して、このチャンネルに自動でメッセージを投稿します（F-36）。チャンネルAIとは別物で、質問に答えたりはしません。通常のメッセージと区別できるよう、投稿ごとに送り主の名前・アイコンを設定します。</p>
+
+        <div class="recur-card">
+          <div class="recur-head">
+            <span class="bot-av">📢</span>
+            <span class="bot-name">お知らせBot</span>
+            <span class="badge badge-bot">BOT</span>
+            <span class="recur-sched">毎週 月曜 9:00</span>
+          </div>
+          <div class="recur-body">今週も一週間よろしくお願いします！今週の全体会議は水曜15時からです。</div>
+          <div class="recur-foot">
+            <div class="switch-sm"><div class="knob-sm"></div></div>
+            <span class="switch-label">有効</span>
+            <div class="recur-actions">
+              <button type="button">編集</button>
+              <button class="danger" type="button">削除</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="recur-card">
+          <div class="recur-head">
+            <span class="bot-av" style="background:#fee2e2;">🔔</span>
+            <span class="bot-name">締切リマインダー</span>
+            <span class="badge badge-bot">BOT</span>
+            <span class="recur-sched">毎月 25日 10:00</span>
+          </div>
+          <div class="recur-body">月末レポートの提出締切は今週金曜日です。未提出の方はお早めにお願いします。</div>
+          <div class="recur-foot">
+            <div class="switch-sm" style="background:var(--border-strong);"><div class="knob-sm" style="left:2px;"></div></div>
+            <span class="switch-label">一時停止中</span>
+            <div class="recur-actions">
+              <button type="button">編集</button>
+              <button class="danger" type="button">削除</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="recur-form">
+          <div class="field-group">
+            <label class="field-label">送り主の表示名</label>
+            <input type="text" placeholder="例: お知らせBot">
+          </div>
+          <div class="field-group">
+            <label class="field-label">送り主のアイコン</label>
+            <div class="icon-input-row">
+              <span class="bot-av">📌</span>
+              <input type="text" value="📌" maxlength="2" placeholder="絵文字">
+              <button class="char-change-btn" type="button">画像をアップロード</button>
+            </div>
+            <div class="field-hint">絵文字を直接入力するか、画像をアップロードします（アップロードした画像が優先されます。JPEG・PNG・WebP、5MBまで。F-37）。</div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">メッセージ本文</label>
+            <textarea rows="3" placeholder="投稿する内容を入力（@でメンション可。ただしAIへの応答は発生しません）"></textarea>
+          </div>
+          <div class="field-row">
+            <div class="field-group">
+              <label class="field-label">頻度</label>
+              <select>
+                <option>1回のみ</option>
+                <option selected>毎週</option>
+                <option>毎月</option>
+                <option>毎日</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label">初回の送信日時</label>
+              <div style="display:flex;gap:8px;">
+                <input type="date" value="2026-08-24" style="flex:1;">
+                <input type="time" value="09:00" style="flex:1;">
+              </div>
+            </div>
+          </div>
+          <div class="field-hint" style="margin-bottom:12px;">「毎週」は初回日時の曜日、「毎月」は初回日時の日にちで繰り返します（該当日が存在しない月は月末に送信）。「1回のみ」は指定日時に1度だけ投稿し、以降は自動的に一時停止扱いになります。</div>
+          <button class="add-skill-btn" type="button" style="border-style:solid;background:var(--accent-600);color:#fff;border-color:var(--accent-600);">＋ 定期投稿を追加</button>
+        </div>
+      </div>
+
+      <!-- 自動応答トリガー -->
+      <div class="tab-panel" id="panel-trigger">
+        <p class="panel-lede">特定のキーワードまたは絵文字を含む発言があったとき、自動でメッセージを投稿します（F-38）。チャンネルAIとは別物で、質問への理解や判断は行わず、単純な一致判定のみで動作します。</p>
+
+        <div class="recur-card">
+          <div class="recur-head">
+            <span class="trigger-type-badge">キーワード</span>
+            <span class="trigger-value">「サポート」</span>
+            <span class="recur-sched">→ メッセージを投稿</span>
+          </div>
+          <div class="recur-to">送り主: <span class="bot-av" style="width:20px;height:20px;font-size:11px;vertical-align:middle;">📎</span> ヘルプ案内Bot</div>
+          <div class="recur-body">お困りごとは <a href="#">サポート窓口 (社内Wiki)</a> をご確認ください。緊急の場合は #総務問い合わせ へどうぞ。</div>
+          <div class="recur-foot">
+            <div class="switch-sm"><div class="knob-sm"></div></div>
+            <span class="switch-label">有効</span>
+            <div class="recur-actions">
+              <button type="button">編集</button>
+              <button class="danger" type="button">削除</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="recur-card">
+          <div class="recur-head">
+            <span class="trigger-type-badge emoji">絵文字</span>
+            <span class="trigger-value">🚨</span>
+            <span class="recur-sched">→ メッセージを投稿</span>
+          </div>
+          <div class="recur-to">送り主: <span class="bot-av" style="width:20px;height:20px;font-size:11px;vertical-align:middle;">🚨</span> 緊急連絡Bot</div>
+          <div class="recur-body">緊急のご連絡ですね。担当のチャンネル管理者に確認しますので、内容を詳しく教えてください。</div>
+          <div class="recur-foot">
+            <div class="switch-sm"><div class="knob-sm"></div></div>
+            <span class="switch-label">有効</span>
+            <div class="recur-actions">
+              <button type="button">編集</button>
+              <button class="danger" type="button">削除</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="recur-form">
+          <div class="field-row">
+            <div class="field-group">
+              <label class="field-label">トリガーの種類</label>
+              <select>
+                <option selected>キーワード</option>
+                <option>絵文字</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label">トリガーの値</label>
+              <input type="text" placeholder="例: サポート">
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">実行する処理</label>
+            <select disabled style="opacity:0.7;">
+              <option selected>メッセージを投稿する</option>
+            </select>
+            <div class="field-hint">現時点で選べる処理はメッセージの投稿のみです（本文にURLを含めることもできます）。</div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">投稿する本文</label>
+            <textarea rows="3" placeholder="トリガーに一致したときに投稿する内容を入力"></textarea>
+          </div>
+          <div class="field-group">
+            <label class="field-label">送り主の表示名</label>
+            <input type="text" placeholder="例: ヘルプ案内Bot">
+          </div>
+          <div class="field-group">
+            <label class="field-label">送り主のアイコン</label>
+            <div class="icon-input-row">
+              <span class="bot-av">⚡</span>
+              <input type="text" value="⚡" maxlength="2" placeholder="絵文字">
+              <button class="char-change-btn" type="button">画像をアップロード</button>
+            </div>
+          </div>
+          <div class="field-hint" style="margin-bottom:12px;">トリガーとなった発言がスレッド内であれば同じスレッドへ、チャンネル本体の発言であればチャンネル本体へ投稿されます。人間の発言のみが判定対象で、BOT自身の投稿が別のトリガーを呼び出すことはありません。</div>
+          <button class="add-skill-btn" type="button" style="border-style:solid;background:var(--accent-600);color:#fff;border-color:var(--accent-600);">＋ トリガーを追加</button>
+        </div>
+      </div>
+
+      <!-- 基本設定 -->
+      <div class="tab-panel" id="panel-general">
+        <p class="panel-lede">このチャンネルでのAIの有効/無効を切り替えます。AIを置かないチャンネル（雑談など）があってもかまいません。</p>
+        <div class="toggle-row">
+          <div class="switch"><div class="knob"></div></div>
+          <div>
+            <div class="t-title"># 開発相談 でAIを有効にする</div>
+            <div class="t-sub">無効にすると、このチャンネルでメンションしてもAIは応答しません。</div>
+          </div>
+        </div>
+        <div class="field-hint" style="margin-top:16px;">対象チャンネル: # 開発相談（公開チャンネル・<a href="補足03_メンバー一覧.html">12名参加</a>）</div>
+      </div>
+
+      <!-- キャラクタ -->
+      <div class="tab-panel" id="panel-character">
+        <p class="panel-lede">AIの名前・アイコン・口調を設定します（F-10）。</p>
+        <div class="char-row">
+          <div class="char-avatar">AI</div>
+          <div>
+            <button class="char-change-btn" type="button">画像をアップロード</button>
+            <div class="field-hint" style="margin-top:6px;">JPEG・PNG・WebP、5MBまで（F-37）。未設定の間は「AI」の2文字で表示されます。</div>
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">名前</label>
+          <input type="text" value="Kogack AI">
+        </div>
+        <div class="field-group">
+          <label class="field-label">口調</label>
+          <textarea rows="3">丁寧語を基本とし、簡潔に回答する。専門用語には簡単な補足を添える。絵文字は使用しない。</textarea>
+          <div class="field-hint">この口調の指定は、次の「振る舞い定義」の内容と合わせてAIの応答生成に反映されます。</div>
+        </div>
+      </div>
+
+      <!-- 振る舞い定義 -->
+      <div class="tab-panel" id="panel-prompt">
+        <p class="panel-lede">AIの振る舞いをテキスト（プロンプト）で記述します（F-09）。</p>
+        <div class="field-group">
+          <label class="field-label">振る舞い定義</label>
+          <textarea rows="10">あなたは開発部の「開発相談」チャンネルに常駐するAIアシスタントです。
+デプロイ・環境構築・社内システムの使い方など、開発に関する質問に答えます。
+
+- 回答は根拠となる社内ドキュメントを示してください。根拠が見つからない場合は、その旨を明示してください。
+- 契約・法務・人事など開発以外の相談は、自動対応範囲の設定に従い、チャンネル管理者に引き継いでください。
+- 過去のやり取りを参照する場合は、参考情報である旨を必ず添えてください。</textarea>
+          <div class="field-hint">編集のたびに上書き保存されます。変更者・日時は<a href="S-08_管理コンソール.html">監査ログ（S-08管理コンソール）</a>に記録されます（過去バージョンの一覧・差分表示は対象外）。</div>
+        </div>
+      </div>
+
+      <!-- 参照ドキュメント範囲 -->
+      <div class="tab-panel" id="panel-docs">
+        <p class="panel-lede">回答の根拠とするフォルダ・文書の範囲を選択します（F-11）。一覧は管理コンソール（S-08）で登録された候補から選びます。</p>
+        <div class="doc-tree">
+          <div class="doc-row"><input type="checkbox" checked><span class="folder-ic">📁</span> 開発部</div>
+          <div class="doc-row child"><input type="checkbox" checked><span class="folder-ic">📄</span> 運用ドキュメント（デプロイ手順書 ほか 12件）</div>
+          <div class="doc-row child"><input type="checkbox"><span class="folder-ic">📄</span> 設計資料（17件）</div>
+          <div class="doc-row"><input type="checkbox"><span class="folder-ic">📁</span> 総務（23件）</div>
+          <div class="doc-row"><input type="checkbox"><span class="folder-ic">📁</span> 人事（9件）</div>
+        </div>
+        <div class="sync-meta">
+          <span>最終同期: 2026-08-18 09:00</span>
+          <a href="#">同期は管理コンソール（S-08）から実行します</a>
+        </div>
+        <div class="field-hint">ここで選んだ範囲であっても、質問者本人がGoogleドライブ上で閲覧権限を持たない文書は回答対象から除外されます（5.1節）。</div>
+
+        <div class="field-group" style="margin-top:24px;">
+          <label class="field-label">指定範囲外の質問が来た場合の対応方針</label>
+          <div class="radio-card selected">
+            <div class="radio-dot"></div>
+            <div>
+              <div class="r-title">厳格に制限</div>
+              <div class="r-sub">登録されたドキュメントや振る舞い定義・スキルの範囲外の質問には対応せず、「担当外のためお答えできません」のようにお断りする。</div>
+            </div>
+          </div>
+          <div class="radio-card">
+            <div class="radio-dot"></div>
+            <div>
+              <div class="r-title">一般回答を許可</div>
+              <div class="r-sub">登録ドキュメントに根拠がない質問でも、AIの一般的な知識を使って回答する。社内ドキュメントを根拠にできる質問については、そちらを優先する。</div>
+            </div>
+          </div>
+          <div class="field-hint">⚠ 「一般回答を許可」を選ぶと、社内ドキュメントに基づかない回答が増えます。誤りを含みうる旨の注意喚起（F-30）はどちらの設定でも常時表示されます。</div>
+        </div>
+      </div>
+
+      <!-- スキル -->
+      <div class="tab-panel" id="panel-skills">
+        <p class="panel-lede">「依頼を受けたらこう進める」手順をスキルとして登録し、AIに割り当てます（F-12）。</p>
+        <div class="skill-card">
+          <div class="skill-head"><span class="skill-title">デプロイ手順の案内</span><button class="skill-del" type="button">削除</button></div>
+          <textarea rows="3">デプロイ方法に関する質問を受けたら、まずデプロイ手順書.mdを参照し、ステージング検証→バックアップ→本番反映の順で案内する。手順書に無い内容は「担当者に確認してください」と回答する。</textarea>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span class="skill-title">座席予約状況の確認</span><button class="skill-del" type="button">削除</button></div>
+          <textarea rows="3">会議室・座席の空き状況を聞かれたら、座席予約システムを参照し、日時・エリアを確認したうえで空き状況を表形式で回答する。</textarea>
+        </div>
+        <button class="add-skill-btn" type="button">＋ スキルを追加</button>
+
+        <div class="field-group" style="margin-top:26px;">
+          <label class="field-label">スキルにない業務依頼の引き継ぎ先</label>
+          <div class="field-hint" style="margin:0 0 10px;">登録されたスキル・自動対応範囲のどれにも該当しない業務依頼が来たとき、誰に引き継ぐかを設定します（F-17）。</div>
+
+          <div class="radio-card selected">
+            <div class="radio-dot"></div>
+            <div>
+              <div class="r-title">チャンネル管理者に引き継ぐ（既定）</div>
+              <div class="r-sub">現在のチャンネル管理者: 田中 智子。同一チャンネル内でメンションして引き継ぎ、DMは使いません。</div>
+            </div>
+          </div>
+          <div class="radio-card">
+            <div class="radio-dot"></div>
+            <div style="flex:1;">
+              <div class="r-title">指定した相手に引き継ぐ</div>
+              <div class="r-sub">このチャンネルの参加者から引き継ぎ先を指定します。</div>
+              <div class="picker-row">
+                <span class="av-sm" style="background:#0ea5e9;">鈴</span>
+                <span class="p-name">鈴木 一郎</span>
+                <button class="char-change-btn change-btn" type="button">変更</button>
+              </div>
+            </div>
+          </div>
+          <div class="field-hint">指定できるのはこのチャンネルの参加者のみです。指定した相手が退出・無効化された場合は既定（チャンネル管理者）に自動的に戻ります。</div>
+        </div>
+      </div>
+
+      <!-- 反応モード -->
+      <div class="tab-panel" id="panel-reaction">
+        <p class="panel-lede">AIがどのタイミングで応答するかを設定します（F-15）。</p>
+        <div class="radio-card selected">
+          <div class="radio-dot"></div>
+          <div>
+            <div class="r-title">メンション時のみ応答</div>
+            <div class="r-sub">「@Kogack AI」と呼びかけられたときだけ応答します。会話に割り込みません。</div>
+          </div>
+        </div>
+        <div class="radio-card">
+          <div class="radio-dot"></div>
+          <div>
+            <div class="r-title">投稿に自ら反応</div>
+            <div class="r-sub">メンションがなくても、チャンネル内の投稿内容に応じてAIが自発的に反応します。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 自動対応範囲 -->
+      <div class="tab-panel" id="panel-auto">
+        <p class="panel-lede">依頼内容ごとに、AIが自動で対応してよい範囲を区分します（F-16）。</p>
+        <table class="auto-table">
+          <thead><tr><th>依頼内容</th><th>対応区分</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>座席予約状況の確認</td>
+              <td class="pill-group"><span class="pill on-ok">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>ドキュメント検索・引用</td>
+              <td class="pill-group"><span class="pill on-ok">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>やりとりの要約</td>
+              <td class="pill-group"><span class="pill on-ok">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>経費精算に関する相談</td>
+              <td class="pill-group"><span class="pill">自動対応可</span><span class="pill on-warn">確認のうえ対応</span><span class="pill">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>契約書フォーマットの相談</td>
+              <td class="pill-group"><span class="pill">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill on-human">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>本番デプロイの実行代行</td>
+              <td class="pill-group"><span class="pill">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill on-human">人が対応</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="field-hint">「人が対応」に区分された依頼は、AIが同一チャンネル内でチャンネル管理者にメンションして引き継ぎます（F-17。DMは使いません）。</div>
+      </div>
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>モックアップ注記</strong><br>
+    画面ID: <code>S-06</code> ／ 対応機能: <code>F-08,F-09,F-10,F-11,F-12,F-15,F-16,F-36,F-37,F-38</code><br>
+左のタブは「チャンネル設定」（チャンネル管理者）と「AI設定の項目」（基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・自動対応範囲）の2グループに分けている。後者は<a href="../02_要件定義書.html#sec4">要件定義書4.2節</a>の項目に対応する画面ID<code>S-06</code>本来の対応機能（<code>F-08,F-09,F-10,F-11,F-12,F-15,F-16</code>）。編集可能なのは、そのチャンネルの<span class="badge badge-chadmin">chadmin</span>とシステム管理者のみ。振る舞い定義（F-09）の変更は監査ログに記録（7章）。タブ切替はこの画面内で実際に動作します。<strong>「チャンネル管理者」タブは要件定義書4.2節のS-06設定項目には含まれないAI設定外の機能</strong>で、利用者管理（S-08）でロールを付与するのではなく、このチャンネルの編集権限を持つ本人が直接付け替える設計とした（基本設計書3.3節の設計判断＝chadminはT-03 channel_members.is_channel_adminで表現、と整合）。「参照ドキュメント範囲」タブ内の<strong>「指定範囲外の質問が来た場合の対応方針」</strong>、「スキル」タブ内の<strong>「スキルにない業務依頼の引き継ぎ先」</strong>も同様に画面モックアップのみに追加した設定（要件定義書・基本設計書は未反映）。<br>
+    <span style="color:#fbbf24;">1.8版で追加:</span> 「チャンネル管理者」タブに「公開範囲」トグルを追加し、公開／非公開（<code>F-34</code>）をチャンネル管理者が切り替えられるようにした。こちらは要件定義書・基本設計書にも反映済み。<br>
+    <span style="color:#fbbf24;">1.9版で追加:</span> 「チャンネル設定」グループに「定期投稿」タブを新設し、日時・頻度（1回のみ／毎日／毎週／毎月）を指定してこのチャンネルに自動投稿する機能（<code>F-36</code>）を追加した。投稿ごとに送り主の表示名・アイコンを設定でき、実際のメッセージには<span class="badge badge-bot">BOT</span>バッジを付けてチャンネルAIや人間の発言と区別する（BOTはAIへの質問応答を行わない）。有効／一時停止の切り替えと編集・削除が行える。こちらも要件定義書・基本設計書に反映済み。<br>
+    <span style="color:#fbbf24;">1.12版で追加:</span> 「キャラクタ」タブのAIアイコン、「定期投稿」タブの送り主アイコンを、画像アップロードで設定できるようにした（<code>F-37</code>）。個人のプロフィール画像（ヘッダーのユーザーメニューから）にも同じ仕組みを使う。こちらも要件定義書・基本設計書に反映済み。<br>
+    <span style="color:#fbbf24;">1.13版で追加:</span> 「チャンネル設定」グループに「自動応答トリガー」タブを新設した（<code>F-38</code>）。キーワードまたは絵文字を含む発言に反応し、指定したメッセージを自動投稿する。「定期投稿」と同じくBOTバッジ・専用アイコンで区別され、実行処理は現時点では「メッセージを投稿する」のみ（将来の拡張を見込んだセレクトボックスとして表現）。こちらも要件定義書・基本設計書に反映済み。<br>
+    <span style="color:#fbbf24;">1.14版で削除:</span> F-36の宛先を個人（複数可）にも対応していたが（1.11版）、チャンネル運用への注力を優先し対象外に戻した。ヘッダーの「🔁 リマインダー」・補足05「リマインダー」を削除し、この「定期投稿」タブはチャンネル宛てのみを扱う。<br>
+    <span style="color:#fbbf24;">1.15版で改称:</span> 画面名を「チャンネルAI設定」から「チャンネル設定」に変更した。チャンネル管理者・定期投稿・自動応答トリガーとAI設定以外の項目が増え、旧名称が実態と合わなくなったため。画面ID・ファイル名は変更していない。要件定義書・基本設計書にも反映済み。<br>
+    <span style="color:#fbbf24;">1.16版で改名:</span> モックアップのファイル名も<code>S-06_チャンネルAI設定.html</code>から<code>S-06_チャンネル設定.html</code>に変更した。参照している全ファイル（一覧・S-03・補足03・補足06）のリンクを更新済み。
+  </div>
+
+<script>
+  function showTab(btn, id) {
+    document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+    btn.classList.add('active');
+    document.getElementById('panel-' + id).classList.add('active');
+  }
+</script>
+
+</body>
+</html>

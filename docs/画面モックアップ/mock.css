@@ -1,0 +1,109 @@
+/* Kogack 画面モックアップ一覧 共通スタイル */
+:root {
+  --accent-600: #1e40af;
+  --accent-700: #1e3a8a;
+  --accent-100: #dbeafe;
+  --accent-50: #eff6ff;
+  --bg: #ffffff;
+  --bg-subtle: #fafbfc;
+  --bg-muted: #f5f7f9;
+  --border: #e7eaee;
+  --border-strong: #d9dde3;
+  --text: #1a1d21;
+  --text-muted: #60656d;
+  --text-subtle: #8a8f98;
+  --member-bg: #f1f5f9; --member-text: #475569;
+  --chadmin-bg: #ccfbf1; --chadmin-text: #0f766e;
+  --admin-bg: #ede9fe; --admin-text: #6d28d9;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 44px 0 100px;
+  font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg-muted);
+}
+
+.index-page { max-width: 980px; margin: 0 auto; padding: 0 28px; }
+
+.index-header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.brand-mark {
+  width: 42px; height: 42px; border-radius: 12px; flex: none;
+  background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+  color: #fff; font-size: 18px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.index-header h1 { font-size: 22px; margin: 0; color: var(--text); }
+
+.index-lead { font-size: 13px; color: var(--text-muted); line-height: 1.9; margin: 10px 0 30px; max-width: 760px; }
+.index-lead a { color: var(--accent-700); }
+
+.mock-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(266px, 1fr)); gap: 16px; margin-bottom: 46px;
+}
+.mock-card {
+  display: block; background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  padding: 18px 20px; text-decoration: none; color: inherit;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+  transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease;
+}
+.mock-card:hover { border-color: var(--accent-600); box-shadow: 0 10px 24px rgba(16, 24, 40, 0.09); transform: translateY(-1px); }
+
+.card-top { display: flex; align-items: baseline; gap: 9px; margin-bottom: 10px; }
+.card-id {
+  flex: none; font-size: 11px; font-weight: 700; color: #0369a1; background: #e0f2fe;
+  border: 1px solid #bae6fd; border-radius: 5px; padding: 2px 8px;
+}
+.card-name { font-size: 14.5px; font-weight: 700; color: var(--text); }
+
+.card-roles { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 11px; }
+.badge {
+  display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 2px 8px;
+  background: var(--bg-muted); color: var(--text-muted); border: 1px solid var(--border);
+}
+.badge-role.role-member { background: var(--member-bg); color: var(--member-text); border-color: transparent; }
+.badge-role.role-chadmin { background: var(--chadmin-bg); color: var(--chadmin-text); border-color: transparent; }
+.badge-role.role-admin { background: var(--admin-bg); color: var(--admin-text); border-color: transparent; }
+
+.card-desc { font-size: 12.5px; color: var(--text-muted); line-height: 1.75; margin: 0; }
+
+.mock-card-note {
+  display: block; background: var(--bg-subtle); border: 1.5px dashed var(--border-strong); border-radius: 12px;
+  padding: 18px 20px;
+}
+.mock-card-note .card-desc { color: var(--text-subtle); }
+
+/* ---- 画面遷移図 ---- */
+.flow-section { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 26px 28px 30px; }
+.flow-title { font-size: 13px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.03em; margin-bottom: 22px; }
+.flow-diagram { display: flex; flex-direction: column; gap: 20px; }
+
+.flow-lane { display: flex; align-items: center; flex-wrap: wrap; row-gap: 14px; }
+.flow-node {
+  border: 1.5px solid var(--border-strong); border-radius: 10px; padding: 10px 16px;
+  background: var(--bg-subtle); text-align: center; min-width: 116px;
+}
+.flow-node.flow-start { border-color: var(--accent-600); background: var(--accent-50); }
+.flow-id { font-size: 10.5px; font-weight: 700; color: var(--accent-700); }
+.flow-name { font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+
+.flow-arrow { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 104px; flex: none; padding: 0 6px; }
+.arrow-label { font-size: 10px; color: var(--text-subtle); margin-bottom: 4px; white-space: nowrap; }
+.arrow-line { display: block; width: 100%; height: 0; border-top: 1.5px solid var(--border-strong); position: relative; }
+.arrow-line::after {
+  content: ""; position: absolute; right: 0; top: -4px; width: 0; height: 0;
+  border: 4px solid transparent; border-left-color: var(--border-strong);
+}
+
+.flow-branch { display: flex; align-items: center; gap: 14px; padding-left: 4px; flex-wrap: wrap; }
+.flow-branch-note { font-size: 11.5px; color: var(--text-subtle); line-height: 1.7; }
+
+.mock-note {
+  position: fixed; bottom: 14px; right: 14px; font-size: 11px; font-weight: 600; color: var(--text-subtle);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 6px 14px;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.08);
+}

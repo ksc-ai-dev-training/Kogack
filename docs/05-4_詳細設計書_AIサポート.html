@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>詳細設計書 AIサポート | AIネイティブチャットシステム（Kogack）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<script src="_sidenav.js"></script>
+<div class="doc">
+
+  <!-- ============ 表紙 ============ -->
+  <div class="cover">
+    <span class="doc-type">詳細設計書 分冊4</span>
+    <h1>詳細設計書 AIサポート</h1>
+    <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
+    <div class="meta">
+      <span>分冊化日: 2026-08-24</span>
+      <span>版数: 1.0（<a href="05_詳細設計書.html">詳細設計書（総論）</a> v1.4から分冊化）</span>
+      <span>作成: コガソフトウェア株式会社</span>
+    </div>
+    <p class="note">本書は<a href="05_詳細設計書.html">詳細設計書（総論）</a>の一部（10章 AIサポート機能）を分冊化したもの。改訂履歴・全体の版数は総論を参照。本ドキュメントは新人社員向けAI開発研修の成果物です</p>
+  </div>
+
+  <!-- ============ 改訂履歴（本分冊固有） ============ -->
+  <h2>改訂履歴（本分冊）</h2>
+  <table>
+    <thead><tr><th>版数</th><th>日付</th><th>改訂内容</th></tr></thead>
+    <tbody>
+      <tr><td>1.0</td><td>2026-08-24</td><td>総論v1.4からの分冊化により新設。内容は総論v1.3時点の10章（AIサポート機能）と同一。以降、本分冊のみで完結する変更はここに追記し、分冊をまたぐ変更は総論の改訂履歴に記載する。</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 目次 ============ -->
+  <nav class="toc">
+    <strong>目次（詳細設計書 全体）</strong>
+    <ol>
+      <li><a href="05_詳細設計書.html#sec1">1. はじめに</a>（総論）</li>
+      <li><a href="05_詳細設計書.html#sec2">2. 実装構成</a>（総論）</li>
+      <li><a href="05-1_詳細設計書_DB設計.html#sec3">3. テーブル定義</a>（分冊: DB設計）</li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec4">4. API詳細設計</a>（分冊: API設計）</li>
+      <li><a href="05_詳細設計書.html#sec5">5. 権限制御詳細</a>（総論）</li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec6">6. 検索処理詳細</a>（分冊: API設計）</li>
+      <li><a href="05_詳細設計書.html#sec7">7. エラーハンドリング・ログ設計</a>（総論）</li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec8">8. 画面項目定義</a>（分冊: 画面設計）</li>
+      <li><a href="05_詳細設計書.html#sec9">9. 処理シーケンス</a>（総論）</li>
+      <li><a href="#sec10">10. AIサポート機能</a></li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec11">11. フロントエンドコンポーネント設計</a>（分冊: 画面設計）</li>
+    </ol>
+  </nav>
+
+  <!-- ============ 10. AIサポート機能 ============ -->
+  <h2 id="sec10">10. AIサポート機能</h2>
+  <p>本章はチャンネルAIの応答生成（基本設計書8章）を実装レベルまで具体化する。ここでいう「AIサポート」はKogackの中核機能そのもの（チャンネルに常駐しF-19〜F-23等を担うAIエージェント）を指す。</p>
+
+  <h3>10.1 Function Callingツール定義</h3>
+  <pre><code>{
+  "type": "function",
+  "function": {
+    "name": "search_documents",
+    "description": "参照ドキュメント範囲内・かつ質問者本人が閲覧権限を持つ社内文書を検索する",
+    "parameters": {
+      "type": "object",
+      "properties": { "query": { "type": "string", "description": "検索クエリ" } },
+      "required": ["query"]
+    }
+  }
+}
+{
+  "type": "function",
+  "function": {
+    "name": "get_seat_availability",
+    "description": "座席予約システムの空き状況を参照する（登録は行わない）",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "description": "YYYY-MM-DD" },
+        "time_range": { "type": "string", "description": "例: 13:00-15:00" },
+        "area": { "type": "string", "description": "例: 3階" }
+      },
+      "required": ["date"]
+    }
+  }
+}</code></pre>
+  <p class="muted">両ツールは全ロール共通で公開する（総論5.8節）。<code>SEAT_RESERVATION_API_BASE</code>未設定時は<code>get_seat_availability</code>自体をツール一覧から除外する。</p>
+
+  <h3>10.2 システムプロンプトの構成</h3>
+  <p>基本設計書8.3節の6要素を、実装では次の順序でテンプレート結合する。</p>
+  <pre><code>あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}
+{behavior_prompt}
+
+# あなたが対応してよい依頼の目安
+{auto_response_rules_summary}
+
+# あなたのスキル
+{channel_skills.instructions を列挙}
+
+# 参照範囲外・対応できない場合
+- out_of_scope_policy = strict: 「担当外のためお答えできません」と回答し、一般知識では答えない
+- out_of_scope_policy = general: 一般知識で回答してよいが、社内文書に基づかない旨とAI回答への注意喚起を必ず付記する
+- スキルにない業務依頼は、引き継ぎメッセージとして {fallback_handoff_user_id または当該チャンネルchadmin} にメンションする
+
+# 全チャンネル共通ルール（固定・編集不可）
+- 過去のやり取りを参照する場合は「参考情報」であることを必ず明示し、断定しない
+- 社内文書を根拠にできる場合は、過去のやり取りより文書根拠を優先する
+- 自分がAIであることを偽らない、あなたが実際に持つ機能以外を案内しない</code></pre>
+  <p class="muted">チャンネル管理者が編集できるのは<code>persona_name</code>/<code>persona_tone</code>/<code>behavior_prompt</code>/<code>out_of_scope_policy</code>/<code>fallback_handoff_user_id</code>/スキルのみで、末尾の「全チャンネル共通ルール」はアプリ側で固定し編集不可とする。</p>
+
+  <h3>10.3 生成中表示の実装（基本設計書8.7節の確定）</h3>
+  <div class="callout">
+    <strong>本書で確定:</strong> AI発言用にT-05へ<code>generation_status='generating'</code>・<code>body=''</code>の仮レコードを作成する方式を採用する（DB設計3.5節）。生成完了時に同じ行の<code>body</code>を更新し<code>generation_status</code>をNULLに戻す。専用のポーリングエンドポイントは新設せず、既存のA-10/A-18のレスポンスに<code>generation_status</code>フィールドを含めることでフロントの3秒間隔ポーリングにそのまま乗せる（実装コストが小さく、ポーリング方式全体の一貫性を保てるため）。フロントは<code>generation_status==="generating"</code>の行を「生成中」のプレースホルダ（アニメーション付きインジケータ）として描画する。
+  </div>
+
+  <h3>10.4 座席予約システム連携（暫定・要確定）</h3>
+  <p><code>services/seat_reservation_client.py</code>は<code>get_seat_availability</code>ツールから呼ばれ、<code>SEAT_RESERVATION_API_BASE</code>宛にREST呼び出しを行う想定だが、認証方式・エンドポイントパス・レスポンス形式は連携先システム側の実装状況に依存し未確定（総論1.4節）。連携先確定後、本節にリクエスト/レスポンスの実例を追記する。座席の空き状況は個人に紐づかない情報のためAI専用の特権認証情報（環境変数で保持）で参照してよく、依頼者本人の資格委譲は作り込まない（要件定義書5.5節）。</p>
+
+  <h3>10.5 コスト計算</h3>
+  <pre><code># services/ai_cost.py（イメージ）
+MODEL_COSTS = {
+    # 1000トークンあたりの単価（円）。実際の値は契約プランに応じて設定ファイル/環境変数で保持する
+    "gpt-4o-mini": {"input": 0.023, "output": 0.092},
+}
+
+def estimate_cost_yen(model: str, input_tokens: int, output_tokens: int) -> float:
+    rate = MODEL_COSTS.get(model, MODEL_COSTS["gpt-4o-mini"])  # 未知モデルは既定単価で概算
+    return round(input_tokens / 1000 * rate["input"] + output_tokens / 1000 * rate["output"], 4)</code></pre>
+  <p class="muted">呼び出しのたびにT-13へ1行記録する（総論7.4節）。上限（T-14）の80%（既定）到達時にメール通知するのみで、応答停止の制御ロジックは持たない（要件定義書8.2節、上限到達時の挙動は別途協議中）。</p>
+
+  <h3>10.6 モデル設定</h3>
+  <p>使用モデルは環境変数<code>AI_MODEL</code>で一律指定し、Keirekiのような画面上でのモデル切替機能は設けない（基本設計書2.2節。要件定義書に画面切替の要求がないため）。</p>
+
+  <h3>10.7 ハルシネーション防止の確認手順</h3>
+  <div class="callout warn">
+    AIエージェント処理（システムプロンプト・ツール定義・基本設計書8.2節の権限フィルタリング）を変更したときは、実際のAPIキーで以下を確認する。もっともらしい回答が返ってきた場合は回帰しているとみなす。
+  </div>
+  <ul>
+    <li>参照範囲外の質問（out_of_scope_policy='strict'のチャンネルで）→「担当外のためお答えできません」の旨を返し、一般知識で答えていないこと</li>
+    <li>閲覧権限のない文書に関する質問→該当文書の内容を回答に含めていないこと（テスト用に閲覧権限のない文書を含む状態で確認する）</li>
+    <li>座席予約システムが応答不能な状態での参照依頼→存在しない空き状況を捏造せず「現在情報を取得できません」を返すこと</li>
+    <li>実装していない機能（例:「予約を確定して」「座席を登録して」）の依頼→実行前確認（F-25）を経ずに実行したかのような回答をしていないこと（本リリースでは書き込みツール自体が存在しないため、AIが独自にできると案内しないこと）</li>
+    <li>スキルにない業務依頼→設定したfallback_handoff_user_id（または既定のchadmin）へのメンション付き引き継ぎメッセージが、チャンネル内（DMではなく）に投稿されること</li>
+  </ul>
+
+  <footer class="doc-footer">
+    <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 AIサポート</span>
+    <span>Ver 1.0 / 2026-08-24</span>
+  </footer>
+</div>
+</body>
+</html>

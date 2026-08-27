@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>詳細設計書（総論） | AIネイティブチャットシステム（Kogack）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<script src="_sidenav.js"></script>
+<div class="doc">
+
+  <!-- ============ 表紙 ============ -->
+  <div class="cover">
+    <span class="doc-type">詳細設計書（総論）</span>
+    <h1>詳細設計書（総論）</h1>
+    <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
+    <div class="meta">
+      <span>作成日: 2026-08-21</span>
+      <span>版数: 1.4</span>
+      <span>作成: コガソフトウェア株式会社</span>
+    </div>
+    <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
+  </div>
+
+  <div class="callout diff-new">
+    <strong>本書の構成（v1.4で分冊化）:</strong> 詳細設計書は本書（総論）と4分冊に分かれている。改訂履歴・版数は本書に集約し、各分冊は分冊内で完結した変更のみを自身の履歴に記す（分冊をまたぐ変更は本書の履歴に一括で記載する）。
+    <ul>
+      <li>本書（総論）: 1章 はじめに／2章 実装構成／5章 権限制御詳細／7章 エラーハンドリング・ログ設計／9章 処理シーケンス</li>
+      <li><a href="05-1_詳細設計書_DB設計.html">05-1 詳細設計書 DB設計</a>: 3章 テーブル定義</li>
+      <li><a href="05-2_詳細設計書_API設計.html">05-2 詳細設計書 API設計</a>: 4章 API詳細設計／6章 検索処理詳細</li>
+      <li><a href="05-3_詳細設計書_画面設計.html">05-3 詳細設計書 画面設計</a>: 8章 画面項目定義／11章 フロントエンドコンポーネント設計</li>
+      <li><a href="05-4_詳細設計書_AIサポート.html">05-4 詳細設計書 AIサポート</a>: 10章 AIサポート機能</li>
+    </ul>
+    章番号は分冊前のものをそのまま維持し、詰め直さない（欠番のまま採番し直さないという本プロジェクトの既存方針と同じ考え方。目次から各章の所在をたどれる）。
+  </div>
+
+  <!-- ============ 改訂履歴 ============ -->
+  <h2>改訂履歴</h2>
+  <table>
+    <thead><tr><th>版数</th><th>日付</th><th>改訂内容</th></tr></thead>
+    <tbody>
+      <tr><td>1.0</td><td>2026-08-21</td><td>初版。基本設計書v1.11・画面モックアップ（S-01〜S-08、補足01〜04・補足06）をもとに、実装構成・テーブル定義（カラム単位）・API詳細（リクエスト/レスポンス）・権限制御・検索処理・エラーハンドリング/ログ・画面項目・処理シーケンス・AIサポート機能の実装レベル詳細を定めた。基本設計書8.7節で「詳細設計書で確定する」とされていたAI生成中表示の方式（T-05.generation_status列を新設する方式）を本書で確定した。</td></tr>
+      <tr><td>1.1</td><td>2026-08-24</td><td>基本設計書v1.13に追従し、これまで未反映だったF-39〜F-42（表示名の変更・同姓同名時の自動識別、発言者・メンバーのプロフィール確認、@メンションの候補選択・ID参照化、検索条件モディファイア）の実装レベル詳細を追記した。T-01.nameの編集可否、T-07 message_blocksへのblock_type='mention'追加、A-11のリクエストへのmentions配列追加、新規API A-67・A-68のリクエスト/レスポンス例、6章検索処理詳細のモディファイア対応（SQL・パース方式）、8章画面項目（S-03・S-05・補足06）を更新した。</td></tr>
+      <tr><td>1.2</td><td>2026-08-24</td><td>基本設計書v1.14に追従し、権限外パスへの直接アクセス時のフロントエンド挙動を確定した。新規5.9節でApp.tsxのルートガード実装（ガード用API・404/403時のリダイレクト先・トースト文言をルートごとの表で明示）を定義。require_channel_adminの判定順序（chadmin判定の前に参加確認を行い、非公開チャンネルの非参加者には404を返す）を5.1節に明記した。</td></tr>
+      <tr><td>1.3</td><td>2026-08-24</td><td>新規11章「フロントエンドコンポーネント設計」を追加した。姉妹プロジェクトKeireki（社員経歴書管理システム）の詳細設計書と同じ観点（責務分割・コンポーネントツリー・Props/内部状態・データ取得フック・状態管理方針）でKogackのfrontend/src/構成を定義し、画面モックアップ検討時に生じていた同種UI（ポップオーバー・ユーザー選択・アバター・バッジ）の個別実装を、実装前にcomponents/ui/の共通部品へ統合する方針とした。2.1節のディレクトリ構成にcomponents/ui/を追加した。</td></tr>
+      <tr class="diff-new"><td>1.4</td><td>2026-08-24</td><td>詳細設計書を総論と4分冊（05-1 DB設計／05-2 API設計／05-3 画面設計／05-4 AIサポート）に分割した。1章・2章・5章・7章・9章は本書（総論）に残し、3章はDB設計、4章・6章はAPI設計、8章・11章は画面設計、10章はAIサポートへ分離した。章番号は分冊前のまま維持し、改訂履歴・版数は本書に一本化する。サイドナビ（_sidenav.js）から各分冊へ直接遷移できるようにした。分冊をまたぐ内部参照は「（分冊名 章番号）」の形式に置き換えた。</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 目次 ============ -->
+  <nav class="toc">
+    <strong>目次</strong>
+    <ol>
+      <li><a href="#sec1">1. はじめに</a></li>
+      <li><a href="#sec2">2. 実装構成</a></li>
+      <li><a href="05-1_詳細設計書_DB設計.html#sec3">3. テーブル定義</a>（分冊: DB設計）</li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec4">4. API詳細設計</a>（分冊: API設計）</li>
+      <li><a href="#sec5">5. 権限制御詳細</a></li>
+      <li><a href="05-2_詳細設計書_API設計.html#sec6">6. 検索処理詳細</a>（分冊: API設計）</li>
+      <li><a href="#sec7">7. エラーハンドリング・ログ設計</a></li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec8">8. 画面項目定義</a>（分冊: 画面設計）</li>
+      <li><a href="#sec9">9. 処理シーケンス</a></li>
+      <li><a href="05-4_詳細設計書_AIサポート.html#sec10">10. AIサポート機能</a>（分冊: AIサポート）</li>
+      <li><a href="05-3_詳細設計書_画面設計.html#sec11">11. フロントエンドコンポーネント設計</a>（分冊: 画面設計）</li>
+    </ol>
+  </nav>
+
+  <!-- ============ 1. はじめに ============ -->
+  <h2 id="sec1">1. はじめに</h2>
+
+  <h3>1.1 本書の位置づけ</h3>
+  <p>本書は、AIネイティブチャットシステム（コードネーム: Kogack）の詳細設計書（総論）である。<a href="04_基本設計書.html">基本設計書</a>で定めたシステム構成・画面・機能・データベース・API・AIエージェント・非機能の各方針を、実装者がそのまま手を動かせる粒度まで具体化する。カラム単位のテーブル定義、リクエスト/レスポンスのフィールド定義、権限判定の実装方式、検索SQLの方針、エラー時の挙動、画面項目の入力規則、代表的な処理のシーケンス、AIプロンプト・ツール定義の実体を定める（詳細はDB設計・API設計・画面設計・AIサポートの各分冊）。</p>
+  <p>基本設計書が「方式」を決める文書であるのに対し、本書は「その方式を具体的にどう実装するか」を決める文書である。基本設計書8.7節のように基本設計書側で「詳細設計書で確定する」と明記されていた論点は、本書該当節（AIサポート10.3節）で確定する。</p>
+
+  <h3>1.2 前提ドキュメント</h3>
+  <p>本書は<a href="01_要求仕様書.html">要求仕様書</a>・<a href="02_要件定義書.html">要件定義書</a>・<a href="04_基本設計書.html">基本設計書</a>・<a href="画面モックアップ/00_一覧.html">画面モックアップ</a>を前提とする。ID体系（REQ-xx / F-xx / S-xx / T-xx / A-xx）は基本設計書までと共通のまま用い、本書で新たにIDを増やすことはしない（本書は既存IDの実装詳細を追記する文書であり、機能追加は行わない）。</p>
+
+  <h3>1.3 対象読者</h3>
+  <ul>
+    <li>本システムの実装を担当する開発者（本書を実装のリファレンスとする）</li>
+    <li>コードレビュー担当者（実装が本書の定義から逸脱していないかの確認）</li>
+    <li>AI開発研修の受講者（設計から実装への橋渡しのサンプルとして参照）</li>
+  </ul>
+
+  <h3>1.4 本書のスコープ外</h3>
+  <div class="callout warn">
+    座席予約システムとの実際の連携仕様（認証方式・エンドポイント・レスポンス形式）は、連携先システム側の実装状況に依存する外部要因であり、確定していない（要件定義書8.2節・基本設計書8.4節）。本書AIサポート10.4節は現時点で合意可能な範囲（Function Callingツールのインタフェース・呼び出し方）のみを定め、連携先固有の仕様は連携先確定後に本書を改訂して追記する。
+  </div>
+  <p>また、本番運用の監視・アラート設定の細則、CI/CDパイプラインの具体的な設定ファイル、負荷試験の計画は本書の対象外とする。</p>
+
+  <!-- ============ 2. 実装構成 ============ -->
+  <h2 id="sec2">2. 実装構成</h2>
+
+  <h3>2.1 ディレクトリ構成</h3>
+  <p>基本設計書2.4節の内部構成を、ファイル単位まで具体化する。LCC CRMの規約に準拠する（REQ-N-07）。</p>
+  <pre><code>backend/
+  main.py                  FastAPIアプリ生成、ルーター登録、静的配信フォールバック（2.3節）
+  database.py               SCHEMA定義（CREATE TABLE IF NOT EXISTS 一式）、コネクションプール初期化
+  models.py                  Pydanticモデル（リクエスト/レスポンススキーマ）
+  google_auth.py            Google OAuth 2.0 認可URL生成・トークン交換・IDトークン検証
+  auth_helpers.py           JWT発行/検証、権限デコレーター（5章）
+  routers/
+    auth.py                  A-01〜A-04
+    channels.py               A-05〜A-15, A-46〜A-49
+    dms.py                     A-16〜A-19
+    search.py                  A-20
+    attachments.py            A-21, A-22, A-61
+    ai_settings.py            A-23〜A-31, A-45
+    pending_actions.py       A-33〜A-35
+    admin.py                   A-36〜A-44
+    scheduled_messages.py    A-50〜A-52
+    recurring_posts.py        A-53〜A-56
+    users.py                   A-62, A-67, A-68
+    trigger_rules.py           A-63〜A-66
+  services/
+    ai_agent.py                AI応答生成の全体フロー（AIサポート10章、基本設計書8.1節）
+    drive_client.py            Google Drive API連携（文書索引・権限確認、API設計6.3節）
+    seat_reservation_client.py 座席予約システム連携（AIサポート10.4節）
+    ai_cost.py                  トークン数→概算コスト換算（AIサポート10.5節）
+    scheduled_dispatcher.py   送信予約・定期投稿の30秒間隔ディスパッチャ（9.4節）
+    trigger_matcher.py         自動応答トリガーの一致判定（9.3節）
+    audit.py                    T-16 audit_logs 書き込みの共通ヘルパー（7.4節）
+  static/                     フロントエンドのビルド成果物（本番配信用、2.3節）
+
+frontend/src/
+  App.tsx                    ルーティング・認証ガード（5.1節・5.9節、画面設計11.3節）
+  pages/                      S-01〜S-08 に対応する画面コンポーネント
+  components/
+    Layout.tsx                 S-02共通サイドバー・ヘッダー
+    blocks/                    citation / external_system / quote_reference / pending_action / mention の描画（DB設計3.7節）
+    ui/                        画面横断の基礎部品（Avatar/RoleBadge/Popover/UserPicker/Modal/Tabs/Chip等。画面設計11.6節）
+    modals/                    補足01〜04・補足06・S-07に対応するモーダル
+  hooks/
+    usePolling.ts               3秒間隔ポーリング共通hook（useSWRのrefreshIntervalラッパー、画面設計11.4節）
+    （その他データ取得フックは画面設計11.4節を参照）
+  lib/                         APIクライアント（fetchラッパー、画面設計11.7節）
+  types/                       APIレスポンス型定義</code></pre>
+  <p class="muted">フロントエンドのコンポーネント構成（各コンポーネントの責務・Props・状態・使用フック）は画面設計分冊11章で定義する。本節はディレクトリ単位の役割のみを示す。</p>
+
+  <h3>2.2 環境変数</h3>
+  <table>
+    <thead><tr><th>変数名</th><th>用途</th><th>本番での扱い</th></tr></thead>
+    <tbody>
+      <tr><td><code>APP_ENV</code></td><td>環境識別（development/staging/production）</td><td>必須</td></tr>
+      <tr><td><code>DATABASE_URL</code></td><td>Supabase PostgreSQL接続文字列</td><td>必須</td></tr>
+      <tr><td><code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code></td><td>Google OAuth 2.0</td><td>必須</td></tr>
+      <tr><td><code>GOOGLE_REDIRECT_URI</code></td><td>A-02のコールバックURL</td><td>必須</td></tr>
+      <tr><td><code>JWT_SECRET</code></td><td>セッションJWT署名鍵</td><td>必須。未設定時は起動失敗とする</td></tr>
+      <tr><td><code>ALLOWED_DOMAINS</code></td><td>ログイン許可ドメイン（既定: kogasoftware.com）</td><td>必須</td></tr>
+      <tr><td><code>OPENAI_API_KEY</code></td><td>AI応答生成</td><td>必須。未設定時はAIエージェント処理をスキップし、人間同士の会話機能のみ提供する</td></tr>
+      <tr><td><code>AI_MODEL</code></td><td>使用モデル名（基本設計書2.2節、画面切替なし）</td><td>必須</td></tr>
+      <tr><td><code>SEAT_RESERVATION_API_BASE</code></td><td>座席予約システムのAPIベースURL</td><td>未設定時はF-23ツールを無効化する（1.4節）</td></tr>
+      <tr><td><code>DB_MODE</code></td><td>ローカル開発時のDB接続先切替（docker/local/auto）</td><td>ローカル専用</td></tr>
+    </tbody>
+  </table>
+
+  <h3>2.3 スキーマ変更の運用</h3>
+  <div class="callout">
+    <strong>本書で確定:</strong> <code>database.py</code> の SCHEMA は <code>CREATE TABLE IF NOT EXISTS</code> で構成するため、既存テーブルへの列追加は起動時に自動適用されない。列を追加する変更は <code>ALTER TABLE ... ADD COLUMN IF NOT EXISTS</code> を SCHEMA に併記すること。開発環境（<code>AUTO_MIGRATE=1</code>）は起動時に流れるが、本番（<code>AUTO_MIGRATE=0</code>）はSupabase上で手動実行が必要になる。忘れると該当APIが <code>column ... does not exist</code> で失敗するため、テーブル定義（DB設計3章）を変更する改訂では必ずこの手順をあわせて確認する。
+  </div>
+
+  <h3>2.4 コーディング規約</h3>
+  <ul>
+    <li>バックエンド: 全エンドポイントを <code>async def</code> で実装し、DBアクセスは <code>asyncpg</code> を直接使用する（ORMは用いない、LCC CRM踏襲）。関数・変数は snake_case。</li>
+    <li>フロントエンド: 関数コンポーネント＋hooksのみを用いる（クラスコンポーネントは使わない）。API呼び出しは <code>lib/</code> のクライアント経由に統一し、コンポーネントから直接 <code>fetch</code> しない。</li>
+    <li>ID体系: すべてのAPIレスポンスで <code>id</code> は文字列（<code>string</code>）としてシリアライズする。BIGINTはJavaScriptの安全な整数範囲（2^53-1）を超えうるため、フロントエンドでの丸め誤差を避ける（API設計4.1節）。</li>
+    <li>日時: すべてUTCのISO 8601（<code>2026-08-21T09:00:00Z</code>）でやり取りし、表示側でローカルタイムゾーンに変換する。</li>
+  </ul>
+
+  <!-- ============ 5. 権限制御詳細 ============ -->
+  <h2 id="sec5">5. 権限制御詳細</h2>
+
+  <h3>5.1 権限デコレーター</h3>
+  <p><code>auth_helpers.py</code> に以下のデコレーター/依存関数を用意し、各ルーターで組み合わせて使う。判定はすべてサーバー側で行い、フロントの表示制御には依存しない（REQ-N-02）。</p>
+  <table>
+    <thead><tr><th>関数</th><th>判定内容</th><th>失敗時</th></tr></thead>
+    <tbody>
+      <tr><td><code>require_auth</code></td><td>JWT検証・<code>is_active=true</code></td><td>401</td></tr>
+      <tr><td><code>require_admin</code></td><td><code>role='admin'</code></td><td>403</td></tr>
+      <tr><td><code>require_channel_member(channel_id)</code></td><td>T-03に(channel_id, user_id)が存在</td><td>非公開チャンネルは404（5.3節）、公開チャンネルは403</td></tr>
+      <tr><td><code>require_channel_admin(channel_id)</code></td><td>T-03.is_channel_admin=true または role='admin'。chadmin判定の前に<code>require_channel_member</code>相当の参加確認を内部で行う</td><td>403（参加しているが非chadmin）。非公開チャンネルの非参加者は<code>require_channel_member</code>と同じ404（5.3節・5.9節）</td></tr>
+      <tr><td><code>require_dm_member(dm_id)</code></td><td>T-17に(dm_id, user_id)が存在</td><td>404</td></tr>
+      <tr><td><code>require_self_or_admin(user_id)</code></td><td>対象がリクエスト本人 または role='admin'</td><td>403</td></tr>
+    </tbody>
+  </table>
+
+  <h3>5.2 API別の権限判定実装</h3>
+  <p>基本設計書3.3節の権限マトリクスをAPI単位に落とし込む。原則は次の3パターンに集約される。</p>
+  <ul>
+    <li><strong>チャンネル参加者限定</strong>（A-06, A-10〜A-15, A-46等）: <code>require_channel_member</code> を適用。</li>
+    <li><strong>当該chadmin/admin限定</strong>（A-09, A-23〜A-31, A-45, A-47〜A-56, A-63〜A-66）: <code>require_channel_admin</code> を適用。「自分が担当するチャンネルのみ編集可、担当外は不可（adminは全チャンネル可）」の判定を1関数に集約する。</li>
+    <li><strong>admin限定</strong>（A-36〜A-44）: <code>require_admin</code> を適用。</li>
+  </ul>
+
+  <h3>5.3 非公開チャンネルの可視性（F-34）</h3>
+  <div class="callout">
+    未参加の非公開チャンネルに対するAPIアクセス（A-06, A-10等）は<strong>403ではなく404</strong>を返す。403は「チャンネルの存在は分かるが権限がない」ことを意味してしまい、非公開チャンネルの存在自体を露呈させないという要件（F-34「参加していない者には一覧・検索に表示されない」）に反するため。<code>require_channel_member</code>はこの区別（存在しない/公開だが未参加=403/非公開かつ未参加=404）をAPI一律で行う。
+  </div>
+  <p>A-05（チャンネル一覧）のクエリは、次の2つを合成して返す。</p>
+  <pre><code>-- 参加中チャンネル
+SELECT c.* FROM channels c JOIN channel_members m ON m.channel_id = c.id WHERE m.user_id = :me
+-- 参加可能な「公開」チャンネル（非公開は含めない）
+SELECT c.* FROM channels c
+WHERE c.is_public = true AND c.id NOT IN (SELECT channel_id FROM channel_members WHERE user_id = :me)</code></pre>
+
+  <h3>5.4 非公開チャンネルへのメンバー追加（A-08）</h3>
+  <p>非公開チャンネルへの追加は「chadmin限定」ではなく「参加者なら誰でも」に開放する（基本設計書6.2節「設計判断」）。実装は <code>require_channel_member</code>（chadminではなく一般の参加者チェック）をA-08の非公開分岐に適用する点が、他の設定系APIの「当該chadmin/admin限定」と異なるので注意する。</p>
+
+  <h3>5.5 最後の1人のチャンネル管理者保護（A-48）</h3>
+  <pre><code>-- A-48 実行前チェック（トランザクション内）
+SELECT count(*) FROM channel_members WHERE channel_id = :cid AND is_channel_admin = true;
+-- 結果が1、かつ解除対象がその1人なら 400 { "detail": "最後のチャンネル管理者は解除できません" }</code></pre>
+
+  <h3>5.6 fallback_handoff_user_id・アイコンURLの反映時検証</h3>
+  <p>A-45は指定された <code>fallback_handoff_user_id</code> が当該チャンネルのT-03参加者であることを検証する（400）。対象者が後日退出・無効化された場合は、参照時（AIエージェント処理・A-23取得時）にNULL相当（既定のchadminへ引き継ぎ）として扱う。A-25・A-54・A-55・A-62は、A-61で取得したURLをそのまま信頼せず、自ドメイン（Supabase Storageの<code>icons/</code>パス）のURLであることを検証してから保存する。</p>
+
+  <h3>5.7 RLSポリシー方針</h3>
+  <p>アプリケーションはasyncpgで直接接続するためアクセス制御の主体は上記のAPI層だが、Supabaseの他経路（PostgREST等）からの意図しない参照を遮断する多層防御として全テーブルRLSを有効にする（基本設計書6.3節）。</p>
+  <pre><code>ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY messages_participant_only ON messages FOR SELECT USING (
+  (channel_id IS NOT NULL AND EXISTS (
+     SELECT 1 FROM channel_members m WHERE m.channel_id = messages.channel_id AND m.user_id = current_setting('app.user_id')::bigint))
+  OR
+  (dm_id IS NOT NULL AND EXISTS (
+     SELECT 1 FROM direct_message_members m WHERE m.dm_id = messages.dm_id AND m.user_id = current_setting('app.user_id')::bigint))
+);
+
+ALTER TABLE channels ENABLE ROW LEVEL SECURITY;
+CREATE POLICY channels_visibility ON channels FOR SELECT USING (
+  is_public = true
+  OR EXISTS (SELECT 1 FROM channel_members m WHERE m.channel_id = channels.id AND m.user_id = current_setting('app.user_id')::bigint)
+);</code></pre>
+  <p class="muted">同様の参加者限定ポリシーを message_blocks・message_attachments にも適用する。<code>current_setting('app.user_id')</code> の設定方式（セッション変数の注入箇所）は<code>database.py</code>のコネクション取得処理で統一する。</p>
+
+  <h3>5.8 AIのドキュメント参照とアプリロールの独立性</h3>
+  <p>Kogackでは、AIが呼び出せるFunction Callingツール（<code>search_documents</code>・<code>get_seat_availability</code>）自体はmember/chadmin/adminいずれのロールでも同一に公開する。ドキュメント検索の絞り込みはアプリロール単位ではなく、質問者個人のGoogle Drive閲覧権限を都度確認する方式（基本設計書8.2節）で行うため、ロールに応じたツールの出し分けは不要かつ行わない。これは「ロールでツール自体を出し分ける」設計（例えば一般ユーザーにはツールを渡さない方式）とは異なる考え方であり、AIサポート10.1節で改めて扱う。</p>
+
+  <h3>5.9 フロントエンドの権限外アクセス時の挙動（App.tsx ルートガード）</h3>
+  <p>S-06・S-08等のURLを直接入力した場合の挙動（基本設計書4.2節「設計判断」）を、<code>App.tsx</code>のルートガードの実装レベルで確定する。各ルートのローダーは、そのルートの表示に最低限必要なAPI（下表）を呼び出し、レスポンスのステータスコードに応じて分岐する。フロント側でrole/is_channel_adminを事前判定して描画を止めることはしない（判定はAPIレスポンスを正とする。5.1節「判定はすべてサーバー側で行い、フロントの表示制御には依存しない」の原則どおり）。</p>
+  <table>
+    <thead><tr><th>ルート</th><th>ガード用に呼ぶAPI</th><th>404時（存在を伏せる）</th><th>403時（権限不足を明示）</th></tr></thead>
+    <tbody>
+      <tr><td><code>/channels/:channelId</code>（S-03）<br><code>/channels/:channelId?thread=</code>（S-04）</td><td>A-06</td><td><code>navigate('/', {replace:true})</code>。トーストなし</td><td>（S-03/S-04は403を返す設計がない。公開チャンネル未参加の自己参加はA-08で行うため、通常フローでは403に到達しない）</td></tr>
+      <tr><td><code>/channels/:channelId/settings</code>（S-06）</td><td>A-23</td><td><code>navigate('/', {replace:true})</code>。トーストなし</td><td><code>navigate('/channels/'+channelId, {replace:true})</code>＋トースト「このページを表示する権限がありません（チャンネル管理者のみ利用できます）」</td></tr>
+      <tr><td><code>/admin</code>（S-08）</td><td>A-36</td><td>（該当なし。adminのみが対象で存在を伏せる要件はない）</td><td><code>navigate('/', {replace:true})</code>＋トースト「このページを表示する権限がありません（システム管理者のみ利用できます）」</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">401（未認証）はルート単位の分岐に先立ち、<code>App.tsx</code>のグローバルな認証ガードが<code>/login</code>へリダイレクトする（既存方針）。トーストは<code>components/Toast.tsx</code>（汎用コンポーネント、4秒で自動消去）を用い、いずれの画面でも同一の見た目にする。</p>
+  <div class="callout">
+    <strong>設計判断（S-03/S-04には403分岐が無い理由）:</strong> S-03/S-04のガードAPI（A-06）はrequire_channel_memberのみを適用し、chadmin等の追加権限は問わない。公開チャンネルは誰でも即座に参加できる（F-02）ため、「参加していないと見えない」という制約自体はあるが「参加した上でさらに見えない」状態は無く、A-06が返すのは404（非公開・非参加）のみである（5.3節）。403分岐を表に残しているのは、将来S-03/S-04にchadmin限定の表示要素が追加された場合の拡張余地を示すためで、現時点では到達しない分岐として扱う。
+  </div>
+
+  <!-- ============ 7. エラーハンドリング・ログ設計 ============ -->
+  <h2 id="sec7">7. エラーハンドリング・ログ設計</h2>
+
+  <h3>7.1 HTTPエラーの標準形</h3>
+  <table>
+    <thead><tr><th>ステータス</th><th>使用場面</th><th>ボディ</th></tr></thead>
+    <tbody>
+      <tr><td>400</td><td>入力値の妥当性エラー（例: scheduled_atが過去、最後のchadmin解除）</td><td><code>{"detail": "具体的な理由"}</code></td></tr>
+      <tr><td>401</td><td>未認証・JWT無効/期限切れ</td><td><code>{"detail": "認証が必要です"}</code>。フロントはS-01へリダイレクト</td></tr>
+      <tr><td>403</td><td>認証済みだが権限不足（公開情報の存在は分かってよい場合）</td><td><code>{"detail": "権限がありません"}</code></td></tr>
+      <tr><td>404</td><td>対象なし、または非公開チャンネル等「存在自体を伏せるべき」対象への未参加アクセス（5.3節）</td><td><code>{"detail": "見つかりません"}</code></td></tr>
+      <tr><td>409</td><td>一意制約違反（チャンネル名重複等）</td><td><code>{"detail": "既に使用されています"}</code></td></tr>
+      <tr><td>422</td><td>リクエストボディのスキーマ不正</td><td>FastAPI標準形式</td></tr>
+      <tr><td>500</td><td>予期しないサーバーエラー</td><td><code>{"detail": "サーバーエラーが発生しました"}</code>（内部詳細は返さずログにのみ出力）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.2 Google認証エラーの種別（A-02）</h3>
+  <p>A-02は失敗時にJSONではなく <code>/login?error=&lt;種別&gt;</code> へリダイレクトし、S-01がクエリパラメータに応じたメッセージを表示する（画面モックアップS-01の「許可ドメイン外のアカウントでログインした場合の表示例」に対応）。</p>
+  <table>
+    <thead><tr><th>error値</th><th>発生条件</th><th>S-01の表示文言</th></tr></thead>
+    <tbody>
+      <tr><td><code>domain_not_allowed</code></td><td>メールドメインが<code>ALLOWED_DOMAINS</code>外</td><td>「このアカウントではログインできません。<code>@kogasoftware.com</code> のアカウントでログインし直してください。」</td></tr>
+      <tr><td><code>account_disabled</code></td><td>該当ユーザーが<code>is_active=false</code></td><td>「アカウントが無効化されています。管理者にお問い合わせください。」</td></tr>
+      <tr><td><code>oauth_failed</code></td><td>state不一致・認可コード交換失敗</td><td>「ログインに失敗しました。もう一度お試しください。」</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.3 外部API失敗時の扱い</h3>
+  <table>
+    <thead><tr><th>連携先</th><th>タイムアウト</th><th>失敗時の挙動</th></tr></thead>
+    <tbody>
+      <tr><td>OpenAI API（AI応答生成）</td><td>30秒</td><td>リトライ1回のみ（指数バックオフなし）。それでも失敗した場合は生成中プレースホルダを「現在AIが応答できません。しばらくしてから再度お試しください」に更新し<code>generation_status</code>をNULLに戻す（人間同士の会話は影響を受けない、基本設計書9.2節）</td></tr>
+      <tr><td>Google Drive API</td><td>10秒</td><td>索引取得・権限確認いずれかが失敗した場合、当該文書は「参照できない」扱いとして候補から除外する（安全側に倒す。基本設計書8.2節の性質上、誤って含めるより除外する方が安全）</td></tr>
+      <tr><td>座席予約システム</td><td>10秒</td><td>ツール呼び出し結果として「現在情報を取得できません」を<code>external_system</code>ブロックで返し、AI応答自体は継続する</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.4 監査ログ・AI利用ログの書き込み</h3>
+  <p><code>services/audit.py</code> に <code>record_audit(event_type, actor_user_id, target_channel_id, target_field, summary)</code> を用意し、A-02（ログイン成功/失敗）、A-24〜A-27・A-31（AI設定変更）から呼び出す。AI利用ログ（T-13）は<code>services/ai_agent.py</code>の応答完了処理から<code>services/ai_cost.py</code>を経由して1呼び出しにつき1行記録する（AIサポート10.5節）。いずれも書き込み失敗時に本来の処理（ログイン・AI応答）自体を失敗させない（ログ書き込みはベストエフォート、例外は捕捉してアプリケーションログに出力するのみ）。</p>
+
+  <h3>7.5 アプリケーションログの方針</h3>
+  <ul>
+    <li>構造化ログ（JSON Lines）を標準出力に出し、Koyeb側のログ収集に委ねる（自前のログ基盤は持たない）。</li>
+    <li><strong>発言本文（messages.body）・振る舞い定義（behavior_prompt）・AIへの質問文/回答文はアプリケーションログに出力しない。</strong> 本文はDB（T-05）に既に保存されており、ログへの二重記録は漏えい範囲を不必要に広げるため（AI利用状況ログが質問文・回答文を保存しない方針、基本設計書8.6節と同じ考え方をアプリログにも適用する）。</li>
+    <li>ログに含めてよい情報: リクエストパス・ステータスコード・処理時間・ユーザーID・エラー種別・スタックトレース（本文以外）。</li>
+  </ul>
+
+  <!-- ============ 9. 処理シーケンス ============ -->
+  <h2 id="sec9">9. 処理シーケンス</h2>
+
+  <h3>9.1 ログイン（Google OAuth）</h3>
+  <ol class="steps">
+    <li><strong>S-01</strong>「Googleでログイン」押下 → ブラウザがA-01へ遷移</li>
+    <li><strong>FastAPI</strong> stateを生成しGoogle認可URLへ302リダイレクト</li>
+    <li><strong>Google</strong> 認証・同意後、認可コード付きでA-02へリダイレクト</li>
+    <li><strong>FastAPI</strong> トークン交換→IDトークン検証→ドメイン照合（NG時7.2節のerror付きで/loginへ）</li>
+    <li><strong>FastAPI</strong> T-01を検索、未登録ならrole='member'で自動登録、is_active=falseなら拒否</li>
+    <li><strong>FastAPI</strong> セッションJWT発行→HttpOnly Cookie→/ へリダイレクト、T-16へログイン結果を記録</li>
+    <li><strong>SPA</strong> A-04→A-05を呼び出し、S-02（サイドバー）を構築して最後に開いていたチャンネルを表示</li>
+  </ol>
+
+  <h3>9.2 メッセージ投稿とAI応答生成（メンション時）</h3>
+  <ol class="steps">
+    <li><strong>S-03</strong> 利用者が「@Kogack AI ...」を送信 → A-11</li>
+    <li><strong>FastAPI</strong> T-05へsender_type='human'で即時保存し201を返す（会話は止まらない、基本設計書8.7節）</li>
+    <li><strong>FastAPI</strong> メンションを検知し<code>services/ai_agent.py</code>を非同期タスクとして起動</li>
+    <li><strong>ai_agent.py</strong> T-05へgeneration_status='generating'のAI行を仮作成（body=''）（AIサポート10.3節）</li>
+    <li><strong>ai_agent.py</strong> T-08/T-11/T-12取得、直近履歴取得（F-13上限、基本設計書8.1節）、T-12の区分が「人が対応」ならAI呼び出しをせずchadminへの引き継ぎメッセージを直接投稿して終了（F-17）</li>
+    <li><strong>ai_agent.py</strong> それ以外はシステムプロンプト（AIサポート10.2節）を構成しOpenAI APIをFunction Calling付きで呼び出す</li>
+    <li><strong>OpenAI API</strong> 必要に応じ<code>search_documents</code>（基本設計書8.2節の権限フィルタリング経由）・<code>get_seat_availability</code>を呼び出し、最終回答を生成</li>
+    <li><strong>ai_agent.py</strong> 手順4の行をbody更新・generation_status=NULLに更新し、根拠等をT-07へ保存、T-13へ利用ログを記録</li>
+    <li><strong>SPA</strong> 3秒間隔ポーリング（A-10の<code>since</code>差分）で新着・更新を検知し表示を更新</li>
+  </ol>
+
+  <h3>9.3 自動応答トリガーの判定（同期・F-38）</h3>
+  <ol class="steps">
+    <li><strong>A-11</strong> 投稿保存後、<code>trigger_matcher.py</code>を同期呼び出し（sender_type='human'の投稿のみ対象、連鎖防止）</li>
+    <li>当該チャンネルのT-21（is_active=true）を取得し、trigger_type/trigger_valueとの部分一致を判定</li>
+    <li>一致するルールがあれば、そのままT-05へsender_type='bot', trigger_rule_id=当該ルールIDで新規発言を作成（スレッド内投稿ならthread_parent_idを引き継ぐ）</li>
+    <li>AIエージェント処理（9.2節）は起動しない（BOT発言はAIの応答対象外）</li>
+  </ol>
+
+  <h3>9.4 送信予約・定期投稿の送信（ディスパッチャ）</h3>
+  <ol class="steps">
+    <li><strong>アプリ起動時</strong> <code>scheduled_dispatcher.py</code>をasyncioバックグラウンドタスクとして開始</li>
+    <li>30秒間隔でループ: T-18から<code>status='pending' AND scheduled_at&lt;=now()</code>を取得し、通常の投稿処理相当でT-05へ発言化、status='sent'に更新</li>
+    <li>同ループでT-19から<code>is_active=true AND next_run_at&lt;=now()</code>を取得し、sender_type='bot', recurring_post_id=当該IDでT-05へ発言化、frequencyに応じ次回<code>next_run_at</code>を計算して更新、last_sent_atを更新</li>
+    <li>単一インスタンス前提（基本設計書10章）。将来複数インスタンス化する場合は<code>UPDATE ... WHERE status='pending' RETURNING</code>形式のアトミックな取得へ変更する</li>
+  </ol>
+
+  <h3>9.5 ドキュメント質問応答の権限フィルタリング（F-19〜F-21）</h3>
+  <ol class="steps">
+    <li>9.2節手順7で<code>search_documents(query)</code>が呼ばれる</li>
+    <li>索引（基本設計書8.2節、S-08「今すぐ同期」で更新済み）から候補文書を取得</li>
+    <li>候補ごとに<code>drive_client.py</code>で質問者本人のDrive閲覧権限を確認し、権限なしは除外（キャッシュは数分程度まで許容）</li>
+    <li>残った候補のうち当該チャンネルのT-10範囲内のもののみをAIに渡す（範囲外は9.2節のout_of_scope_policyに従う、基本設計書8.2節）</li>
+    <li>回答生成後、根拠文書をT-07 message_blocks（citation）として保存</li>
+  </ol>
+
+  <h3>9.6 実行前確認（F-25、本リリースでは到達しない設計上の骨格）</h3>
+  <ol class="steps">
+    <li>書き込み系ツールが呼ばれるとT-15へstatus='pending'で登録し、S-03/S-04上にS-07モーダルを表示</li>
+    <li>利用者が「実行する」→A-34→status='confirmed'（次フェーズで実際の連携先書き込みに接続）</li>
+    <li>利用者が「キャンセル」→A-35→status='cancelled'</li>
+  </ol>
+
+  <footer class="doc-footer">
+    <span>AIネイティブチャットシステム（Kogack） / 詳細設計書（総論）</span>
+    <span>Ver 1.4 / 2026-08-24</span>
+  </footer>
+</div>
+</body>
+</html>

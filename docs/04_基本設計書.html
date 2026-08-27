@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>基本設計書 | AIネイティブチャットシステム（Kogack）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<script src="_sidenav.js"></script>
+<div class="doc">
+
+  <!-- ============ 表紙 ============ -->
+  <div class="cover">
+    <span class="doc-type">基本設計書</span>
+    <h1>基本設計書</h1>
+    <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
+    <div class="meta">
+      <span>作成日: 2026-08-19</span>
+      <span>版数: 1.14</span>
+      <span>作成: コガソフトウェア株式会社</span>
+    </div>
+    <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
+  </div>
+
+  <!-- ============ 改訂履歴 ============ -->
+  <h2>改訂履歴</h2>
+  <table>
+    <thead><tr><th>版数</th><th>日付</th><th>改訂内容</th></tr></thead>
+    <tbody>
+      <tr><td>1.0</td><td>2026-08-19</td><td>初版。要件定義書v2.7・画面モックアップ（S-01〜S-08、補足01〜02）をもとに、システム構成・認証認可・画面・機能・DB・API・AIエージェント・非機能の各設計を定義した。</td></tr>
+      <tr><td>1.1</td><td>2026-08-19</td><td>要件定義書v1.6（画面モックアップ検討で見つかった追加分）を反映（変更箇所は本文中に赤字で表示）。F-33「チャンネル管理者の変更」を新設し、T-08にout_of_scope_policy・fallback_handoff_user_idを追加、API A-45〜A-48を新設した。S-06のタブ構成、S-02のサブ機能（メンバー一覧・補足03）、AIエージェント設計8.2・8.3節を更新した。</td></tr>
+      <tr><td>1.2</td><td>2026-08-20</td><td>要件定義書v1.7（F-05のグループDM対応）を反映（変更箇所は本文中に赤字で表示）。T-04 direct_messagesから当事者2名の固定カラムを廃し、新規T-17 direct_message_membersで参加者（2名以上）を表現するよう変更。ER図・API A-16〜A-19・5.3節を更新し、設計判断を追記した。</td></tr>
+      <tr><td>1.3</td><td>2026-08-20</td><td>要件定義書v1.8（F-34「チャンネルの公開範囲」新設）を反映（変更箇所は本文中に赤字で表示）。T-02.is_publicを「対象外だが将来拡張のため保持」から実運用のカラムに変更。API A-05・A-07・A-08を非公開チャンネル対応に更新し、公開/非公開切替の新規API A-49を追加。新規5.14節・権限マトリクス・RLS方針を更新した。</td></tr>
+      <tr><td>1.4</td><td>2026-08-20</td><td>要件定義書v1.9（F-35「メッセージの送信予約」新設）を反映（変更箇所は本文中に赤字で表示）。新規T-18 scheduled_messagesとAPI A-50〜A-52を追加し、指定時刻に送信するバックグラウンドディスパッチャの方式を2.2・2.4節・新規5.15節に定義した。S-03/S-04の画面設計・権限マトリクス・非機能設計・前提制約を更新した。</td></tr>
+      <tr><td>1.5</td><td>2026-08-20</td><td>要件定義書v1.10（F-36「定期投稿（bot投稿）」新設）を反映（変更箇所は本文中に赤字で表示）。新規T-19 recurring_postsを追加し、T-05 messagesにsender_type='bot'とbot_display_name・bot_icon・recurring_post_idを追加。API A-53〜A-56を新設し、F-35のディスパッチャを拡張して繰り返し送信に対応させた（新規5.16節）。S-06に「定期投稿」タブ、S-03にBOTバッジ付きメッセージを追加し、権限マトリクスを更新した。</td></tr>
+      <tr><td>1.6</td><td>2026-08-20</td><td>要件定義書v1.11（F-36の宛先を個人＝複数可へ拡張）を反映（変更箇所は本文中に赤字で表示）。T-19 recurring_postsにdestination_type（'channel'/'individuals'）を追加しchannel_idを任意化、新規T-20 recurring_post_recipientsを追加。個人宛てはDM経路（T-04/T-17）を予約システムアカウント（T-01.is_system、新規カラム）経由で流用し、既存のDM基盤を再利用する設計とした。API A-57〜A-60を新設。個人宛ては作成者本人のみが閲覧・編集でき、チャンネル宛て（既存、chadmin/admin限定）とは別の権限モデルとした（6.2節「設計判断」）。ヘッダーに「🔁 リマインダー」を追加し、新規補足05「リマインダー」で個人宛てルールを作成・管理する。</td></tr>
+      <tr><td>1.7</td><td>2026-08-20</td><td>要件定義書v1.12（新規F-37「プロフィール画像のアップロード」、F-10・F-36のアイコンをアップロード対応に拡張）を反映（変更箇所は本文中に赤字で表示）。汎用の画像アップロードAPI A-61と自分のプロフィール更新API A-62を新設し、T-19にbot_icon_urlを追加。アイコン画像はSupabase Storageの専用パスに保存し、メッセージ添付とは異なり全認証済み利用者が読み取れる公開範囲とする設計判断を6.2節に追記。新規5.18節、S-06キャラクタタブ・定期投稿タブ、補足05、新規補足06「プロフィール画像を変更」を更新した。</td></tr>
+      <tr><td>1.8</td><td>2026-08-20</td><td>要件定義書v1.13（新規F-38「トリガーによる自動応答」）を反映（変更箇所は本文中に赤字で表示）。新規T-21 trigger_rulesを追加し、A-11（メッセージ投稿）の処理にキーワード・絵文字の一致判定を組み込んだ（時刻ベースのF-35/F-36ディスパッチャとは別方式。ループ防止のためsender_type='human'の発言のみ判定対象とする）。API A-63〜A-66を新設。新規5.19節、S-06に「自動応答トリガー」タブを追加し、権限マトリクス・非機能設計を更新した。</td></tr>
+      <tr><td>1.9</td><td>2026-08-20</td><td>要件定義書v1.14（F-36の宛先を個人宛て拡張前のチャンネルのみに戻す）を反映。v1.6で追加した個人宛てリマインダー（destination_type='individuals'）を対象外に戻し、T-19からdestination_typeを除去してchannel_idを再びNOT NULLに、新規T-20 recurring_post_recipientsとT-01.is_systemを削除、API A-57〜A-60を廃止した（T-20・A-57〜A-60は欠番とし採番し直さない）。ヘッダーの「🔁 リマインダー」・補足05「リマインダー」・関連する設計判断・権限マトリクス行を削除し、5.16節・関連画面/API/テーブルの記載をチャンネル宛てのみの内容に戻した。3.2節に「個人宛てのリマインダー」を対象外機能として追記。</td></tr>
+      <tr><td>1.10</td><td>2026-08-20</td><td>要件定義書v1.15を反映。画面S-06の名称を「チャンネルAI設定」から「チャンネル設定」に改称した（機能追加ではなく名称の見直し）。チャンネル管理者・定期投稿・自動応答トリガーなどAI設定以外の項目が増え、旧名称が実態と合わなくなったための対応。画面ID・関連ファイル名・DB/API上の識別子（T-08 channel_ai_settings等）は変更せず、画面一覧・見出し・S-03からの導線・システム構成図など利用者が目にする名称のみを更新した。</td></tr>
+      <tr><td>1.11</td><td>2026-08-20</td><td>画面モックアップのファイル名も<code>S-06_チャンネルAI設定.html</code>から<code>S-06_チャンネル設定.html</code>に変更した（v1.10では画面ID・ファイル名は据え置きとしていたが、本改訂で名称変更を徹底）。参照している全ファイルのリンクを更新した。</td></tr>
+      <tr class="diff-new"><td>1.12</td><td>2026-08-24</td><td>要件定義書v1.16（新規F-39「表示名の変更・同姓同名時の自動識別」・F-40「発言者・メンバーのプロフィール確認」・F-41「@メンションの候補選択・ID参照化」）を反映（変更箇所は本文中に赤字で表示）。氏名変更不可としていたF-37の方針を見直し、A-62で表示名（T-01.name）も更新できるようにした。メンションは自由入力の氏名一致から、A-46のチャンネル参加者一覧を使ったオートコンプリート＋user_id参照（T-07 message_blocksのblock_type='mention'として保持）に変更。新規API A-67（プロフィール詳細取得）を追加。新規5.20〜5.22節、S-02/S-03/補足06の画面設計、権限マトリクス、T-01・T-07・6.2節設計判断を更新した。詳細な検討経緯は<a href="../検討資料/README.md">検討資料</a>「発言者表示・メンションの識別性改善」を参照。</td></tr>
+      <tr class="diff-new"><td>1.13</td><td>2026-08-24</td><td>要件定義書v1.17（新規F-42「検索条件モディファイア」）を反映（変更箇所は本文中に赤字で表示）。横断検索（A-20）に<code>in:</code>/<code>from:</code>/<code>with:</code>/<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>/完全一致フレーズの各モディファイアを追加。from:/with:はF-41と同じくuser_idで解決するため新規API A-68（利用者検索。DM相手選択＝補足02の取得元でもあった設計上の抜けも解消）を追加した。新規5.23節、S-05の画面設計を更新した。</td></tr>
+      <tr class="diff-new"><td>1.14</td><td>2026-08-24</td><td>権限外パスへの直接アクセス時のフロントエンド挙動を確定した（従来「403表示または一覧画面へ誘導する」と未確定のまま4.2節に記載していた論点）。F-34で確立した「存在を伏せるべき対象は伏せる／権限不足は明示する」の使い分けをルーティングにも一貫して適用し、(1)非公開チャンネルへの未参加者はワークスペース（S-02）へ無言でリダイレクト、(2)参加中チャンネルのS-06にchadmin以外がアクセスした場合は当該チャンネルのS-03へ、S-08に非adminがアクセスした場合はS-02へ、それぞれトースト通知付きでリダイレクトする方針とした。require_channel_adminは非公開チャンネルの非参加者に対してはrequire_channel_memberと同じ404を返すよう挙動を明確化（5.1節相当、詳細は詳細設計書5.9節）。4.2節「共通レイアウト」callout、権限マトリクスの前提を更新した。</td></tr>
+      <tr class="diff-new"><td>1.15</td><td>2026-08-26</td><td>要件定義書v1.18（新規F-43「チャンネル参加の通知」）を反映（変更箇所は本文中に赤字で表示）。誰かがチャンネルに参加すると「（氏名）さんが参加しました。」というsender_type='bot'の発言をA-08の処理内でT-05へ作成する。新規テーブル・列は追加せず、F-36/F-38で確立したsender_type='bot'の枠組みをそのまま流用（bot_display_nameは固定で「システム通知」）。チャンネル作成（A-07）時の自動参加は対象外。5.2節・6.2節「設計判断」を更新した。詳細な検討経緯は<a href="../検討資料/README.md">検討資料</a>「チャンネル入室通知の追加」を参照。</td></tr>
+      <tr class="diff-new"><td>1.16</td><td>2026-08-27</td><td>サイドバーの未読バッジ（4.2節に記載済みだったがDB/API設計が未反映だった抜け）を実現するため、新規T-22 read_states（利用者ごとの最終既読時刻のみを保持）と、既読化API（チャンネル・DMそれぞれに新設）、A-05/A-16レスポンスへのunread_count追加を6.2節「設計判断」に記録した。未読件数はスレッド返信を含まない本体タイムラインの発言数として都度計算し、既読はその画面を開いていることをもって記録する（専用の既読ボタンは設けない）。</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 目次 ============ -->
+  <nav class="toc">
+    <strong>目次</strong>
+    <ol>
+      <li><a href="#sec1">はじめに</a></li>
+      <li><a href="#sec2">システム構成</a></li>
+      <li><a href="#sec3">認証・認可設計</a></li>
+      <li><a href="#sec4">画面設計</a></li>
+      <li><a href="#sec5">機能設計</a></li>
+      <li><a href="#sec6">データベース設計</a></li>
+      <li><a href="#sec7">API設計</a></li>
+      <li><a href="#sec8">AIエージェント設計</a></li>
+      <li><a href="#sec9">非機能設計</a></li>
+      <li><a href="#sec10">前提・制約</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============ 1. はじめに ============ -->
+  <h2 id="sec1">1. はじめに</h2>
+
+  <h3>1.1 本書の位置づけ</h3>
+  <p>本書は、AIネイティブチャットシステム（コードネーム: Kogack）の基本設計書である。要件定義書で定義された機能要件（F-01〜F-32）・画面要件（S-01〜S-08）・AI回答＆エージェント連携要件・権限要件・非機能要件を実現するためのシステム構成・認証認可方式・画面・機能・データベース・API・AIエージェントの設計方針を定める。実装レベルの詳細（カラム単位の入出力仕様、リクエスト/レスポンスのフィールド定義、プロンプトの具体的な文面、バリデーション規則など）は後続の詳細設計書で定義する。</p>
+  <p>本システムの4層構造（第0層 土台〜第3層 AIが動く）は<a href="01_要求仕様書.html#sec1">要求仕様書1.4節</a>を参照。本書はこのうち第0層（チャット基盤・認証）〜第3層（AIエージェント連携）のすべてを対象とする。各画面の具体的なレイアウト・UIは<a href="画面モックアップ/00_一覧.html">画面モックアップ</a>（S-01〜S-08、および補足01・補足02）を参照のこと。以下では各画面の設計概要のみ記す。</p>
+
+  <h3>1.2 要件定義書との関係</h3>
+  <p>本書の各設計は、要件定義書の要求事項ID・機能IDと以下のように対応する。ドキュメント間の相互参照は共通のID体系（REQ-xx / F-xx / S-xx / T-xx / A-xx）で行う。</p>
+  <table>
+    <thead><tr><th>要求ID</th><th>要求概要</th><th>本書での対応</th></tr></thead>
+    <tbody>
+      <tr><td>REQ-N-01</td><td>Google認証・許可ドメイン制限</td><td>認証・認可設計（3章）</td></tr>
+      <tr><td>REQ-F-01〜F-06</td><td>チャンネル・スレッド・メンション・DM・検索・ファイル共有</td><td>機能設計5.2〜5.4節、画面設計4章、DB設計T-01〜T-07</td></tr>
+      <tr><td>REQ-F-07〜F-17</td><td>チャンネルAIの振る舞い定義・スキル・履歴参照・要約・反応・自動対応・引き継ぎ・AI明示</td><td>機能設計5.5〜5.7節、AIエージェント設計8.3節、S-06、T-08〜T-12</td></tr>
+      <tr><td>REQ-F-18〜F-21</td><td>ドキュメント質問応答・根拠提示・閲覧権限フィルタリング・参照範囲管理</td><td>機能設計5.8節、AIエージェント設計8.2節、T-09・T-10</td></tr>
+      <tr><td>REQ-F-22〜F-27</td><td>社内システム連携・実行前確認・操作履歴・権限継承</td><td>機能設計5.9〜5.10節、AIエージェント設計8.4〜8.5節、S-07、T-15</td></tr>
+      <tr><td>REQ-N-02</td><td>会話の参照範囲の制御</td><td>認証・認可設計3.3節、権限マトリクス</td></tr>
+      <tr><td>REQ-N-03</td><td>AI利用コストの把握・制限</td><td>AIエージェント設計8.6節、S-08、T-13・T-14</td></tr>
+      <tr><td>REQ-N-04</td><td>AI回答が正しいとは限らないことの明示</td><td>機能設計5.12節、AIエージェント設計8.8節</td></tr>
+      <tr><td>REQ-N-05</td><td>会話の応答が妨げられないこと</td><td>AIエージェント設計8.7節、システム構成2.1節（ポーリング方式）</td></tr>
+      <tr><td>REQ-N-07</td><td>既存システム（LCC CRM）の技術構成踏襲</td><td>システム構成（2章）、非機能設計（9章）</td></tr>
+      <tr class="diff-new"><td>（新規・F-33）</td><td>チャンネル管理者の変更（画面モックアップ検討時の気づき）</td><td>機能設計5.13節、画面設計4.8節、S-06、T-03、A-47・A-48</td></tr>
+      <tr class="diff-new"><td>REQ-F-01（F-34）</td><td>チャンネルの公開範囲（非公開チャンネル。MVPスコープ決定では一度見送ったが本改訂で対象に追加）</td><td>機能設計5.14節、画面設計4.4・4.5節、T-02、A-05・A-07・A-08・A-49</td></tr>
+      <tr class="diff-new"><td>（新規・F-35）</td><td>メッセージの送信予約（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td><td>機能設計5.15節、画面設計4.5・4.6節、補足04、T-18、A-50〜A-52</td></tr>
+      <tr class="diff-new"><td>（新規・F-36）</td><td>定期投稿・bot投稿（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td><td>機能設計5.16節、画面設計4.5・4.8節、T-05, T-19、A-53〜A-56</td></tr>
+      <tr class="diff-new"><td>（新規・F-37）</td><td>プロフィール画像のアップロード（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td><td>機能設計5.18節、画面設計4.4節、補足06、T-01、A-61, A-62</td></tr>
+      <tr class="diff-new"><td>（新規・F-38）</td><td>トリガーによる自動応答（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td><td>機能設計5.19節、画面設計4.8節、T-05, T-21、A-63〜A-66</td></tr>
+      <tr class="diff-new"><td>（新規・F-39）</td><td>表示名の変更・同姓同名時の自動識別（発言者取り違えの防止のため本改訂で追加。上位のREQ番号なし）</td><td>機能設計5.20節、画面設計4.4節、補足06、T-01、A-46, A-62</td></tr>
+      <tr class="diff-new"><td>（新規・F-40）</td><td>発言者・メンバーのプロフィール確認（同上）</td><td>機能設計5.21節、画面設計4.5節、T-01、A-67</td></tr>
+      <tr class="diff-new"><td>（新規・F-41）</td><td>@メンションの候補選択・ID参照化（同姓同名時のメンション先の曖昧さ解消のため本改訂で追加。上位のREQ番号なし）</td><td>機能設計5.22節、画面設計4.5節、T-05, T-07、A-11, A-46</td></tr>
+      <tr class="diff-new"><td>（新規・F-42）</td><td>検索条件モディファイア（利用者からの追加要望により本改訂で追加。上位のREQ番号なし）</td><td>機能設計5.23節、画面設計4.7節、A-20, A-68</td></tr>
+    </tbody>
+  </table>
+
+  <h3>1.3 対象読者</h3>
+  <ul>
+    <li>本システムの開発を担当する開発者（詳細設計・実装の入力として利用）</li>
+    <li>プロジェクトの発注側担当者・レビュー担当者（設計方針の妥当性確認）</li>
+    <li>AI開発研修の受講者（設計ドキュメントのサンプルとして参照）</li>
+  </ul>
+
+  <!-- ============ 2. システム構成 ============ -->
+  <h2 id="sec2">2. システム構成</h2>
+
+  <h3>2.1 システム構成図</h3>
+  <p>本システムは、React製SPAをフロントエンドとし、Koyeb上でホスティングするFastAPIがAPIを提供、データストアにSupabaseのPostgreSQLを用いる3層構成である。認証はGoogle OAuth 2.0、社内ドキュメントの参照はGoogle Drive APIと連携する。AIの回答生成には外部AI API（OpenAI API）を用い、座席予約システムとはREST API経由で連携する。既存システムLCC CRMの構成を踏襲する（REQ-N-07）。</p>
+
+  <div class="diagram">
+    <svg width="860" height="380" viewBox="0 0 860 380" font-family="'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif">
+      <defs>
+        <marker id="arw" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#1e40af"/>
+        </marker>
+        <marker id="arwg" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#8a8f98"/>
+        </marker>
+      </defs>
+
+      <!-- ブラウザ -->
+      <rect x="20" y="140" width="150" height="90" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="95" y="168" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a8a">ブラウザ</text>
+      <text x="95" y="188" text-anchor="middle" font-size="12" fill="#1a1d21">React SPA</text>
+      <text x="95" y="206" text-anchor="middle" font-size="10.5" fill="#60656d">3秒間隔ポーリング</text>
+
+      <!-- Koyeb 枠 -->
+      <rect x="230" y="105" width="220" height="160" rx="8" fill="#ffffff" stroke="#d9dde3" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <text x="340" y="126" text-anchor="middle" font-size="11.5" font-weight="600" fill="#8a8f98">Koyeb（main / staging）</text>
+      <rect x="255" y="138" width="170" height="100" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="340" y="164" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a8a">FastAPI</text>
+      <text x="340" y="184" text-anchor="middle" font-size="12" fill="#1a1d21">Uvicorn + asyncpg</text>
+      <text x="340" y="200" text-anchor="middle" font-size="10.5" fill="#60656d">API提供 / SPA静的配信</text>
+      <text x="340" y="216" text-anchor="middle" font-size="10.5" fill="#60656d">AIエージェント処理（8章）</text>
+
+      <!-- Supabase -->
+      <rect x="500" y="140" width="150" height="90" rx="8" fill="#f5f7f9" stroke="#60656d" stroke-width="1.5"/>
+      <text x="575" y="166" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1d21">Supabase</text>
+      <text x="575" y="186" text-anchor="middle" font-size="12" fill="#1a1d21">PostgreSQL / Storage</text>
+      <text x="575" y="203" text-anchor="middle" font-size="10.5" fill="#60656d">全テーブルRLS有効</text>
+
+      <!-- 外部AI API -->
+      <rect x="700" y="20" width="145" height="72" rx="8" fill="#fafbfc" stroke="#8a8f98" stroke-width="1.5"/>
+      <text x="772" y="44" text-anchor="middle" font-size="12" font-weight="600" fill="#1a1d21">外部AI API</text>
+      <text x="772" y="62" text-anchor="middle" font-size="10.5" fill="#60656d">OpenAI API</text>
+      <text x="772" y="77" text-anchor="middle" font-size="10.5" fill="#60656d">Chat Completions / Function Calling</text>
+
+      <!-- Google Drive API -->
+      <rect x="700" y="105" width="145" height="72" rx="8" fill="#fafbfc" stroke="#8a8f98" stroke-width="1.5"/>
+      <text x="772" y="129" text-anchor="middle" font-size="12" font-weight="600" fill="#1a1d21">Google Drive API</text>
+      <text x="772" y="147" text-anchor="middle" font-size="10.5" fill="#60656d">文書の参照・</text>
+      <text x="772" y="162" text-anchor="middle" font-size="10.5" fill="#60656d">閲覧権限確認</text>
+
+      <!-- 座席予約システム -->
+      <rect x="700" y="190" width="145" height="72" rx="8" fill="#fafbfc" stroke="#8a8f98" stroke-width="1.5"/>
+      <text x="772" y="214" text-anchor="middle" font-size="12" font-weight="600" fill="#1a1d21">座席予約システム</text>
+      <text x="772" y="232" text-anchor="middle" font-size="10.5" fill="#60656d">参照API（空き状況）</text>
+      <text x="772" y="247" text-anchor="middle" font-size="10.5" fill="#b45309">連携方式は8.4節参照</text>
+
+      <!-- Google OAuth -->
+      <rect x="150" y="290" width="200" height="56" rx="8" fill="#fafbfc" stroke="#8a8f98" stroke-width="1.5"/>
+      <text x="250" y="313" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1d21">Google OAuth 2.0</text>
+      <text x="250" y="331" text-anchor="middle" font-size="10.5" fill="#60656d">Google Workspace 認証基盤</text>
+
+      <!-- 矢印: ブラウザ ↔ FastAPI -->
+      <line x1="170" y1="170" x2="252" y2="170" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw)"/>
+      <line x1="252" y1="195" x2="170" y2="195" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw)"/>
+      <text x="211" y="161" text-anchor="middle" font-size="10.5" fill="#1e40af">HTTPS /api（JWT Cookie）</text>
+      <text x="211" y="213" text-anchor="middle" font-size="10.5" fill="#60656d">HTML / JS / JSON</text>
+
+      <!-- 矢印: FastAPI ↔ Supabase -->
+      <line x1="425" y1="185" x2="497" y2="185" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw)"/>
+      <text x="461" y="176" text-anchor="middle" font-size="10.5" fill="#1e40af">asyncpg</text>
+
+      <!-- 矢印: FastAPI → 外部AI/Drive/座席予約 -->
+      <line x1="425" y1="150" x2="697" y2="60" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw)"/>
+      <line x1="425" y1="165" x2="697" y2="145" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw)"/>
+      <line x1="425" y1="200" x2="697" y2="230" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw)"/>
+
+      <!-- 矢印: ブラウザ → Google（認可リダイレクト） -->
+      <line x1="100" y1="230" x2="200" y2="288" stroke="#8a8f98" stroke-width="1.5" marker-end="url(#arwg)"/>
+      <text x="110" y="268" text-anchor="middle" font-size="10.5" fill="#8a8f98">認可リダイレクト</text>
+
+      <!-- 矢印: FastAPI ↔ Google（トークン交換） -->
+      <line x1="340" y1="238" x2="310" y2="288" stroke="#8a8f98" stroke-width="1.5" marker-end="url(#arwg)"/>
+      <text x="400" y="270" text-anchor="middle" font-size="10.5" fill="#8a8f98">トークン交換・検証</text>
+
+      <!-- タイトル -->
+      <text x="430" y="20" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">Kogack システム構成（本番）</text>
+    </svg>
+  </div>
+
+  <h3>2.2 技術スタック</h3>
+  <p>技術スタックはLCC CRMを踏襲する（REQ-N-07）。要件定義書8.1節で「基本設計書で定める」とされていた4項目（AI提供元・リアルタイム配信方式・ファイルストレージ・座席予約システム連携方式）を本節で確定する。</p>
+  <table>
+    <thead><tr><th>レイヤー</th><th>技術</th></tr></thead>
+    <tbody>
+      <tr><td>Frontend</td><td>React 19 + TypeScript + Vite + Tailwind CSS + react-router + SWR</td></tr>
+      <tr><td>Backend</td><td>FastAPI (Python) + Uvicorn + asyncpg</td></tr>
+      <tr><td>Database</td><td>PostgreSQL (Supabase)、全テーブルRLS有効</td></tr>
+      <tr><td>認証</td><td>Google OAuth 2.0 + セッションJWT（HttpOnly Cookie）、<code>ALLOWED_DOMAINS</code> による制限（既定: kogasoftware.com）</td></tr>
+      <tr><td>AI（本書で確定）</td><td>OpenAI API（Chat Completions + Function Calling）。使用モデルは環境変数 <code>AI_MODEL</code> で指定し、画面上でのモデル切替機能は設けない（要件定義書に定めがないため）</td></tr>
+      <tr><td>ドキュメント連携</td><td>Google Drive API（文書の参照・権限確認。8.2節）</td></tr>
+      <tr><td>リアルタイム配信（本書で確定）</td><td>WebSocket等は用いず、フロントエンドが3秒間隔でポーリングする方式とする。要件定義書7章の目標値（5秒以内反映）に対して余裕を持たせた間隔とし、将来的にWebSocket/SSEへ移行する余地は残す</td></tr>
+      <tr><td>ファイルストレージ（本書で確定）</td><td>Supabase Storage。DBと同一ベンダーとし、認証・アクセス制御の仕組みを流用して運用を簡素化する</td></tr>
+      <tr class="diff-new"><td>アイコン画像のアップロード（本書で追加）</td><td>個人アイコン（T-01.picture_url）・チャンネルAIアイコン（T-08.persona_icon_url）・BOTアイコン（T-19.bot_icon_url）を対象に、共通の画像アップロードAPI（A-61）を用意する。JPEG/PNG/WebP、1件5MBまで。Supabase Storageの<code>icons/</code>パス配下に保存し、message_attachments（チャンネル/DM参加者限定）とは異なり全認証済み利用者が読み取れる公開範囲とする（アイコンは組織内のあらゆる画面に表示されうるため。6.2節「設計判断」）。アップロード画像の内容審査（モデレーション）、旧ファイルの自動削除は対象外（3.2節）。</td></tr>
+      <tr><td>連携先システム（本書で確定）</td><td>座席予約システムの参照REST APIを前提とする。具体的なエンドポイント仕様は連携先システムの実装状況に依存するため、詳細設計書で確定する（8.4節・10章参照。外部依存リスクが残る）</td></tr>
+      <tr><td>ホスティング</td><td>Koyeb（main=本番 / staging=ステージング）。本番はフロントをビルドしFastAPIが静的配信するSPA構成（LCC CRM踏襲）</td></tr>
+      <tr><td>開発</td><td>Vite devサーバー(3000)→FastAPI(8001)へ /api プロキシ</td></tr>
+      <tr class="diff-new"><td>予約メッセージの送信（本書で追加）</td><td>外部のジョブスケジューラ（Celery等）は導入せず、FastAPIプロセス内でアプリ起動時に開始するasyncioバックグラウンドタスクとして実装する（<code>services/scheduled_dispatcher.py</code>）。30秒間隔で <code>scheduled_messages</code>（T-18）のうち <code>status='pending'</code> かつ <code>scheduled_at &lt;= now()</code> の行を検出し、通常の投稿処理（A-11相当）を呼び出してT-05へ発言化する。既存の3秒間隔ポーリング（リアルタイム配信）とは独立した仕組み。単一インスタンス運用を前提とする（10章）。<span class="diff-new">同じディスパッチャが <code>recurring_posts</code>（T-19、F-36）も対象に含み、<code>next_run_at &lt;= now()</code> かつ <code>is_active=true</code> の行を検出してsender_type='bot'のT-05発言を作成し、次回時刻を計算して<code>next_run_at</code>を更新する（6.2節「設計判断」参照）。</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>2.3 開発時と本番時の構成差</h3>
+  <table>
+    <thead><tr><th>項目</th><th>開発時</th><th>本番時（Koyeb）</th></tr></thead>
+    <tbody>
+      <tr><td>フロント配信</td><td>Vite devサーバー（ポート3000）がHMR付きで配信</td><td><code>vite build</code> の成果物（静的ファイル）をFastAPIが静的配信</td></tr>
+      <tr><td>API呼び出し</td><td>Viteのプロキシ設定で <code>/api</code> をFastAPI（ポート8001）へ転送。同一オリジン扱いのためCORS設定不要</td><td>同一オリジン（FastAPIが静的配信とAPIを兼ねる）。<code>/api</code> 以外のパスはSPAの <code>index.html</code> にフォールバック</td></tr>
+      <tr><td>プロセス</td><td>Vite と Uvicorn を個別に起動（2プロセス）</td><td>Uvicorn 1プロセス</td></tr>
+      <tr><td>通信</td><td>http（localhost）</td><td>HTTPS必須</td></tr>
+      <tr><td>環境識別</td><td colspan="2">環境変数 <code>APP_ENV</code> で識別。その他の主要環境変数: <code>DATABASE_URL</code>, <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code>, <code>GOOGLE_REDIRECT_URI</code>, <code>JWT_SECRET</code>, <code>ALLOWED_DOMAINS</code>, <code>OPENAI_API_KEY</code>, <code>AI_MODEL</code>, <code>SEAT_RESERVATION_API_BASE</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>2.4 アプリケーション内部構成</h3>
+  <p>ソースコード構成はLCC CRMの規約に準拠する。</p>
+  <table>
+    <thead><tr><th>区分</th><th>構成</th></tr></thead>
+    <tbody>
+      <tr><td>バックエンド</td><td><code>backend/main.py</code>, <code>database.py</code>（SCHEMA定義）, <code>models.py</code>, <code>google_auth.py</code>, <code>auth_helpers.py</code>（権限デコレーター）, <code>routers/</code>（auth.py, channels.py, messages.py, dms.py, search.py, attachments.py, ai_settings.py, admin.py<span class="diff-new">, scheduled_messages.py, recurring_posts.py, users.py, trigger_rules.py</span>）, <code>services/</code>（<code>ai_agent.py</code> AI応答生成・Function Calling, <code>drive_client.py</code> Google Drive連携, <code>seat_reservation_client.py</code> 座席予約連携, <code>ai_cost.py</code> 利用量・コスト集計<span class="diff-new">, <code>scheduled_dispatcher.py</code> 予約メッセージ・定期投稿の送信（asyncioバックグラウンドタスク）, <code>trigger_matcher.py</code> キーワード/絵文字トリガーの一致判定・自動応答投稿（F-38）</span>）</td></tr>
+      <tr><td>フロントエンド</td><td><code>frontend/src/App.tsx</code>（ルーティング・認証ガード）, <code>pages/</code>, <code>components/</code>（レイアウト・メッセージブロック描画・モーダル・トースト）, <code>components/blocks/</code>（citation / external_system / quote_reference / pending_action の各メッセージブロック描画。6.2節 T-07参照）, <code>hooks/</code>（ポーリングhook等）, <code>lib/</code>, <code>types/</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 3. 認証・認可設計 ============ -->
+  <h2 id="sec3">3. 認証・認可設計</h2>
+
+  <h3>3.1 Google OAuth 2.0 認証フロー（F-01）</h3>
+  <p>認証はGoogle OAuth 2.0（認可コードフロー）による。フロー全体の概要を以下に示す。</p>
+  <ol>
+    <li>未認証ユーザーが S-01（ログイン画面）で「Googleでログイン」を押下すると、ブラウザは A-01 <code>GET /api/auth/login</code> にアクセスする。</li>
+    <li>バックエンドは state を生成し、Google の OAuth 認可URLへリダイレクトする。</li>
+    <li>ユーザーがGoogleアカウントで認証・同意すると、Googleは認可コード付きで A-02 <code>GET /api/auth/callback</code> にリダイレクトする。</li>
+    <li>バックエンドは認可コードをGoogleのトークンエンドポイントでアクセストークン・IDトークンに交換し、ユーザーのメールアドレス・氏名・プロフィール画像を取得する。</li>
+    <li>メールアドレスのドメインを <code>ALLOWED_DOMAINS</code>（既定: kogasoftware.com）と照合する。許可ドメイン外の場合は認証を拒否する（REQ-N-01。S-01のエラー表示例）。</li>
+    <li>T-01 users をメールアドレスで検索する。未登録なら role='member' で自動登録し、その時点のGoogleアカウントの氏名・写真を <code>name</code>・<code>picture_url</code> の初期値とする（初回ログイン。新規作成・削除の管理画面操作は行わない）。登録済みで <code>is_active=false</code> の場合はログインを拒否する。<span class="diff-new">2回目以降のログインでは <code>name</code>・<code>picture_url</code> をGoogle側の値で上書きしない（本人がF-37・F-39で変更した内容を優先する。5.20節「設計判断」）。</span></li>
+    <li>ユーザーID・ロールを含むセッションJWTを発行し、HttpOnly Cookie にセットして <code>/</code> へリダイレクトする。</li>
+    <li>SPAは起動時に A-04 <code>GET /api/auth/me</code> でログイン中ユーザー情報（id, email, name, role, picture_url）を取得し、参加チャンネルの取得（A-05）を経て最後に開いていたチャンネル、または最初のチャンネルを表示する（S-02の実装。4.4節）。</li>
+    <li>ログアウトは A-03 <code>POST /api/auth/logout</code> でセッションCookieを破棄する。</li>
+    <li>ログイン成功・失敗はいずれも T-16 audit_logs に記録する（9.4節）。</li>
+  </ol>
+
+  <h3>3.2 セッション管理</h3>
+  <table>
+    <thead><tr><th>項目</th><th>設計</th></tr></thead>
+    <tbody>
+      <tr><td>セッション方式</td><td>セッションJWT。署名鍵は環境変数 <code>JWT_SECRET</code> で管理</td></tr>
+      <tr><td>格納先</td><td>HttpOnly Cookie（JavaScriptから読み取り不可とし、XSSによるトークン窃取を防止）。本番は Secure 属性を付与し、SameSite 属性によりCSRFリスクを低減</td></tr>
+      <tr><td>JWTペイロード</td><td>ユーザー識別子・ロール（member/admin。3.3節）・有効期限。詳細なクレーム構成は詳細設計書で定義</td></tr>
+      <tr><td>検証</td><td>A-01・A-02 を除く全APIでリクエスト毎にJWTを検証。無効・期限切れは 401 を返却しSPAは S-01 へ誘導</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.3 認可（ロールベースアクセス制御）</h3>
+  <p>グローバルなロールは member / admin の2値、これに加えてチャンネル単位で付与される「チャンネル管理者（chadmin）」の状態を持つ、という2階層で表現する（要件定義書6章の3ロール制に対応。詳細は6.3節「設計判断」を参照）。認可判定はすべてサーバー側（<code>auth_helpers.py</code> の権限デコレーター）で行い、フロントエンドの表示制御はあくまで利便性のための補助とする（REQ-N-02）。</p>
+  <table>
+    <thead><tr><th>ロール</th><th>コード</th><th>本書での表現</th><th>できること</th></tr></thead>
+    <tbody>
+      <tr><td>一般利用者</td><td><span class="badge badge-member">member</span></td><td>T-01 users.role = 'member'</td><td>参加チャンネル・DMでの会話、チャンネルAIへの質問（本人の閲覧権限の範囲内）</td></tr>
+      <tr><td>チャンネル管理者</td><td><span class="badge badge-chadmin">chadmin</span></td><td>T-03 channel_members.is_channel_admin = true（チャンネル単位）</td><td>member権限＋自分が管理者のチャンネルの設定（S-06）編集、当該チャンネルの引き継ぎ依頼への対応</td></tr>
+      <tr><td>システム管理者</td><td><span class="badge badge-admin">admin</span></td><td>T-01 users.role = 'admin'</td><td>chadmin権限＋全チャンネルのAI設定、参照対象フォルダの追加・削除、利用者のロール付与・変更とアカウントの有効化・無効化、AI利用状況・監査ログの閲覧</td></tr>
+    </tbody>
+  </table>
+
+  <p>権限マトリクス（○=可、×=不可）:</p>
+  <table>
+    <thead><tr><th>操作</th><th><span class="badge badge-member">member</span></th><th><span class="badge badge-chadmin">chadmin</span></th><th><span class="badge badge-admin">admin</span></th></tr></thead>
+    <tbody>
+      <tr><td>参加チャンネル・DMでの会話</td><td>○</td><td>○</td><td>○</td></tr>
+      <tr><td>チャンネルAIへの質問</td><td>○（本人の閲覧権限の範囲）</td><td>○</td><td>○</td></tr>
+      <tr><td>横断検索</td><td>○（自分が参照可能な範囲）</td><td>○</td><td>○</td></tr>
+      <tr><td>チャンネルの作成</td><td>○</td><td>○</td><td>○</td></tr>
+      <tr><td>チャンネルの削除</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>チャンネルの公開／非公開の切り替え（F-34）</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>非公開チャンネルへのメンバー追加（F-34）</td><td>○（自分が参加しているチャンネルのみ）</td><td>○</td><td>○</td></tr>
+      <tr class="diff-new"><td>メッセージの送信予約・予約中メッセージの確認とキャンセル（F-35）</td><td>○（自分が予約したものだけ）</td><td>○（同左）</td><td>○（同左。他者の予約は不可視）</td></tr>
+      <tr class="diff-new"><td>チャンネル宛て定期投稿（BOT投稿）の作成・編集・削除・一時停止（F-36）</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>自分のプロフィールの変更（表示名・画像。F-37, F-39）</td><td>○</td><td>○</td><td>○</td></tr>
+      <tr class="diff-new"><td>自動応答トリガーの作成・編集・削除・一時停止（F-38）</td><td>×</td><td>○（自分が管理者のチャンネルのみ）</td><td>○（全チャンネル）</td></tr>
+      <tr class="diff-new"><td>他の利用者のプロフィール確認（アイコン・表示名・メールアドレス・ロール。F-40）</td><td>○</td><td>○</td><td>○</td></tr>
+      <tr><td>自分が担当するチャンネルのAI設定編集</td><td>×</td><td>○</td><td>○</td></tr>
+      <tr><td>担当外チャンネルのAI設定編集</td><td>×</td><td>×</td><td>○</td></tr>
+      <tr><td>参照対象フォルダの追加・削除（全体）</td><td>×</td><td>×</td><td>○</td></tr>
+      <tr><td>AI利用状況・コスト・監査ログの確認</td><td>×</td><td>×</td><td>○</td></tr>
+      <tr><td>利用者のロール付与・変更、アカウント有効化・無効化</td><td>×</td><td>×</td><td>○</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>初回ログインとアカウント無効化:</strong> 許可ドメインのGoogleアカウントであれば初回ログイン時に自動でユーザー登録され、ロールは member となる（管理者による事前登録は不要）。無効化されたユーザー（<code>is_active=false</code>）はログイン不可であり、既存セッションでのAPIアクセスも拒否する。無効化後も、既存の発言は削除せず表示を維持する（要件定義書5.2節）。
+  </div>
+
+  <!-- ============ 4. 画面設計 ============ -->
+  <h2 id="sec4">4. 画面設計</h2>
+
+  <h3>4.1 画面一覧</h3>
+  <table>
+    <thead><tr><th>画面ID</th><th>画面名</th><th>パス</th><th>アクセス可能ロール</th><th>概要</th></tr></thead>
+    <tbody>
+      <tr><td>S-01</td><td>ログイン</td><td><code>/login</code></td><td>全員（未認証）</td><td>Googleでログインボタンのみのシンプルな画面</td></tr>
+      <tr><td>S-02</td><td>ワークスペース</td><td><code>/</code>（共通レイアウト）</td><td>全ロール</td><td>参加中のチャンネル・DM一覧を表示するサイドバー。単独の画面としては持たず、S-03以降の全画面に共通のシェル（ヘッダー＋サイドバー）として実装する（4.4節）</td></tr>
+      <tr><td>S-03</td><td>チャンネル会話</td><td><code>/channels/:channelId</code></td><td>チャンネル参加者</td><td>メッセージ一覧・投稿欄。AIの発言はバッジで明示。連携先システムの参照結果もここに表示する。要約ボタンあり</td></tr>
+      <tr><td>S-04</td><td>スレッド表示</td><td><code>/channels/:channelId?thread=:messageId</code></td><td>チャンネル参加者</td><td>特定の発言に対する返信をまとめて表示するパネル。S-03に重ねて右側に表示する</td></tr>
+      <tr><td>S-05</td><td>横断検索</td><td><code>/search?q=...</code></td><td>全ロール</td><td>発言・ファイル・ドキュメント根拠の横断検索。結果は利用者の参照権限の範囲に限定</td></tr>
+      <tr><td>S-06</td><td><span class="diff-new">チャンネル設定</span></td><td><code>/channels/:channelId/settings</code></td><td>本人が管理者権限を持つチャンネルの<span class="badge badge-chadmin">chadmin</span>, <span class="badge badge-admin">admin</span></td><td>「チャンネル管理者」<span class="diff-new">（chadminの追加・解除。F-33）、「定期投稿」（F-36）、「自動応答トリガー」（F-38）</span>と「AI設定の項目」（キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・自動対応範囲）の2グループのタブ構成の画面。<span class="diff-new">AI設定以外の項目が増えたため、画面名を「チャンネルAI設定」から「チャンネル設定」に改称した。</span></td></tr>
+      <tr><td>S-07</td><td>AI操作確認ダイアログ</td><td>（URLなし・モーダル）</td><td>依頼した本人</td><td>AIが社内システムへの登録・変更を実行する前に、実行内容を提示し同意を得るモーダル。S-03/S-04上に表示する</td></tr>
+      <tr><td>S-08</td><td>管理コンソール</td><td><code>/admin</code></td><td><span class="badge badge-admin">admin</span></td><td>4タブ構成: 「利用者管理」「ドキュメント参照範囲」「AI利用状況・コスト」「監査ログ」</td></tr>
+    </tbody>
+  </table>
+  <p class="note">S-08の「監査ログ」タブ、およびS-02・S-03のサブ機能（チャンネルに参加／作成、DM相手を選ぶ<span class="diff-new">、メンバー一覧</span>）は要件定義書4.1節に独立した画面IDとして定義されていないが、7章「監査」・F-02・F-05<span class="diff-new">・チャンネル管理者の可視化</span>を満たすために必要な補足UIとして画面モックアップに追加している（画面モックアップ「補足01」<span class="diff-new">〜「補足03」</span>参照）。本書では新たな画面IDは追加せず、S-02・S-03・S-08の一部として設計する。</p>
+
+  <h3>4.2 画面遷移図</h3>
+  <div class="diagram">
+    <svg width="820" height="360" viewBox="0 0 820 360" font-family="'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif">
+      <defs>
+        <marker id="arw2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#1e40af"/>
+        </marker>
+        <marker id="arw2g" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#8a8f98"/>
+        </marker>
+      </defs>
+
+      <!-- S-01 -->
+      <rect x="20" y="150" width="130" height="56" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="85" y="173" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1e3a8a">S-01 ログイン</text>
+      <text x="85" y="191" text-anchor="middle" font-size="10.5" fill="#60656d">/login</text>
+
+      <!-- S-02 -->
+      <rect x="210" y="90" width="170" height="56" rx="8" fill="#f5f7f9" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <text x="295" y="112" text-anchor="middle" font-size="12.5" font-weight="600" fill="#4a4f57">S-02 ワークスペース</text>
+      <text x="295" y="130" text-anchor="middle" font-size="10" fill="#60656d">共通シェル（サイドバー）</text>
+
+      <!-- S-03 -->
+      <rect x="440" y="150" width="170" height="56" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="525" y="173" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1e3a8a">S-03 チャンネル会話</text>
+      <text x="525" y="191" text-anchor="middle" font-size="10.5" fill="#60656d">/channels/:channelId</text>
+
+      <!-- S-04 -->
+      <rect x="440" y="260" width="170" height="56" rx="8" fill="#ffffff" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="525" y="283" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1e3a8a">S-04 スレッド表示</text>
+      <text x="525" y="301" text-anchor="middle" font-size="10" fill="#60656d">?thread=:messageId</text>
+
+      <!-- S-05 -->
+      <rect x="210" y="260" width="170" height="56" rx="8" fill="#ffffff" stroke="#8a8f98" stroke-width="1.5"/>
+      <text x="295" y="283" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1d21">S-05 横断検索</text>
+      <text x="295" y="301" text-anchor="middle" font-size="10" fill="#60656d">全画面共通ヘッダーから</text>
+
+      <!-- S-06 -->
+      <rect x="660" y="90" width="140" height="56" rx="8" fill="#ffffff" stroke="#8a8f98" stroke-width="1.5"/>
+      <text x="730" y="112" text-anchor="middle" font-size="12" font-weight="600" fill="#1a1d21">S-06 チャンネル設定</text>
+      <text x="730" y="130" text-anchor="middle" font-size="10" fill="#60656d">chadmin/adminのみ</text>
+
+      <!-- S-07 -->
+      <rect x="660" y="200" width="140" height="56" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
+      <text x="730" y="222" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">S-07 実行前確認</text>
+      <text x="730" y="240" text-anchor="middle" font-size="10" fill="#60656d">モーダル表示</text>
+
+      <!-- S-08 -->
+      <rect x="20" y="260" width="130" height="56" rx="8" fill="#ffffff" stroke="#8a8f98" stroke-width="1.5"/>
+      <text x="85" y="283" text-anchor="middle" font-size="12" font-weight="600" fill="#1a1d21">S-08 管理コンソール</text>
+      <text x="85" y="301" text-anchor="middle" font-size="10" fill="#60656d">/admin（adminのみ）</text>
+
+      <!-- 矢印 -->
+      <line x1="150" y1="165" x2="207" y2="128" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw2)"/>
+      <text x="178" y="140" text-anchor="middle" font-size="10.5" fill="#1e40af">ログイン成功</text>
+
+      <line x1="380" y1="128" x2="440" y2="168" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw2)"/>
+      <text x="410" y="128" text-anchor="middle" font-size="10.5" fill="#1e40af">チャンネル選択</text>
+
+      <line x1="545" y1="206" x2="545" y2="257" stroke="#1e40af" stroke-width="1.5" marker-end="url(#arw2)"/>
+      <line x1="575" y1="257" x2="575" y2="209" stroke="#8a8f98" stroke-width="1.5" marker-end="url(#arw2g)"/>
+      <text x="497" y="234" text-anchor="middle" font-size="10.5" fill="#1e40af">返信を開く</text>
+      <text x="627" y="234" text-anchor="middle" font-size="10.5" fill="#8a8f98">閉じる</text>
+
+      <line x1="295" y1="146" x2="295" y2="257" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arw2g)"/>
+      <text x="240" y="200" text-anchor="middle" font-size="10" fill="#8a8f98">検索（全画面共通）</text>
+
+      <line x1="150" y1="288" x2="207" y2="288" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arw2g)"/>
+      <text x="178" y="280" text-anchor="middle" font-size="9.5" fill="#8a8f98">ヘッダーから</text>
+
+      <line x1="610" y1="163" x2="657" y2="123" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arw2g)"/>
+      <text x="645" y="135" text-anchor="middle" font-size="9.5" fill="#8a8f98">チャンネル設定を開く</text>
+
+      <line x1="610" y1="190" x2="657" y2="220" stroke="#d97706" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arw2g)"/>
+      <text x="645" y="215" text-anchor="middle" font-size="9.5" fill="#92400e">実行前にモーダル表示</text>
+
+      <text x="410" y="30" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">Kogack 画面遷移図</text>
+    </svg>
+  </div>
+
+  <div class="callout">
+    <strong>共通レイアウト:</strong> S-02（ワークスペース）は独立したルートを持たず、ヘッダー（ブランド・検索・ユーザーメニュー）とサイドバー（参加中のチャンネル・DM一覧、チャンネルに参加／作成、DM相手を選ぶ）として S-03〜S-07 の全画面に共通で表示する。認証ガードは <code>frontend/src/App.tsx</code> で行い、未認証時は S-01 へリダイレクトする。<span class="diff-new">認証済みだが権限外パスへ直接アクセスした場合の挙動は次の「設計判断」を参照。</span>
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（権限外パスへの直接アクセス時の挙動）:</strong> S-06・S-08のURLを直接入力した場合など、認証済みだが権限が無いパスへアクセスしたときの挙動は、F-34で確立した「存在を伏せるべき対象は伏せる／権限不足は明示する」という使い分けをルーティングにも一貫して適用する。専用のエラー画面（403ページ等）は新設せず、既存の到達可能な画面へのリダイレクトのみで表現する。
+    <ul>
+      <li><strong>対象の存在自体を伏せるべき場合</strong>（非公開チャンネルのS-03/S-04/S-06に、参加していない利用者がアクセス）: ワークスペース（S-02。実際には最後に開いていたチャンネルまたは参加チャンネル一覧）へ<strong>無言で</strong>リダイレクトする。トースト通知も出さない（「アクセスできません」という一般的な文言であっても、対象がそこに存在することを示唆しうるため）。</li>
+      <li><strong>対象の存在は利用者に知られてよいが、権限が不足している場合</strong>（参加中のチャンネルのS-06に、chadminでない参加者がアクセス／S-08に非adminがアクセス）: その状況で到達可能な最も近い既存画面（S-06→当該チャンネルのS-03、S-08→S-02）へリダイレクトし、トースト通知（例:「このページを表示する権限がありません」）で理由を明示する。</li>
+    </ul>
+    この2区分をフロントエンドだけで正しく判定するには、バックエンドの<code>require_channel_admin</code>が「非公開チャンネルの非参加者」と「参加しているが非chadmin」を区別して返す必要がある。前者はrequire_channel_memberと同じ404、後者は403とし、chadmin判定の前に参加確認を行うよう5.1節相当のデコレーター定義を明確化した（詳細は詳細設計書5.1節・5.9節）。この整理をしないと、S-06配下のAPI（A-23〜A-31等）がchadmin判定のみで403を返し、非公開チャンネルの存在をURL直打ちで確認できてしまう（F-34への抜け穴になる）。
+  </div>
+
+  <p>各画面の具体的なレイアウト・UIは画面モックアップ「<a href="画面モックアップ/00_一覧.html">画面モックアップ</a>」を参照のこと。以下では各画面の設計概要のみ記す。</p>
+
+  <h3>4.3 S-01 ログイン</h3>
+  <ul>
+    <li><strong>主な表示項目:</strong> システム名（Kogack）、タグライン、「Googleでログイン」ボタン、許可ドメインの案内、モックアップである旨の注記。</li>
+    <li><strong>操作:</strong> ボタン押下で A-01 へ遷移し、Google OAuth 2.0 フローを開始する。認証エラー（許可ドメイン外・無効化ユーザー）の場合は本画面にエラーメッセージを表示する（画面モックアップの切替表示例を参照）。</li>
+    <li><strong>アクセス制御:</strong> 未認証ユーザーのみ。認証済みユーザーがアクセスした場合は S-02（最後に開いていたチャンネル、または最初のチャンネル）へリダイレクトする。</li>
+  </ul>
+
+  <h3>4.4 S-02 ワークスペース</h3>
+  <ul>
+    <li><strong>ヘッダー:</strong> ブランドロゴ、検索欄（S-05への導線）、<span class="diff-new">予約中メッセージへの導線（「🕐 予約中」＋件数バッジ。自分が予約したものが1件以上あるときのみ表示。F-35）、</span>ユーザーメニュー（アバター・ロールバッジ。adminには「管理コンソール」、chadminには自分が管理するチャンネルへの導線を表示<span class="diff-new">、「プロフィールを編集」（補足06）への導線。F-37, F-39</span>）。</li>
+    <li><strong>サイドバー:</strong> 参加中のチャンネル一覧（未読バッジ）、参加中のDM一覧（未読バッジ・オンライン表示）。それぞれに「＋」ボタンを持つ。</li>
+    <li class="diff-new"><strong>プロフィールを編集（補足06）:</strong> ヘッダーのユーザーメニュー（自分のアバター）から開くモーダル。A-61でアイコン画像をアップロードしA-62で自分のpicture_urlに反映する（F-37）。<span class="diff-new">1.12版から表示名の編集欄も追加し、同じA-62でT-01.nameを更新できる（F-39）。表示名は初回ログイン時にGoogleアカウントの氏名で初期化されるが、以後はGoogle側の変更を自動追従しない（3.1節）。メールアドレスはこの画面でも変更できない（Googleアカウントの情報を正とするため、A-62に含めても400で拒否される）。</span> モックアップのファイル名・画面内タイトルは従来の<code>補足06_プロフィール画像を変更.html</code>のまま据え置き、モーダル見出しのみ「プロフィールを編集」に更新した（画像アップロードに加え表示名も扱う画面へスコープが広がったため。ファイル名の変更はS-06改称と異なり詳細設計書側の参照が未整備のため今回は見送り、次回改訂で揃える）。</li>
+    <li class="diff-new"><strong>予約中のメッセージ（補足04）:</strong> ヘッダーの「🕐 予約中」から開くモーダル。自分が予約したメッセージを、送信先のチャンネル・DMを横断して一覧表示する。各行に送信予定日時とメッセージ本文のプレビューを表示し、「予約をキャンセル」で送信前に取り消せる。他の参加者には表示されない（F-35）。</li>
+    <li><strong>チャンネルに参加／作成（補足01）:</strong> 「＋」から開くモーダル。「参加する」タブは<span class="diff-new">公開</span>チャンネルの一覧を検索し即時参加する（F-02、承認不要。<span class="diff-new">非公開チャンネルは参加者以外の一覧・検索には出さない。F-34</span>）。「作成する」タブはチャンネル名・説明を入力して作成し、<span class="diff-new">公開・非公開をトグルで選択する（既定は公開）。</span>作成者は自動的にそのチャンネルの chadmin になる。</li>
+    <li><strong>DMの相手を選ぶ（補足02）:</strong> 「＋」から開くモーダル。氏名・メールアドレスで利用者を検索し、<span class="diff-new">チェックボックスで1人以上を選んで（複数選択可）DMを開始する。1人だけ選んだ場合は一対一のDM、2人以上選んだ場合はグループDMとなる。選んだ参加者の集合と完全に一致する</span>既にDMがある相手は区別表示し、無効化されたアカウントは新規DMの対象外とする。</li>
+    <li class="diff-new"><strong>メンバー一覧（補足03）:</strong> S-03ヘッダーの参加人数から開くモーダル。チャンネルの参加者一覧を表示し、chadminにはバッジを付与して誰が管理者かを可視化する。管理者の変更操作はここでは行わず、S-06に一本化する。非公開チャンネルでは、参加者なら誰でも（chadminに限らず）ここから「メンバーを追加」で他の利用者を追加できる（F-34）。公開チャンネルではこの操作は不要なため表示しない（補足01の「参加する」タブから本人が参加できるため）。</li>
+    <li><strong>操作:</strong> チャンネル・DMの選択で S-03 へ遷移する。</li>
+    <li><strong>アクセス制御:</strong> 全ロール（参加中のチャンネル・DMのみ表示）。</li>
+  </ul>
+
+  <h3>4.5 S-03 チャンネル会話</h3>
+  <ul>
+    <li><strong>ヘッダー:</strong> チャンネル名・参加人数<span class="diff-new">（非公開チャンネルは鍵アイコンを付与。F-34）</span>、要約ボタン、<span class="diff-new">チャンネル設定への導線（旧称「AI設定」。chadmin/adminのみ表示）</span>。</li>
+    <li><strong>メッセージ一覧:</strong> 人間の発言とAIの発言（常時<span class="badge badge-ai">AI</span>バッジ表示。F-18）を時系列に表示する。AIの発言には、回答の根拠となる文書へのリンク（citation。F-20）、連携先システムの参照結果（external_system。F-23）、過去のやり取りの参照（quote_reference。5.3節、参考情報である旨を明示）を種類ごとに区別したカードで表示する（6.2節 T-07 message_blocks）。応答生成中は「生成中」を表示する（F-31）。<span class="diff-new">発言者のアイコンまたは表示名をクリックすると、プロフィールカード（アイコン・表示名・メールアドレス・ロール）をポップオーバー表示する（F-40、5.21節）。同一チャンネル内に表示名が完全一致する参加者が複数いる場合は、発言者表示に「表示名（メールアドレス）」の形でメールアドレスを自動的に併記し、クリックしなくても区別できるようにする（F-39、5.20節）。</span></li>
+    <li><strong>投稿欄:</strong> メンション入力、ファイル添付（1件20MBまで）、送信。<span class="diff-new">「@」を入力すると、当該チャンネルの参加者＋チャンネルAIを候補としたオートコンプリート一覧（アイコン・表示名・メールアドレスを表示。補足02のユーザーピッカーと同じ見せ方）がポップオーバー表示され、選択して確定する（自由入力の表示名一致には頼らない。F-41、5.22節）。</span>送信ボタンの隣に送信予約ボタン（🕐）を配置し、クリックすると日時ピッカーのポップオーバーが開く。日時を指定して「予約する」を押すと、その時刻まで送信されない予約状態になる（F-35）。予約送信ではファイル添付は利用できない。</li>
+    <li><strong>操作:</strong> 「要約」ボタンで押した時点までの内容（チャンネル本体は直近100件）を要約する（F-14、手動実行のみ）。返信件数の表示から S-04 を開く。</li>
+    <li><strong>アクセス制御:</strong> チャンネル参加者のみ。<span class="diff-new">非公開チャンネルのURLを未参加者が直接開いた場合は、存在を伏せるためワークスペース（S-02）へ無言でリダイレクトする（4.2節「設計判断」）。</span></li>
+  </ul>
+
+  <h3>4.6 S-04 スレッド表示</h3>
+  <ul>
+    <li><strong>主な表示項目:</strong> S-03の右側に重ねて表示するパネル。元発言＋返信一覧＋返信用の投稿欄で構成する。元発言はS-03の一覧上でもハイライトする。</li>
+    <li><strong>操作:</strong> 「返信」から開き、「✕」または他の発言選択で閉じる。「要約」ボタン押下時、スレッド内であればそのスレッド全体を要約対象とする（F-14）。<span class="diff-new">返信用の投稿欄もS-03と同じ送信予約ボタン（🕐）を持つ（F-35。thread_parent_idを指定して予約する）。</span></li>
+    <li><strong>設計方針:</strong> スレッド内の返信はチャンネル本体のタイムラインには表示しない。AIとのやり取りをスレッド内に閉じることで、チャンネル本体の会話と分離する（F-03）。</li>
+    <li><strong>アクセス制御:</strong> チャンネル参加者のみ。</li>
+  </ul>
+
+  <h3>4.7 S-05 横断検索</h3>
+  <ul>
+    <li><strong>主な表示項目:</strong> 検索クエリの表示、参照権限の範囲に限定される旨の注記、「すべて／メッセージ／ファイル／ドキュメント根拠」のタブ、種別ごとの結果一覧（一致箇所のハイライト表示）。<span class="diff-new">モディファイアを含む検索では、解決済みの条件をチップ（例:「in: #開発相談 ✕」）で結果上部に表示し、クリックで個別に解除できる（F-42、5.23節）。</span></li>
+    <li><strong>操作:</strong> ヘッダーの検索欄から全画面共通でアクセス可能。A-20 を呼び出し、キーワード・種別で絞り込む。<span class="diff-new">検索欄に<code>in:</code>/<code>from:</code>/<code>with:</code>/<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>と入力すると、その場でオートコンプリート候補（in:はチャンネル名、from:/with:はA-68による氏名・メールアドレス・アイコン付きの利用者候補、日付系はカレンダーピッカー）がポップオーバー表示される。<code>"…"</code>で囲むとフレーズの完全一致検索になる（F-42）。</span></li>
+    <li><strong>アクセス制御:</strong> 全ロール。検索結果は利用者が参加しているチャンネル・DM、および閲覧権限を持つ文書の範囲に限定する（F-06、REQ-N-02）。<span class="diff-new">モディファイアを含む検索では、ドキュメント根拠タブは検索対象から除外される（5.23節）。</span></li>
+  </ul>
+
+  <h3>4.8 S-06 <span class="diff-new">チャンネル設定</span></h3>
+  <p>「チャンネル設定」（チャンネル管理者<span class="diff-new">・定期投稿・自動応答トリガー</span>）と「AI設定の項目」（基本設定 / キャラクタ / 振る舞い定義 / 参照ドキュメント範囲 / スキル / 反応モード / 自動対応範囲）の2グループのタブで構成する<span class="diff-new">（画面モックアップ検討により、チャンネル管理者の変更をAI設定と別グループへ分離した）</span>。<span class="diff-new">AI設定以外の項目が増えたことに伴い、画面自体の名称も「チャンネルAI設定」から「チャンネル設定」に改称した（画面IDは変更していないが、モックアップのファイル名は<code>S-06_チャンネル設定.html</code>に変更した）。</span></p>
+  <ul>
+    <li class="diff-new"><strong>チャンネル管理者:</strong> このチャンネルの管理者（chadmin）を追加・解除する（F-33）。複数人を管理者にできる。最後の1人は解除できない（管理者不在の防止）。追加できるのはこのチャンネルの参加者のみ。同タブ内に「公開範囲」トグルを持ち、公開・非公開（F-34）を切り替えられる。</li>
+    <li class="diff-new"><strong>定期投稿:</strong> このチャンネルへの自動投稿ルールを一覧表示し、追加・編集・削除・一時停止ができる（F-36）。ルールごとに送り主の表示名・アイコン、本文、頻度（1回のみ／毎日／毎週／毎月）、初回送信日時を設定する。実際の投稿はT-05にsender_type='bot'として作成され、S-03上でBOTバッジ・専用アイコンとともに表示される。</li>
+    <li class="diff-new"><strong>自動応答トリガー:</strong> このチャンネルの人間の発言を対象に、特定のキーワードまたは絵文字が本文に含まれていたら自動的にメッセージを投稿するルールを一覧表示し、追加・編集・削除・一時停止ができる（F-38）。ルールごとにトリガーの種類（キーワード／絵文字）と値、投稿する本文、送り主の表示名・アイコンを設定する。トリガーとなった発言がスレッド内であればそのスレッドへ返信し、チャンネル本体の発言であればチャンネル本体へ新規投稿する。定期投稿と同様、投稿はT-05にsender_type='bot'として作成される。</li>
+    <li><strong>基本設定:</strong> このチャンネルでのAIの有効/無効（F-08）。</li>
+    <li><strong>キャラクタ:</strong> AIの名前・アイコン・口調（F-10）。<span class="diff-new">アイコンは画像ファイルをアップロードして設定できる（F-37）。</span></li>
+    <li><strong>振る舞い定義:</strong> AIの振る舞いをテキスト（プロンプト）で記述する（F-09）。編集のたびに上書き保存し、変更者・日時を監査ログ（S-08、T-16）に記録する。過去バージョンの一覧・差分表示は対象外（要件定義書3.2節）。</li>
+    <li><strong>参照ドキュメント範囲:</strong> S-08で登録された候補フォルダの中から、このチャンネルの回答根拠とする範囲を選択する（F-11）。選択していても質問者本人に閲覧権限がない文書は回答対象から除外される（5.1節）。<span class="diff-new">あわせて、指定範囲外の質問への対応方針（「厳格に制限」／「一般回答を許可」）を設定する（8.2節）。</span></li>
+    <li><strong>スキル:</strong> 「依頼を受けたらこう進める」手順をテキストで登録する（F-12）。<span class="diff-new">同じタブ内で、スキルにない業務依頼の引き継ぎ先（既定のチャンネル管理者、または指定した参加者）も設定する（F-17）。</span></li>
+    <li><strong>反応モード:</strong> 「メンション時のみ応答」「投稿に自ら反応」の2択（F-15）。</li>
+    <li><strong>自動対応範囲:</strong> 依頼内容ごとに「自動対応可／確認のうえ対応／人が対応」を設定する（F-16）。「人が対応」の依頼は、AIが同一チャンネル内で引き継ぎ先（既定はチャンネル管理者<span class="diff-new">、変更している場合は指定された参加者</span>）にメンションして引き継ぐ（F-17、DMは使わない）。</li>
+    <li><strong>アクセス制御:</strong> 本人が管理者権限を持つチャンネルの chadmin、および admin。<span class="diff-new">参加中だがchadminでない利用者がURLを直接開いた場合は当該チャンネルのS-03へ、権限がない旨のトースト通知とともにリダイレクトする（4.2節「設計判断」）。</span></li>
+  </ul>
+
+  <h3>4.9 S-07 AI操作確認ダイアログ</h3>
+  <ul>
+    <li><strong>主な表示項目:</strong> 依頼者、対象システム・操作内容・対象・日時などの実行内容、データを変更する旨の警告、キャンセル／実行ボタン。</li>
+    <li><strong>操作:</strong> AIが社内システムへの登録・変更を実行する直前に、S-03/S-04上へモーダル表示する。参照のみの操作（座席の空き状況確認など）では表示しない（F-25、5.5節）。</li>
+    <li><strong>本リリースでの位置づけ:</strong> 座席予約の「登録」自体（F-24）は本リリースの対象外（要件定義書3.2節、次フェーズ実装予定）であり、本画面は実行前確認の「仕組み」（F-25）を先行して用意するものである。今回実装する座席予約の参照（F-23）は確認不要（既定どおり）。</li>
+    <li><strong>アクセス制御:</strong> 依頼した本人。</li>
+  </ul>
+
+  <h3>4.10 S-08 管理コンソール</h3>
+  <p>タブ構成（利用者管理 / ドキュメント参照範囲 / AI利用状況・コスト / 監査ログ）。</p>
+  <ul>
+    <li><strong>利用者管理:</strong> ユーザー一覧（氏名・メール・ロール・有効/無効。A-36）、ロール変更・有効/無効化（A-37）。新規作成・削除は行わない。<span class="diff-new">ロールは member/admin の2種類のみを表示・変更対象とし、chadminはチャンネル単位の権限（3.3節）のため一覧には「チャンネル管理者」列として参考表示するにとどめ、変更はS-06から行う。</span></li>
+    <li><strong>ドキュメント参照範囲:</strong> チャンネルAIが参照できるフォルダ候補の全体管理（A-38〜A-40。F-22）。「今すぐ同期」（A-41）を実行した時点の内容が回答に反映される（自動的な定期同期は対象外）。</li>
+    <li><strong>AI利用状況・コスト:</strong> 呼び出し件数・トークン数・概算コストの月次集計（A-42。F-29）、チャンネル別・利用者別の内訳、上限設定・通知先の設定（A-43）。</li>
+    <li><strong>監査ログ:</strong> ログイン記録、チャンネルAI設定の変更履歴（日時・実行者・対象・詳細）の一覧（A-44。要件定義書7章「監査」）。変更内容そのもの（過去バージョン・差分）は対象外とし、「いつ・誰が・どの項目を」変更したかのみを記録する。</li>
+    <li><strong>アクセス制御:</strong> admin のみ。ヘッダーのメニュー自体を admin 以外には表示しない。<span class="diff-new">URLを直接開いた場合はS-02へ、権限がない旨のトースト通知とともにリダイレクトする（4.2節「設計判断」）。</span></li>
+  </ul>
+
+  <!-- ============ 5. 機能設計 ============ -->
+  <h2 id="sec5">5. 機能設計</h2>
+  <p>機能一覧（F-01〜F-31、対象外を除く）を要件定義書3.1節のグルーピングに沿って整理し、処理概要と関連する画面・API・テーブルを示す。処理の詳細フロー・バリデーションは詳細設計書で定義する。</p>
+
+  <h3>5.1 F-01 Google認証</h3>
+  <p><strong>処理概要:</strong> Google OAuth 2.0によるログイン。許可ドメイン制限、セッションJWT発行（対応要求: REQ-N-01）。詳細は3章参照。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-01</td><td>A-01〜A-04</td><td>T-01, T-16</td></tr></tbody>
+  </table>
+
+  <h3>5.2 F-02〜F-04 チャンネル・スレッド・メンション</h3>
+  <p><strong>処理概要:</strong> 目的ごとのチャンネルの作成・参加（F-02。<span class="diff-new">公開・非公開の別はF-34参照</span>）、特定の発言への返信をスレッドとしてまとめる機能（F-03）、人間・チャンネルAIへの呼びかけ（F-04）。チャンネル作成者は自動的にそのチャンネルの chadmin になる（T-03.is_channel_admin）。<span class="diff-new">人間へのメンションは、投稿欄のオートコンプリートで候補（当該チャンネル参加者）から選んで確定し、内部的には対象user_idの参照として本文とは別にT-07 message_blocks（block_type='mention'）に保持する。表示は選択時点の表示名をメッセージ本文中の<code>@表示名</code>としてそのまま残す（検索・可読性のため）が、宛先の解決・通知はmessage_blocksのuser_id参照を正とする（F-41、5.22節「設計判断」）。</span>AIへのメンションは、従来どおりメッセージ本文中の<code>@チャンネルAI名</code>を解析して検知し、8章のAIエージェント処理をトリガーする（チャンネルAIはT-01 usersを持たない単一の存在のため、氏名重複によるあて先の曖昧さが生じずID参照化の対象外とした）。<span class="diff-new">誰かがチャンネルに参加する（A-08）と、「（氏名）さんが参加しました。」というsender_type='bot'の発言を同一トランザクション内でT-05へ作成する（F-43。bot_display_nameは固定で「システム通知」）。チャンネル作成（A-07）時に作成者が自動参加する場合は対象外とする（6.2節「設計判断」）。</span></p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-02, S-03, S-04</td><td>A-05, A-07〜A-14<span class="diff-new">, A-46, A-69</span></td><td>T-01〜T-03, T-05<span class="diff-new">, T-07, T-22</span></td></tr></tbody>
+  </table>
+
+  <h3>5.3 F-05 ダイレクトメッセージ</h3>
+  <p><strong>処理概要:</strong> <span class="diff-new">特定の相手との会話（対応要求: REQ-F-04）。相手は1人（一対一）に限らず、複数人をまとめて指定して開始できる（グループDM）。DMはチャンネルとは別テーブル（T-04）で管理し、参加者（T-17）に登録された者のみがアクセスできる。参加者は開始時のメンバーで固定し、開始後の追加・削除は対象外とする。</span><span class="diff-new">相手選択（補足02）の候補一覧はA-68（利用者検索）で取得する（5.23節「設計判断」）。</span></p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-02, S-03</td><td>A-16〜A-19<span class="diff-new">, A-68, A-70</span></td><td>T-01, T-04, <span class="diff-new">T-17</span>, T-05<span class="diff-new">, T-22</span></td></tr></tbody>
+  </table>
+
+  <h3>5.4 F-06 横断検索・F-07 ファイル共有</h3>
+  <p><strong>処理概要:</strong> 過去の発言・ファイル・ドキュメント根拠の横断検索（F-06。<span class="diff-new">検索条件モディファイアはF-42、5.23節を参照</span>）。検索対象は利用者の参照権限（参加チャンネル・DM、文書の閲覧権限）の範囲に限定する（REQ-N-02）。ファイル共有（F-07）は1ファイル20MBまでとし、Supabase Storageに保存する。AIによる添付ファイルの内容参照（テキスト抽出等）は対象外。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-05, S-03</td><td>A-20〜A-22</td><td>T-05〜T-07, T-09, T-10</td></tr></tbody>
+  </table>
+
+  <h3>5.5 F-08〜F-12, F-15, F-16 チャンネルAI設定</h3>
+  <p><strong>処理概要:</strong> チャンネルごとのAI有効/無効（F-08）、振る舞い定義（プロンプト。F-09）、キャラクタ（F-10。<span class="diff-new">アイコンはA-61で画像をアップロードして設定できる。F-37</span>）、参照ドキュメント範囲（F-11。<span class="diff-new">指定範囲外の質問への対応方針を含む</span>）、スキル（F-12。<span class="diff-new">スキルにない業務依頼の引き継ぎ先を含む</span>）、反応モード（F-15）、自動対応範囲（F-16）の設定・保存。振る舞い定義の変更は監査ログ（T-16）に記録する。詳細はS-06（4.8節）・AIエージェント設計8.3節を参照。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-06</td><td>A-23〜A-31<span class="diff-new">, A-45, A-61</span></td><td>T-08, T-09, T-10, T-11, T-12, T-16</td></tr></tbody>
+  </table>
+
+  <h3>5.6 F-13 チャンネル履歴参照・F-14 やりとりの要約</h3>
+  <p><strong>処理概要:</strong> AIはチャンネルの過去のやりとり（直近30日、かつ直近200件までのいずれか少ない方）を踏まえて応答する（F-13）。要約はボタンを押した時点までの内容を対象とし、スレッド内であればそのスレッド全体、チャンネル本体であれば直近100件を対象とする（F-14、自動要約はしない）。いずれもAI呼び出しのコストを抑えるための上限であり、横断検索（F-06）や発言の保存期間（無期限）とは独立した制約である。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03, S-04</td><td>A-10, A-13, A-15</td><td>T-05</td></tr></tbody>
+  </table>
+
+  <h3>5.7 F-17 人への引き継ぎ・F-18 AI発言の明示</h3>
+  <p><strong>処理概要:</strong> AIが対応できない依頼（自動対応範囲「人が対応」に区分された依頼）を、同じチャンネル内で引き継ぎ先にメンションして引き継ぐ（F-17。DMは使わない。経緯が他の参加者からも見えるようにするため）。<span class="diff-new">引き継ぎ先は既定でチャンネル管理者（T-03の当該チャンネルchadmin）だが、S-06のスキルタブでチャンネルごとに特定の参加者へ変更できる（T-08.fallback_handoff_user_id）。</span>AIの発言には常時<span class="badge badge-ai">AI</span>バッジを表示し、人間の発言と判別できるようにする（F-18）。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03</td><td>A-11</td><td>T-05, T-12</td></tr></tbody>
+  </table>
+
+  <h3>5.8 F-19〜F-22 ドキュメント質問応答</h3>
+  <p><strong>処理概要:</strong> 社内ドキュメントに関する質問に、参照範囲内（F-11・F-22）かつ質問者本人が閲覧権限を持つ文書（F-21）を根拠に回答する（F-19）。回答には根拠文書名・該当箇所へのリンクを示す（F-20）。回答対象とする文書範囲（フォルダ）はS-08で管理者が登録し、「今すぐ同期」で反映する（F-22）。実現方式（権限フィルタリングの詳細）は8.2節で定める。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03, S-06, S-08</td><td>A-11, A-27, A-38〜A-41</td><td>T-07, T-09, T-10</td></tr></tbody>
+  </table>
+
+  <h3>5.9 F-23 社内システム情報参照</h3>
+  <p><strong>処理概要:</strong> 座席予約システムの空き状況をチャットから参照する（対応要求: REQ-F-22）。参照結果はメッセージ内にexternal_systemブロックとして表示する。座席の空き状況は非個人情報のため、ドキュメント質問と同様に全ロールが利用可（要件定義書5.5節）。e-learningシステムとの連携は次フェーズ（要件定義書3.2節）。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03</td><td>A-11</td><td>T-07</td></tr></tbody>
+  </table>
+
+  <h3>5.10 F-25 実行前確認の仕組み</h3>
+  <p><strong>処理概要:</strong> 社内システムへの登録・変更操作は、内容にかかわらず必ず実行前確認を行う（S-07）。参照のみの操作は既定で確認を求めない。本リリースでは登録・変更操作（F-24）自体が対象外のため、本機能は仕組みとして用意するにとどまる（4.9節参照）。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-07</td><td>A-33〜A-35</td><td>T-15</td></tr></tbody>
+  </table>
+
+  <h3>5.11 F-29 AI利用状況・コスト管理</h3>
+  <p><strong>処理概要:</strong> AI呼び出しごとに日時・チャンネル・利用者・トークン数・概算コストを記録し（T-13）、月次で集計・閲覧できる（S-08）。想定を超える利用に対してチャンネル単位・全体単位で上限設定・通知ができる（T-14）。詳細は8.6節。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-08</td><td>A-42, A-43</td><td>T-13, T-14</td></tr></tbody>
+  </table>
+
+  <h3>5.12 F-30 AI回答への注意喚起表示・F-31 非同期応答</h3>
+  <p><strong>処理概要:</strong> AIの回答には誤りが含まれうる旨を利用者が認識できるよう表示する（F-30。S-03の各AI発言下部）。AIの応答生成中も人間同士の会話が滞らないようにし、処理に時間を要する場合は「生成中」を表示する。新着メッセージは5秒以内に画面へ反映する（F-31。2.1節のポーリング方式）。</p>
+  <table>
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03, S-04</td><td>A-10, A-11</td><td>T-05, T-07</td></tr></tbody>
+  </table>
+
+  <h3 class="diff-new">5.13 F-33 チャンネル管理者の変更</h3>
+  <p class="diff-new"><strong>処理概要:</strong> チャンネルの参加者の中からチャンネル管理者（chadmin）を追加・解除する。チャンネル作成時は作成者が自動的に唯一のchadminとなるが（4.1節）、既存のchadminがS-06「チャンネル管理者」タブから他の参加者を追加・解除できる。管理者不在を防ぐため、最後の1人は解除できない（API側で残数を検証する）。画面モックアップ検討時に追加した機能で、要件定義書1.6版でF-33として反映した。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-06</td><td>A-47, A-48</td><td>T-03</td></tr></tbody>
+  </table>
+
+  <h3 class="diff-new">5.14 F-34 チャンネルの公開範囲</h3>
+  <p class="diff-new"><strong>処理概要:</strong> チャンネルは公開・非公開のいずれかで運用する（T-02.is_public）。公開チャンネルは <code>GET /api/channels</code> の一覧・検索に含まれ、誰でも即時参加できる（A-08）。非公開チャンネルは参加者以外には一覧・検索に出さず、参加には既存の参加者による追加操作が必要（chadminに限らずメンバーなら誰でも追加できる。補足03「メンバー一覧」から実行）。公開・非公開の別は作成時（補足01）に選択し、作成後もチャンネル管理者がS-06から変更できる（A-49）。MVPスコープ決定では一度見送った機能だが、本改訂（要件定義書v1.8）で対象に追加した（6.2節「設計判断」参照）。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>補足01, 補足03, S-06</td><td>A-05, A-07, A-08, A-49</td><td>T-02, T-03</td></tr></tbody>
+  </table>
+
+  <h3 class="diff-new">5.15 F-35 メッセージの送信予約</h3>
+  <p class="diff-new"><strong>処理概要:</strong> チャンネル・DM・スレッド返信いずれの投稿欄でも、送信ボタンの隣の🕐ボタンから送信日時（<code>scheduled_at</code>）を指定して予約できる（A-50）。予約中の内容はT-05（発言）にはまだ存在せず、専用のT-18 scheduled_messagesにpending状態で保持され、予約した本人以外には見えない。<code>services/scheduled_dispatcher.py</code>がアプリ起動時から30秒間隔で稼働し、<code>scheduled_at</code>を過ぎたpending行を検出すると、通常のメッセージ投稿（A-11/A-14/A-19相当）と同じ経路でT-05へ発言化する。これにより、@メンションによるAIエージェント処理（8章）も予約時ではなく実際の送信時点で通常どおりトリガーされる。送信前であれば、予約した本人がいつでもキャンセルできる（A-52、補足04「予約中のメッセージ」）。ファイル添付との併用は対象外（要件定義書3.2節）。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03, S-04, 補足04</td><td>A-50, A-51, A-52</td><td>T-18</td></tr></tbody>
+  </table>
+
+  <h3 class="diff-new">5.16 F-36 定期投稿（bot投稿）</h3>
+  <p class="diff-new"><strong>処理概要:</strong> チャンネル管理者・システム管理者が、S-06「定期投稿」タブでこのチャンネルへの自動投稿ルールを設定する（A-54）。ルールは頻度（<code>frequency</code>: 'once'/'daily'/'weekly'/'monthly'）と初回日時（<code>anchor_at</code>）、本文（<code>body</code>）、送り主の表示名・アイコン（<code>bot_display_name</code>・<code>bot_icon</code>。<span class="diff-new">A-61でアップロードした画像を使う場合は<code>bot_icon_url</code>を優先表示。F-37</span>）をT-19 recurring_postsに保持する。<code>services/scheduled_dispatcher.py</code>が、30秒間隔で<code>next_run_at &lt;= now()</code>かつ<code>is_active=true</code>のルールを検出すると、T-05にchannel_idを指定してsender_type='bot'の発言を1件作成する。sender_type='bot'のためAIエージェント処理は起動しない（本文に@メンションを含めても応答は発生しない）。送信後、頻度に応じて次回時刻を計算し<code>next_run_at</code>を更新する（'once'の場合は<code>is_active=false</code>に変更）。「毎月」で該当日が存在しない月（例: 31日）は月末に繰り下げる。アプリの停止等で<code>next_run_at</code>を過ぎても検出できなかった場合は、次回起動時のポーリングで直ちに送信する（欠落回をスキップしない。F-35と同じ考え方）。チャンネル管理者は一覧から一時停止（<code>is_active</code>切替）・編集・削除ができる（A-55, A-56）。フロントエンドはsender_type='bot'の発言に<span class="badge badge-bot">BOT</span>バッジと専用アイコンを表示し、人間・チャンネルAIの発言と区別する。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03, S-06</td><td>A-53, A-54, A-55, A-56</td><td>T-19</td></tr></tbody>
+  </table>
+
+  <h3 class="diff-new">5.18 F-37 プロフィール画像のアップロード</h3>
+  <p class="diff-new"><strong>処理概要:</strong> 利用者はA-61でアイコン画像をアップロードし、返却されたURLをA-62でT-01.picture_urlに保存することで、自分の表示アイコンを変更できる。初回ログイン時はGoogleアカウントのプロフィール画像で初期化されるが（3章）、変更後はGoogle側の画像更新を自動追従しない（本人が明示的に再アップロードするまで維持）。メールアドレスはGoogleアカウントの情報を正として扱い、本機能では変更しない。<span class="diff-new">氏名（表示名）は1.12版よりF-39として変更可能になった（5.20節）。</span>アップロードされたアイコン画像（個人・チャンネルAI・BOTの3種とも共通）は、message_attachmentsと異なりチャンネル・DM参加者に限定しない公開範囲とする（メッセージ一覧・S-06・S-08など組織内の様々な画面に表示されるため。6.2節「設計判断」）。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>補足06</td><td>A-61, A-62</td><td>T-01</td></tr></tbody>
+  </table>
+
+  <h3 class="diff-new">5.19 F-38 トリガーによる自動応答</h3>
+  <p class="diff-new"><strong>処理概要:</strong> チャンネル管理者・システム管理者が、S-06「自動応答トリガー」タブでこのチャンネル宛てのルールを設定する（A-64）。ルールはトリガー種別（<code>trigger_type</code>: 'keyword'/'emoji'）とトリガー値（<code>trigger_value</code>）、実行する処理（<code>action_type</code>。現時点では'post_message'のみ）、投稿する本文（<code>action_body</code>）、送り主の表示名・アイコン（<code>bot_display_name</code>・<code>bot_icon</code>／<code>bot_icon_url</code>）をT-21 trigger_rulesに保持する。F-35/F-36の時刻ベースのディスパッチャとは異なり、本機能はイベント駆動で動作する。A-11（メッセージ投稿）でsender_type='human'の発言を受け付けるたびに、<code>services/trigger_matcher.py</code>がその発言のchannel_idに紐づく<code>is_active=true</code>のルールを取得し、本文にtrigger_value（キーワードは大文字小文字を区別しない部分一致、絵文字は文字の包含判定）が含まれるものを検出する。一致したルールごとに、T-05へsender_type='bot'の発言を1件作成する（action_body、bot_display_name、bot_icon/bot_icon_url、どのルールから生成されたかを示すtrigger_rule_idを設定）。トリガーとなった発言がスレッド内（thread_parent_idあり）であれば同じスレッドへ、チャンネル本体の発言であればチャンネル本体へ新規投稿する。sender_type='bot'の発言はトリガー判定・AIエージェント処理のどちらも対象外とし（F-36と同じ無限ループ防止策）、自動応答が別のトリガーや@メンションを連鎖的に呼び出すことはない。同一メッセージが複数ルールに一致した場合は、一致したルールすべてがそれぞれ投稿する。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03, S-06</td><td>A-11, A-63〜A-66</td><td>T-05, T-21</td></tr></tbody>
+  </table>
+
+  <h3 class="diff-new">5.20 F-39 表示名の変更・同姓同名時の自動識別</h3>
+  <p class="diff-new"><strong>処理概要:</strong> 補足06でT-01.nameを編集し、A-62で保存する（picture_urlと同じAPIに統合。7章）。表示名はGoogleアカウントの氏名を初回ログイン時の初期値として使うのみで、以後の再ログインでも自動的には同期しない（3.1節）。NOT NULL・1〜100文字のバリデーションのみを行い、UNIQUE制約は設けない（重複を許容する。理由は下記「設計判断」）。同一チャンネル・DM・スレッドの発言者一覧を組み立てる際、表示名が完全一致する参加者が2名以上いる場合にのみ、フロントエンドがA-46（メンバー一覧。email付き）の応答から重複を検出し、該当する参加者全員の発言者表示に「表示名（メールアドレス）」の形でメールアドレスを併記する。メッセージ本体（A-10/A-18のレスポンス）にメールアドレスを含めず、発言者一覧（A-46）を突き合わせて表示側で判定するのは、メッセージ1件ごとにメールアドレスを持たせるとペイロードが肥大化し、かつ重複判定はチャンネル単位で完結するため。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>補足06, S-03</td><td>A-46, A-62</td><td>T-01</td></tr></tbody>
+  </table>
+  <div class="callout diff-new">
+    <strong>設計判断（表示名にUNIQUE制約を設けなかった理由）:</strong> 一意制約を課すと、後から登録・改名した利用者が「その名前は既に使われています」というエラーに遭遇し、代替名を選ぶ調整UIが必要になる。200名規模の運用でこの摩擦を利用者に強いるコストは、同姓同名の発生頻度に対して見合わないと判断した。代わりに、重複が実際に問題になる場面（同じチャンネル・DM内に同姓同名がいる場合）に限定して、発言者表示にメールアドレスを自動的に併記する方式（アプリ層での重複検出、DBに制約を持たせない）を採用した。これはGoogleカレンダー・Google Meetの参加者一覧が同姓同名時にメールアドレスを併記する挙動を参考にしている。
+  </div>
+
+  <h3 class="diff-new">5.21 F-40 発言者・メンバーのプロフィール確認</h3>
+  <p class="diff-new"><strong>処理概要:</strong> S-03の発言者アイコン・表示名をクリックすると、新設のA-67（GET /api/users/{id}）でid・name・email・picture_url・roleを取得し、プロフィールカードとしてポップオーバー表示する。既に氏名・メールアドレスを併記しているDM相手選択（補足02）・管理コンソール（S-08）と異なる新しいデータを追加するものではなく、既存のA-36（管理者向け利用者一覧）と同等の情報を、会話画面から誰でも本人以外についても参照できるようにするAPIである。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03</td><td>A-67</td><td>T-01</td></tr></tbody>
+  </table>
+  <div class="callout diff-new">
+    <strong>設計判断（プロフィールカードに所属チャンネルを含めなかった理由）:</strong> Slack等のプロフィールカードは所属チャンネルやステータスも表示するが、Kogackでは非公開チャンネル（F-34）は参加者以外に存在自体を露出しない設計（6.3節RLS方針）のため、「この人がどのチャンネルに参加しているか」を無条件に見せると非公開チャンネルの存在が間接的に漏れる恐れがある。閲覧者ごとに見える範囲を絞り込む実装コストに見合わないため、本リリースではアイコン・表示名・メールアドレス・ロールの4項目に留め、所属チャンネル一覧は対象外とした。
+  </div>
+
+  <h3 class="diff-new">5.22 F-41 @メンションの候補選択・ID参照化</h3>
+  <p class="diff-new"><strong>処理概要:</strong> S-03/S-04の投稿欄で「@」を入力すると、A-46（当該チャンネルのメンバー一覧）とチャンネルAIの設定（A-23で取得済みのpersona_name）を候補としたオートコンプリートを表示する。利用者が候補を選択すると、エディタは表示名を挿入すると同時に、送信時にその選択情報（対象user_id、選択時点の表示名）を保持する。A-11（メッセージ投稿）は、本文（body）はこれまでどおり<code>@表示名</code>を含むプレーンテキストとして保存しつつ、選択されたメンションごとにT-07 message_blocksへblock_type='mention'の行を1件追加する（payload: 対象user_id、選択時点の表示名スナップショット）。発言の表示時、フロントエンドはmessage_blocksのuser_id参照をもとに<strong>現在の</strong>表示名・アイコンでメンション部分を描画し直す（本文中の静的テキストではなく、常に最新のプロフィールを反映する）。この方式により、（1）表示名が重複していても宛先が一意に定まる、（2）対象者が表示名を変更してもメンションの参照は壊れない、という2点をあわせて解決する。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-03, S-04</td><td>A-11, A-46</td><td>T-05, T-07</td></tr></tbody>
+  </table>
+  <div class="callout diff-new">
+    <strong>設計判断（新規テーブルを設けずT-07 message_blocksを再利用した理由）:</strong> message_blocksは元々AI発言の根拠カード等（citation/external_system/quote_reference/pending_action）を、種類ごとにテーブルを分けずblock_type＋JSONBペイロードの1テーブルに集約する設計だった（6.2節「設計判断」）。人間メンションの構造化参照も「発言に付随する種類別の追加情報」という点で性質が同じであり、専用のmentionsテーブルを新設するより既存の仕組みに1種類（'mention'）を追加するほうが一貫性がある。message_blocksはAI発言専用ではなく人間の発言（sender_type='human'）にも付与できる設計（message_idに紐づくのみでsender_typeを問わない）であるため、この拡張に制約はない。
+  </div>
+  <div class="callout diff-new">
+    <strong>設計判断（AIへのメンションはID参照化の対象外とした理由）:</strong> ID参照化が必要なのは「複数の候補の中からどれを指すか曖昧になる」ケースであり、これはT-01 usersの氏名重複に起因する。チャンネルAIはチャンネルごとに1つしか存在せず（T-08 channel_ai_settings.channel_idはUNIQUE）、T-01 usersのレコードでもないため、同名の別候補と混同される余地がない。AIメンションの検知方式（本文中の<code>@チャンネルAI名</code>文字列一致）を変更する理由がなく、8章のAIエージェント処理・trigger_matcher.pyの既存実装（sender_type='human'の投稿のみを対象とする前提）にも影響を与えないため、従来方式を維持する。
+  </div>
+
+  <h3 class="diff-new">5.23 F-42 検索条件モディファイア</h3>
+  <p class="diff-new"><strong>処理概要:</strong> S-05横断検索の検索欄に、Slackを参考にしたモディファイア（<code>in:</code>/<code>from:</code>/<code>with:</code>/<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>/<code>"完全一致"</code>）を入力すると、条件を絞り込んで検索できる。フロントエンドが入力中の生の検索文字列（例: <code>in:開発相談 from:鈴木一郎 after:2026-08-01 デプロイ 手順</code>）をその場でトークンに分解し、<code>in:</code>/<code>from:</code>/<code>with:</code>の値は候補から選択させることで対象（channel_id／user_id）を確定し、日付系はカレンダーピッカーでISO日付を確定する。A-20へは解決済みの構造化パラメータ（<code>in</code>=channel_id、<code>from</code>=user_id、<code>with</code>=user_id、<code>before</code>/<code>after</code>/<code>on</code>=YYYY-MM-DD、<code>during</code>=YYYY-MM、<code>q</code>=残りの自由語＋引用符付きフレーズ）として送信する（自由入力の氏名一致に頼らないのはF-41と同じ考え方）。バックエンドは各パラメータをANDで結合したWHERE句を組み立てる。<code>q</code>内の各語は空白区切りでAND結合したILIKE条件とし、引用符で囲まれた部分は1つのフレーズとして分割せずそのままILIKE条件にする。</p>
+  <table class="diff-new">
+    <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
+    <tbody><tr><td>S-05</td><td>A-20, A-46, A-68</td><td>T-01〜T-03, T-05〜T-07, T-17</td></tr></tbody>
+  </table>
+  <div class="callout diff-new">
+    <strong>設計判断（ドキュメント根拠をモディファイア検索から除外した理由）:</strong> <code>in:</code>/<code>from:</code>/<code>with:</code>/日付系はいずれもT-05 messages（channel_id・dm_id・sender_user_id・created_at）またはT-06 message_attachments（親メッセージ経由で同じ属性を継承）に対応する属性が存在する一方、Google Drive文書索引（8.2節）にはチャンネル・投稿者・投稿日時に相当する属性がない。ドキュメントにも無理に適用しようとすると「文書が置かれたDriveフォルダをin:として扱う」等の別解釈が必要になり利用者の混乱を招くため、モディファイアを1つ以上含む検索ではドキュメント根拠タブを検索対象から除外し、キーワードのみの検索（従来どおり）でのみドキュメント根拠も対象にする。
+  </div>
+  <div class="callout diff-new">
+    <strong>設計判断（from:/with:をuser_idで解決し、新規API A-68を追加した理由）:</strong> T-01.nameはUNIQUE制約を持たず同姓同名を許容する設計にした（F-39、5.20節）ため、<code>from:田中 智子</code>のような自由入力の文字列一致では対象が一意に定まらない。F-41のメンション候補選択と同じ考え方で、<code>from:</code>/<code>with:</code>もオートコンプリートで候補（アイコン・氏名・メールアドレス）から選ばせ、内部的にはuser_idで検索する。候補取得には、当該チャンネルの参加者に限定されるA-46ではなく全社の利用者を対象にした検索が必要（検索対象は複数チャンネル・DMを横断するため、送信者が必ずしも同じチャンネルの参加者とは限らない）。この用途向けに新規API A-68（<code>GET /api/users?q=</code>）を追加した。なお、DM相手を選ぶ（補足02、F-05）も同様に全社の利用者一覧を必要とするが、従来この一覧を取得するAPIが明記されていなかった（設計上の抜け）。A-68はこの抜けも埋め、補足02のユーザーピッカーの取得元としても用いる。
+  </div>
+  <div class="callout diff-new">
+    <strong>設計判断（日付モディファイアはJSTの絶対日付のみを対象とした理由）:</strong> <code>before:</code>/<code>after:</code>は指定日を含まない厳密な前後、<code>on:</code>は指定日1日、<code>during:</code>は指定月（YYYY-MM）を対象とする。境界はいずれもAsia/Tokyo（JST）の00:00を基準にUTCへ変換してT-05.created_atと比較する（非機能設計・要件定義書の業務時間がJST前提であるため）。「昨日」「今週」のような相対日付は対象外（要件定義書3.2節）とし、絶対日付のみをサポートする。
+  </div>
+
+  <h3>5.24 対象外機能</h3>
+  <p>要件定義書3.2節に基づき、本リリースでは以下を対象外とする（次フェーズ以降の拡張候補）。</p>
+  <table>
+    <thead><tr><th>対象外機能</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr class="diff-new"><td>表示名の一意性を強制する仕組み（F-39の一部）</td><td>登録・変更時の重複禁止は利用者に代替名を選ばせる調整UIを要し、200名規模の摩擦に見合わない。重複時の識別はメールアドレスの自動併記（5.20節）で担保する</td></tr>
+      <tr class="diff-new"><td>検索モディファイアの相対日付指定（F-42の一部）</td><td>「昨日」「今週」等はタイムゾーン・業務時間の境界の定義が絡み実装が複雑化する。絶対日付（YYYY-MM-DD）のみサポートする</td></tr>
+      <tr class="diff-new"><td>検索モディファイアのOR・NOT演算子（F-42の一部）</td><td>モディファイア・キーワードいずれもAND条件のみとする。除外検索・いずれか一致の要求は無く、クエリ構文・UIが複雑化するため次フェーズで検討する</td></tr>
+      <tr class="diff-new"><td>ドキュメント根拠タブへの検索モディファイア適用（F-42の一部）</td><td>Drive文書索引にはチャンネル・投稿者・投稿日時に相当する属性がなく、無理に対応させると解釈が利用者に伝わりにくい。モディファイアを含む検索ではドキュメント根拠タブを対象外とする（5.23節）</td></tr>
+      <tr class="diff-new"><td>予約送信でのファイル添付（F-35の一部）</td><td>予約中はT-05に発言としてまだ存在しないため、添付の保存先を別途用意する必要があり複雑化する</td></tr>
+      <tr class="diff-new"><td>定期投稿の複数曜日・複数日にち指定（F-36の一部）</td><td>「毎週」「毎月」は初回日時から1つの曜日・日にちのみを繰り返す。「毎週月・水・金」のような複数指定はUIが複雑になるため見送り、必要な場合はルールを複数作成する運用とする</td></tr>
+      <tr class="diff-new"><td>個人宛てのリマインダー（F-36の一部）</td><td>一時期、宛先をチャンネルに加えて個人（複数可）に拡張したが、チャンネル運用への注力を優先し対象外に戻した。DM経路（T-04/T-17）と予約システムアカウントを使う配送方式は設計済みのため、次フェーズで再検討する際に流用できる（6.2節「設計判断」）</td></tr>
+      <tr class="diff-new"><td>アップロード画像の内容審査（モデレーション）・旧ファイルの自動削除（F-37の一部）</td><td>不適切画像の検知は外部サービス連携を要し過大。旧ファイルはストレージ容量の点で当面許容し、詳細設計フェーズでの清掃対象とする</td></tr>
+      <tr class="diff-new"><td>post_message以外のaction_type（外部Webhook通知・社内システム連携等。F-38の一部）</td><td>今回は「メッセージ・URLを投稿する」という要求のみで、いずれもチャット内へのメッセージ投稿として実現できるため。action_typeはENUMとして拡張余地を残す</td></tr>
+      <tr class="diff-new"><td>トリガーの正規表現・連続発火のクールダウン設定（F-38の一部）</td><td>単純な部分一致で当面の要求は満たせる。同一トリガーが短時間に連続発火した場合の抑制は次フェーズで検討する</td></tr>
+      <tr><td>F-24 社内システム登録・変更操作</td><td>誤操作時の影響が大きいため、参照（F-23）を先行実装</td></tr>
+      <tr><td>F-26 AI操作履歴の記録</td><td>登録・変更操作（F-24）が無いため優先度が低い</td></tr>
+      <tr><td>F-27 対象システム・操作範囲の管理設定</td><td>今回は座席予約システムの参照のみに固定するため不要</td></tr>
+      <tr><td>F-28 利用者権限の継承の作り込み</td><td>参照のみでは影響が小さいため簡易な扱いとする</td></tr>
+      <tr><td>F-32 モバイル対応レイアウト</td><td>初期運用はPCブラウザで検証する</td></tr>
+      <tr><td>e-learningシステムとの連携</td><td>座席予約システムでの実装知見を踏まえ次フェーズで着手</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 6. データベース設計 ============ -->
+  <h2 id="sec6">6. データベース設計</h2>
+
+  <h3>6.1 ER図</h3>
+  <p>PostgreSQL (Supabase) 上に16テーブルを配置する。主要な関連のみを以下に示す。全テーブルの詳細は6.2節を参照。</p>
+
+  <div class="diagram">
+    <svg width="860" height="420" viewBox="0 0 860 420" font-family="'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif">
+      <!-- users -->
+      <rect x="30" y="170" width="170" height="66" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="1.5"/>
+      <rect x="30" y="170" width="170" height="26" rx="8" fill="#1e40af"/>
+      <rect x="30" y="186" width="170" height="10" fill="#1e40af"/>
+      <text x="115" y="188" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">T-01 users</text>
+      <text x="115" y="210" text-anchor="middle" font-size="11" fill="#1a1d21">ユーザー</text>
+      <text x="115" y="226" text-anchor="middle" font-size="10" fill="#60656d">email / role / is_active</text>
+
+      <!-- channels -->
+      <rect x="320" y="30" width="200" height="66" rx="8" fill="#ffffff" stroke="#1e40af" stroke-width="1.5"/>
+      <rect x="320" y="30" width="200" height="26" rx="8" fill="#dbeafe"/>
+      <rect x="320" y="46" width="200" height="10" fill="#dbeafe"/>
+      <text x="420" y="48" text-anchor="middle" font-size="12" font-weight="600" fill="#1e3a8a">T-02 channels</text>
+      <text x="420" y="70" text-anchor="middle" font-size="11" fill="#1a1d21">チャンネル</text>
+      <text x="420" y="86" text-anchor="middle" font-size="10" fill="#dc2626">name / is_public / created_by</text>
+
+      <!-- channel_members -->
+      <rect x="320" y="125" width="200" height="66" rx="8" fill="#ffffff" stroke="#1e40af" stroke-width="1.5"/>
+      <rect x="320" y="125" width="200" height="26" rx="8" fill="#dbeafe"/>
+      <rect x="320" y="141" width="200" height="10" fill="#dbeafe"/>
+      <text x="420" y="143" text-anchor="middle" font-size="12" font-weight="600" fill="#1e3a8a">T-03 channel_members</text>
+      <text x="420" y="165" text-anchor="middle" font-size="11" fill="#1a1d21">チャンネル参加・chadmin</text>
+      <text x="420" y="181" text-anchor="middle" font-size="10" fill="#60656d">channel_id / user_id / is_channel_admin</text>
+
+      <!-- direct_messages -->
+      <rect x="320" y="220" width="90" height="66" rx="8" fill="#ffffff" stroke="#1e40af" stroke-width="1.5"/>
+      <rect x="320" y="220" width="90" height="26" rx="8" fill="#dbeafe"/>
+      <rect x="320" y="236" width="90" height="10" fill="#dbeafe"/>
+      <text x="365" y="238" text-anchor="middle" font-size="11" font-weight="600" fill="#1e3a8a">T-04</text>
+      <text x="365" y="260" text-anchor="middle" font-size="10.5" fill="#1a1d21">DMスレッド</text>
+      <text x="365" y="276" text-anchor="middle" font-size="9.5" fill="#60656d">created_by</text>
+
+      <!-- direct_message_members -->
+      <rect x="430" y="220" width="90" height="66" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="1.5"/>
+      <rect x="430" y="220" width="90" height="26" rx="8" fill="#1e40af"/>
+      <rect x="430" y="236" width="90" height="10" fill="#1e40af"/>
+      <text x="475" y="238" text-anchor="middle" font-size="11" font-weight="600" fill="#ffffff">T-17</text>
+      <text x="475" y="258" text-anchor="middle" font-size="10" fill="#dc2626" font-weight="600">参加者（2名以上）</text>
+      <text x="475" y="274" text-anchor="middle" font-size="9.5" fill="#dc2626">dm_id / user_id</text>
+
+      <!-- messages -->
+      <rect x="600" y="125" width="220" height="80" rx="8" fill="#ffffff" stroke="#1e40af" stroke-width="1.5"/>
+      <rect x="600" y="125" width="220" height="26" rx="8" fill="#dbeafe"/>
+      <rect x="600" y="141" width="220" height="10" fill="#dbeafe"/>
+      <text x="710" y="143" text-anchor="middle" font-size="12" font-weight="600" fill="#1e3a8a">T-05 messages</text>
+      <text x="710" y="165" text-anchor="middle" font-size="11" fill="#1a1d21">発言（人間・AI）</text>
+      <text x="710" y="181" text-anchor="middle" font-size="10" fill="#60656d">channel_id / dm_id / thread_parent_id</text>
+      <text x="710" y="196" text-anchor="middle" font-size="10" fill="#60656d">sender_type / sender_user_id</text>
+
+      <!-- message_blocks -->
+      <rect x="600" y="235" width="220" height="66" rx="8" fill="#f5f7f9" stroke="#60656d" stroke-width="1.5"/>
+      <rect x="600" y="235" width="220" height="26" rx="8" fill="#e7eaee"/>
+      <rect x="600" y="251" width="220" height="10" fill="#e7eaee"/>
+      <text x="710" y="253" text-anchor="middle" font-size="12" font-weight="600" fill="#1a1d21">T-07 message_blocks</text>
+      <text x="710" y="275" text-anchor="middle" font-size="11" fill="#1a1d21">根拠・外部参照・確認等のカード</text>
+      <text x="710" y="291" text-anchor="middle" font-size="10" fill="#60656d">block_type / payload(JSONB)</text>
+
+      <!-- channel_ai_settings -->
+      <rect x="30" y="280" width="200" height="80" rx="8" fill="#ffffff" stroke="#1e40af" stroke-width="1.5"/>
+      <rect x="30" y="280" width="200" height="26" rx="8" fill="#dbeafe"/>
+      <rect x="30" y="296" width="200" height="10" fill="#dbeafe"/>
+      <text x="130" y="298" text-anchor="middle" font-size="12" font-weight="600" fill="#1e3a8a">T-08 channel_ai_settings</text>
+      <text x="130" y="320" text-anchor="middle" font-size="11" fill="#1a1d21">チャンネルAI設定</text>
+      <text x="130" y="336" text-anchor="middle" font-size="10" fill="#60656d">persona / behavior_prompt</text>
+      <text x="130" y="351" text-anchor="middle" font-size="10" fill="#60656d">reaction_mode / is_ai_enabled</text>
+
+      <!-- doc_folders / channel_doc_folders -->
+      <rect x="30" y="380" width="200" height="30" rx="6" fill="#fafbfc" stroke="#d9dde3" stroke-width="1.3"/>
+      <text x="130" y="399" text-anchor="middle" font-size="10.5" fill="#60656d">T-09 doc_folders ／ T-10 channel_doc_folders</text>
+
+      <!-- users - channels (creator) -->
+      <line x1="200" y1="190" x2="320" y2="65" stroke="#60656d" stroke-width="1.3"/>
+      <text x="215" y="150" font-size="10.5" font-weight="600" fill="#1e40af">1</text>
+      <text x="300" y="62" font-size="10.5" font-weight="600" fill="#1e40af">N</text>
+
+      <!-- users - channel_members -->
+      <line x1="200" y1="200" x2="320" y2="158" stroke="#60656d" stroke-width="1.3"/>
+      <text x="215" y="198" font-size="10.5" font-weight="600" fill="#1e40af">1</text>
+      <text x="300" y="156" font-size="10.5" font-weight="600" fill="#1e40af">N</text>
+
+      <!-- channels - channel_members -->
+      <line x1="420" y1="96" x2="420" y2="123" stroke="#60656d" stroke-width="1.3"/>
+      <text x="428" y="110" font-size="10.5" font-weight="600" fill="#1e40af">1:N</text>
+
+      <!-- channels - messages -->
+      <line x1="520" y1="70" x2="600" y2="140" stroke="#60656d" stroke-width="1.3"/>
+      <text x="527" y="100" font-size="10.5" font-weight="600" fill="#1e40af">1</text>
+      <text x="580" y="140" font-size="10.5" font-weight="600" fill="#1e40af">N</text>
+
+      <!-- direct_messages - direct_message_members -->
+      <line x1="410" y1="253" x2="430" y2="253" stroke="#dc2626" stroke-width="1.3"/>
+      <text x="411" y="248" font-size="10" font-weight="600" fill="#dc2626">1:N</text>
+
+      <!-- users - direct_message_members (routed around direct_messages / channel_ai_settings boxes) -->
+      <path d="M200,225 L250,225 L250,310 L475,310 L475,286" fill="none" stroke="#dc2626" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="205" y="238" font-size="10.5" font-weight="600" fill="#dc2626">1</text>
+      <text x="450" y="305" font-size="10.5" font-weight="600" fill="#dc2626">N</text>
+
+      <!-- direct_messages - messages (routed above direct_message_members box) -->
+      <line x1="410" y1="220" x2="600" y2="192" stroke="#60656d" stroke-width="1.3"/>
+      <text x="415" y="212" font-size="10.5" font-weight="600" fill="#1e40af">1</text>
+      <text x="583" y="195" font-size="10.5" font-weight="600" fill="#1e40af">N</text>
+
+      <!-- messages - message_blocks -->
+      <line x1="710" y1="205" x2="710" y2="232" stroke="#60656d" stroke-width="1.3"/>
+      <text x="718" y="220" font-size="10.5" font-weight="600" fill="#1e40af">1:N</text>
+
+      <!-- channels - channel_ai_settings -->
+      <line x1="320" y1="55" x2="130" y2="277" stroke="#60656d" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="200" y="170" font-size="10.5" font-weight="600" fill="#1e40af">1:1</text>
+
+      <!-- channel_ai_settings - doc_folders -->
+      <line x1="130" y1="360" x2="130" y2="378" stroke="#8a8f98" stroke-width="1.3" stroke-dasharray="4 3"/>
+
+      <text x="30" y="60" font-size="10.5" fill="#8a8f98">※ T-06, T-11〜T-16, T-18, T-19, T-21 は6.2節参照（添付ファイル・スキル・自動対応・利用量・上限・確認待ち・監査ログ・予約送信・定期投稿・自動応答トリガー。T-20は個人宛てリマインダーの対象外化に伴い欠番）</text>
+      <text x="430" y="20" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">Kogack ER図（主要関連）</text>
+    </svg>
+  </div>
+
+  <h3>6.2 テーブル一覧</h3>
+  <table>
+    <thead><tr><th>テーブルID</th><th>物理名</th><th>論理名</th><th>概要</th></tr></thead>
+    <tbody>
+      <tr><td>T-01</td><td><code>users</code></td><td>ユーザー</td><td>ログインユーザー。email（UNIQUE）、name<span class="diff-new">（UNIQUE制約なし＝重複を許容。初回ログイン時はGoogleの氏名で初期化。以降はGoogle側の氏名変更を自動反映せず、A-62で本人が任意の表示名に変更可能。F-39、5.20節「設計判断」）</span>、picture_url<span class="diff-new">（初回ログイン時はGoogleのプロフィール画像で初期化。A-62で本人が上書き可能。以降はGoogle側の画像変更を自動反映しない。F-37）</span>、role（'member'/'admin'、DEFAULT 'member'）、is_active（DEFAULT true。falseでログイン不可）</td></tr>
+      <tr><td>T-02</td><td><code>channels</code></td><td>チャンネル</td><td>チャンネル。name（UNIQUE）、topic、<span class="diff-new">is_public（DEFAULT true。false=非公開チャンネル。F-34）</span>、created_by（FK→users.id）</td></tr>
+      <tr><td>T-03</td><td><code>channel_members</code></td><td>チャンネル参加・チャンネル管理者</td><td>チャンネルへの参加とchadmin権限を表す。channel_id・user_id・is_channel_admin（DEFAULT false）・joined_at。(channel_id, user_id) 主キー</td></tr>
+      <tr><td>T-04</td><td><code>direct_messages</code></td><td>DM</td><td><span class="diff-new">DMスレッド本体。created_by（FK→users.id）・created_at。参加者はT-17で管理する</span></td></tr>
+      <tr><td>T-05</td><td><code>messages</code></td><td>発言</td><td>チャンネル・DM・スレッド共通の発言。channel_id／dm_id（いずれか一方。CHECK制約）、thread_parent_id（自己参照FK、スレッドの元発言）、sender_type（'human'/'ai'<span class="diff-new">/'bot'</span>）、sender_user_id（AI・BOT発言時はNULL）、body、deleted_at・deleted_by（論理削除）<span class="diff-new">、bot_display_name・bot_icon<span class="diff-new">・bot_icon_url</span>（sender_type='bot'のときのみ使用。送信時点のT-19の値をスナップショットするため非正規化。ルール変更・削除後も過去の投稿の見た目を保つ）、recurring_post_id（FK→T-19、sender_type='bot'のときのみ、どのルールから生成されたかの参照。F-36）</span><span class="diff-new">、trigger_rule_id（FK→T-21、sender_type='bot'かつトリガー応答のときのみ、どのルールから生成されたかの参照。recurring_post_idと同時にはNOT NULLにならない。F-38）</span></td></tr>
+      <tr><td>T-06</td><td><code>message_attachments</code></td><td>添付ファイル</td><td>発言に紐づく添付ファイル。message_id、file_name、byte_size（20MB上限はAPI側で検証）、storage_path（Supabase Storage）、uploaded_by</td></tr>
+      <tr><td>T-07</td><td><code>message_blocks</code></td><td>発言内の構造化ブロック</td><td>AI発言に付随する根拠カード等<span class="diff-new">、および人間の発言の@メンション参照（F-41）</span>。message_id、block_type（'citation'/'external_system'/'quote_reference'/'pending_action'<span class="diff-new">/'mention'</span>）、payload（JSONB。種類ごとに異なる構造<span class="diff-new">。'mention'はtarget_user_id・表示名スナップショットを持つ</span>）、sort_order。設計判断は6.3節<span class="diff-new">・5.22節</span>参照</td></tr>
+      <tr><td>T-08</td><td><code>channel_ai_settings</code></td><td>チャンネルAI設定</td><td>チャンネルごとのAI設定。channel_id（FK、UNIQUE）、is_ai_enabled、persona_name／persona_icon_url<span class="diff-new">（A-61で画像をアップロードし、返却されたURLをA-25で保存する。未設定時は「AI」の2文字アバターで代替）</span>／persona_tone、behavior_prompt、reaction_mode（'mention_only'/'proactive'）、<span class="diff-new">out_of_scope_policy（'strict'/'general'。指定範囲外の質問への対応方針。F-11）、fallback_handoff_user_id（スキルにない業務依頼の引き継ぎ先。NULL時はT-03の当該チャンネルchadminへ引き継ぐ。F-17）、</span>updated_by・updated_at（監査ログの参照元）</td></tr>
+      <tr><td>T-09</td><td><code>doc_folders</code></td><td>参照ドキュメントフォルダ（全体候補）</td><td>S-08で管理者が登録するGoogle Driveフォルダの全体候補。drive_folder_id（UNIQUE）、drive_folder_name、added_by</td></tr>
+      <tr><td>T-10</td><td><code>channel_doc_folders</code></td><td>チャンネル別 参照ドキュメント範囲</td><td>T-09の候補のうち、各チャンネルが参照範囲として選択したもの。(channel_id, folder_id) 主キー</td></tr>
+      <tr><td>T-11</td><td><code>channel_skills</code></td><td>スキル</td><td>チャンネルAIに割り当てる「依頼を受けたらこう進める」手順。channel_id、title、instructions</td></tr>
+      <tr><td>T-12</td><td><code>channel_auto_response_rules</code></td><td>自動対応範囲</td><td>依頼内容カテゴリごとの対応区分。channel_id、request_category、response_level（'auto'/'confirm'/'human'）。(channel_id, request_category) UNIQUE</td></tr>
+      <tr><td>T-13</td><td><code>ai_usage_logs</code></td><td>AI利用ログ</td><td>AI呼び出しごとの記録。channel_id／dm_id、requested_by、model、input_tokens・output_tokens、estimated_cost_yen、created_at。<strong>質問文・回答文は保存しない</strong>（8.6節）</td></tr>
+      <tr><td>T-14</td><td><code>ai_usage_limits</code></td><td>AI利用上限設定</td><td>scope（'global'/'channel'）、channel_id（scope='channel'時）、monthly_limit_yen、notify_threshold_pct（DEFAULT 80）、notify_email</td></tr>
+      <tr><td>T-15</td><td><code>pending_actions</code></td><td>実行前確認待ちの操作</td><td>S-07で提示する操作。message_id、requested_by、system_name、action_type、action_payload（JSONB）、status（'pending'/'confirmed'/'cancelled'）、decided_by・decided_at</td></tr>
+      <tr><td>T-16</td><td><code>audit_logs</code></td><td>監査ログ</td><td>ログイン・チャンネルAI設定変更の記録。event_type（'login'/'channel_ai_setting_change'）、actor_user_id、target_channel_id、target_field、summary</td></tr>
+      <tr class="diff-new"><td>T-17</td><td><code>direct_message_members</code></td><td>DM参加者</td><td>DM（T-04）の参加者。dm_id・user_id、joined_at。(dm_id, user_id) 主キー。1件のDMにつき2行以上（一対一なら2行、グループDMなら3行以上）</td></tr>
+      <tr class="diff-new"><td>T-18</td><td><code>scheduled_messages</code></td><td>予約メッセージ</td><td>送信予約された発言。channel_id／dm_id（いずれか一方。T-05と同じCHECK制約）、thread_parent_id（スレッド返信の予約時）、sender_user_id（FK→users.id）、body、scheduled_at（送信予定日時）、status（'pending'/'sent'/'cancelled'、DEFAULT 'pending'）、created_at、sent_at。ファイル添付・sender_type（常に人間）は持たない</td></tr>
+      <tr class="diff-new"><td>T-19</td><td><code>recurring_posts</code></td><td>定期投稿ルール</td><td>チャンネルへの自動投稿ルール（F-36）。channel_id（FK→channels.id）、created_by（FK→users.id）、body、bot_display_name、bot_icon（絵文字。未指定時はAPI側で既定値を補う）、<span class="diff-new">bot_icon_url（アップロードした画像のURL。A-61で取得したURLを保存。設定されている場合はbot_iconより優先して表示）、</span>frequency（'once'/'daily'/'weekly'/'monthly'）、anchor_at（初回送信日時。weekly/monthlyの曜日・日にちの基準）、next_run_at（次回送信予定。ディスパッチャが参照・更新）、is_active（DEFAULT true。一時停止で false）、last_sent_at、updated_by・updated_at</td></tr>
+      <tr class="diff-new"><td>T-21</td><td><code>trigger_rules</code></td><td>自動応答トリガー</td><td>キーワード・絵文字による自動応答ルール（F-38）。channel_id（FK→channels.id）、created_by（FK→users.id）、trigger_type（'keyword'/'emoji'）、trigger_value（一致判定に使う文字列）、action_type（'post_message'。将来の拡張余地として保持）、action_body、bot_display_name、bot_icon、bot_icon_url、is_active（DEFAULT true。一時停止で false）、updated_by・updated_at</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>設計判断（chadminをどう表現するか）:</strong> 要件定義書6章はmember/chadmin/adminの「3ロール制」と表現するが、chadminはチャンネル単位で付与される点が他の2つと異なる。これをT-01 usersに3値のroleカラムとして持たせると「あるチャンネルではchadminだが別のチャンネルではそうではない」状態を表現できない。そのため、<strong>グローバルなroleはmember/adminの2値のみ</strong>とし、chadminであるかどうかはT-03 channel_members.is_channel_adminで表現する（3.3節）。
+  </div>
+
+  <div class="callout">
+    <strong>設計判断（message_blocksをJSONBにした理由）:</strong> S-03のAI発言には、根拠文書カード（citation）・連携先システムの参照結果（external_system）・過去の発言の参照（quote_reference）・実行前確認への導線（pending_action）など、種類ごとに構造の異なる付加情報が表示される。これらを個別のテーブルに分けると発言の表示順を跨いだ結合が煩雑になるため、種類（block_type）と内容（payload、JSONB）を持つ1つのテーブルにまとめ、フロントエンドはblock_typeに応じたコンポーネント（<code>components/blocks/</code>）で描画する。将来ブロック種類が増えてもテーブルを追加せずに済む。
+  </div>
+
+  <div class="callout">
+    <strong>設計判断（pending_actionsを今回から用意する理由）:</strong> 座席予約の登録操作（F-24）自体は本リリースの対象外だが、要件定義書F-25は「実行前確認の仕組み」を要求しており、次フェーズで書き込み系の連携が増えたときに使い回せるよう、スキーマとAPI（A-33〜A-35）を本リリースから用意する（「仕組みのみ用意」5.5節）。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（out_of_scope_policy・fallback_handoff_user_idを追加した理由）:</strong> 画面モックアップ検討の過程で、「参照ドキュメント範囲外の質問にどう答えるか」「スキルにない業務依頼を誰に引き継ぐか」をチャンネルごとに設定したいという要望が出た（要件定義書F-11・F-17の拡張。1.6版で反映）。いずれもchannel_ai_settingsに1カラムずつ追加すれば表現できる単純な設定のため、T-08に直接持たせ、独立テーブルは設けない。fallback_handoff_user_idは必ずT-03で当該チャンネルの参加者であることをAPI側で検証し、指定した人物が退出・無効化された場合はNULL（既定のchadminへ引き継ぎ）に戻す。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（DMをuser_a_id/user_b_idの2カラムからT-17の参加者テーブルに変更した理由）:</strong> 旧設計はDMを常に2名の関係として扱い、user_a_id &lt; user_b_idに正規化したうえでUNIQUE制約により同一ペアの重複作成を防いでいた。要件定義書v1.7でF-05が3名以上のグループDMに対応したため、固定2カラムでは参加者を表現できなくなった。T-03 channel_membersと同じ構造（中間テーブルによる多対多）をT-17として設け、DM1件（T-04）に対しN名の参加者を紐づける形に変更する。既存DMがあれば再利用する仕様（A-17）は、参加者の集合が完全一致するT-04を検索する処理としてAPI側で実装し、DB制約では表現しない（参加者数が可変のため、UNIQUE制約による重複防止はできない）。参加者の追加・削除は本リリースの対象外とし（5.3節）、変更が必要な場合は新規にDMを開始する運用とする。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（非公開チャンネルを既存のis_publicカラム・channel_membersだけで実現した理由）:</strong> 非公開チャンネルはMVPスコープ決定（<a href="../検討資料/20260818_MVPスコープ決定.html">検討資料</a>）で一度見送られたが、T-02.is_publicは「将来拡張のため」のプレースホルダとしてv1.0から既に存在していた。参加管理の実体はT-03 channel_membersで公開・非公開を問わず同じ仕組み（is_public=trueは誰でもA-08で自分を追加できる、is_public=falseは既存の参加者がA-08で他者を追加する形にAPI側の認可を分岐する）であるため、新規テーブルは不要と判断した。非公開チャンネルへのメンバー追加をchadmin限定にせず参加者全員に開放したのは、F-33（チャンネル管理者の変更）のようなガバナンス強化とは目的が異なり、「すでに信頼して招き入れた相手を、本人たちの判断でさらに招待できる」という利用実態を優先したため（chadminのみに絞ると、非公開チャンネル運用の実務上のボトルネックになりやすい）。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（予約メッセージの送信を外部ジョブスケジューラではなくFastAPI内蔵のasyncioタスクにした理由）:</strong> Celery＋Redisのような専用ジョブキューを導入すると、Koyeb上の構成要素が増え（ワーカープロセス・ブローカー）、9月末リリースの規模に対して過剰である。既に8.1節でAI応答生成を非同期タスクとして起動する仕組み（<code>asyncio.create_task</code>）があり、同じ方式を「30秒間隔でDBをポーリングして期限到来分を処理する」ループとして流用できるため、追加インフラなしで実現できると判断した。ただし、この方式はFastAPIプロセスが1つであることを前提とする。将来Koyebで複数インスタンスに水平スケールする場合、同じ予約メッセージを複数インスタンスが同時に処理し二重送信する恐れがあるため、その時点で <code>UPDATE ... WHERE status='pending' RETURNING</code>（1行を排他的に確保するアトミックな更新）への変更、または専用ワーカーへの切り出しが必要になる（10章に前提として明記）。予約メッセージへの添付ファイルを対象外としたのは、T-05に発言として存在する前にファイルを保存する経路（message_attachments.message_idはNOT NULL）を新たに設ける必要があり、本追加のスコープに対して過大なためである。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（定期投稿をF-35と同じディスパッチャに統合し、sender_typeに'bot'を追加した理由）:</strong> 定期投稿（F-36）は「期限が来たらDBの行を検出してT-05へ発言化する」という処理の骨格がF-35（送信予約）と同一であり、専用のディスパッチャを別途起動するのではなく<code>scheduled_dispatcher.py</code>内の別ループとして同居させ、単一インスタンス前提などの制約（前述）も共有する。発言の主体をT-01 usersに持たせず新たに'bot'というsender_typeを設けたのは、BOT投稿はチャンネル管理者が設定した「送り主の見た目」であって特定のユーザーアカウントの発言ではないため、sender_user_idにNULLを許容しつつ表示名・アイコンを持てる形が必要だったこと、また将来ルール（T-19）が削除・変更されても過去の投稿の見た目を変えないために、送信時点の表示名・アイコンをT-05側にスナップショットする必要があったためである（T-17のような単純な中間テーブルでは表現できない）。BOT投稿の本文中の@メンションでAIを起動しない設計としたのは、繰り返し実行される投稿が意図せず毎回AI呼び出し（コスト）を発生させることを避けるためで、8章のAIエージェント処理はsender_type='human'の投稿のみをトリガー対象とする（既存の前提を変更しない）。「毎月」の日付計算で該当日が無い月を月末に繰り下げるのは、単純に例外として送信をスキップするよりも「毎月ほぼ同じタイミングで届く」という利用者の期待に近いと判断したため。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（個人宛てリマインダーを対象外に戻した理由）:</strong> v1.6でF-36の宛先を個人（複数可）に拡張し、DM経路（T-04/T-17）と予約システムアカウント（T-01.is_system）を使った配送方式まで設計したが、本改訂でチャンネル宛てのみに戻すことにした。定期投稿はチャンネル運用（お知らせ・締切リマインドなど）としての需要が主眼であり、個人宛ての利用は範囲が広がりすぎて優先度を下げるべきと判断したための方針転換である。設計自体（新規テーブルT-20・is_systemカラム・API A-57〜A-60）は妥当だったため、次フェーズで個人宛てを再検討する際は流用できるよう、要件定義書3.2節に対象外機能として記録した。DBの採番（T-20、A-57〜A-60）は欠番のままとし、将来復活させる場合も同じIDを再利用する。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（アイコンアップロードを1本の汎用APIに集約し、公開範囲をmessage_attachmentsと分けた理由）:</strong> 個人アイコン（T-01.picture_url）・チャンネルAIアイコン（T-08.persona_icon_url）・BOTアイコン（T-19.bot_icon_url）は、いずれも「画像を受け取りStorageに保存してURLを返す」という処理が同一であり、対象ごとに別々のアップロードAPIを作ると重複が増えるだけでなく上限サイズや許可形式の食い違いが起きやすい。そのため汎用のA-61に一本化し、アップロード自体は認証済みであれば誰でも呼べる（そのファイル単体は何にも紐づかず実害がないため）。実際にそのURLを特定のリソースへ反映する段階（A-25のチャンネルAI編集、A-54/A-55の定期投稿編集、A-62の自分のプロフィール編集）でそれぞれの既存の権限チェックを通す設計とし、アップロードAPI自体に個別の権限ロジックを持たせずシンプルに保った。公開範囲をmessage_attachments（チャンネル/DM参加者限定）と揃えなかったのは、アイコンはメッセージの吹き出し・S-06・S-08・横断検索結果など「発言者が誰か」を示す目的で組織内のあらゆる画面に登場しうる性質のものであり、参加者限定にすると閲覧者ごとに表示できたりできなかったりする不整合が生じるため。全認証済み利用者に読み取りを許可しても、アイコン画像自体は機密情報ではないためREQ-N-02（会話の参照範囲制御）には抵触しないと判断した。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（自動応答トリガーを新規T-21として独立させ、F-35/F-36とは別の同期方式にした理由）:</strong> T-19 recurring_postsは「時刻が来たら送る」という時間ベースの構造（frequency・anchor_at・next_run_at）を前提にしており、trigger_rulesが必要とする「発言内容が一致したら送る」という条件はこれらの列と噛み合わない（frequency等が常にNULLになる、あるいは無関係な値で埋まる不自然なテーブルになる）。そのため、送り主表示（bot_display_name・bot_icon・bot_icon_url）や「T-05にsender_type='bot'で発言化する」という下流処理は共通させつつ、スケジュールに関する列を持たない新規テーブルT-21として分離した。送信方式もF-35/F-36の30秒間隔ポーリングではなく、A-11（メッセージ投稿）の中で同期的に判定する方式とした。理由は、判定処理が文字列の部分一致とDB1件挿入のみで完結し、AI応答生成のような外部API呼び出し（レイテンシ・失敗のリスク）を伴わないため、ポーリング間隔分の遅延を許容する理由がなく、投稿直後に反応させたほうが「トリガーに反応した」という利用者体験に合致するため。ループ防止（sender_type='human'の発言のみを判定対象とする）は、F-36で確立した「BOT発言はAIエージェント処理を起動しない」という原則を横展開したもので、これにより自動応答が別の自動応答や@メンションを連鎖的に呼び出すことはない。action_typeを'post_message'固定のENUMとしたのは、要件定義書F-38が「メッセージ・URLの送付」のみを求めており、いずれもチャット内投稿として表現できるため。将来Webhook通知等の種類が増えた場合は、T-07 message_blocksと同様にaction_payload（JSONB）を追加してblock_type相当の拡張を行う設計とする。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（入室通知を新規sender_typeやテーブルを追加せずF-36/F-38と同じ'bot'で表現した理由）:</strong> F-43（チャンネル参加の通知）は「特定のイベント（参加）が起きたらBOTとしてT-05へ発言化する」という点でF-36・F-38と処理の骨格が同一であり、sender_type='bot'・bot_display_name・bot_icon/bot_icon_urlという既存の枠組みだけで表現できるため、新しいsender_typeやテーブルは追加しなかった。送り主表示（bot_display_name）はF-36/F-38のようにチャンネル管理者が設定するのではなく固定文字列「システム通知」とする。recurring_post_id・trigger_rule_idはいずれもNULLのままとし（どちらの由来にも該当しないため）、将来「入室通知の文言をチャンネルごとにカスタマイズしたい」といった要望が出た場合は、T-19/T-21と同じ考え方で新規テーブルを追加すればよい（現時点ではその需要が無いため見送る）。生成のタイミングはA-08（参加）の処理内で同期的に行い、F-38のtrigger_matcher.pyと同様に判定・生成コストが軽い（DB挿入のみ）ためポーリング方式は採用しない。チャンネル作成（A-07）時の自動参加を対象外としたのは、作成直後のチャンネルには他に参加者がおらず、通知を出しても読む相手がいないため。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（未読管理をメッセージ単位ではなく「最終既読時刻」1本にした理由）:</strong> サイドバーの未読バッジ（4.2節「サイドバー」に記載済みだったが本改訂までDB/API設計が未反映だった）を実現する方式として、個々のメッセージごとに既読/未読を記録する方式（例: T-05へ既読者リストを持たせる）ではなく、チャンネル・DMそれぞれについて「利用者が最後に読んだ時刻」を1行だけ保持する新規T-22 read_states（channel_id/dm_idはT-05と同じCHECK制約パターン）を採用した。未読件数は「読んだ時刻より後に投稿された、自分以外が送った、スレッド返信ではない発言」の件数として都度計算する（本体タイムラインのみを対象とし、スレッド内の未読は数えない。スレッド内のやり取りは本体タイムラインに流れないという既存方針と整合させるため）。既読時刻の初期値が無い参加者（read_statesに行が無い）は、参加時刻（T-03.joined_at／T-17.joined_at）を基準にする。既読は「そのチャンネル/DMの画面を開いている（表示中に新着が来た場合も含む）」ことをもって記録し、専用の既読ボタン等は設けない。この方式はSlack等の主要チャットツールと同じ考え方で、メッセージ単位の既読管理よりはるかに単純であり、200名規模の想定運用では十分な精度と判断した。
+  </div>
+
+  <h3>6.3 共通設計方針</h3>
+  <ul>
+    <li>主キー: <code>id</code> は BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY で統一する（channel_members・channel_doc_folders等の中間テーブルは複合主キー）。</li>
+    <li>タイムスタンプ: <code>created_at</code> / <code>updated_at</code> は TIMESTAMPTZ NOT NULL DEFAULT now() で全テーブルに付与する。</li>
+    <li>論理削除: 発言（T-05）は物理削除せず <code>deleted_at</code> で論理削除し、表示・検索・AI参照のいずれからも除外する（要件定義書5.2節）。</li>
+    <li>コード値（role, sender_type, block_type, response_level, status）は CHECK制約または列挙で担保する。</li>
+    <li>スキーマ定義は <code>backend/database.py</code>（SCHEMA定義）に集約し、テーブル定義書を docs/ で管理する。</li>
+  </ul>
+  <p>各テーブルのカラム詳細（型・NULL可否・制約・既定値の全定義）は詳細設計書に委ねる。</p>
+
+  <div class="callout">
+    <strong>RLS方針:</strong> 全テーブルでRow Level Security（RLS）を有効にする（<code>ALTER TABLE ... ENABLE ROW LEVEL SECURITY;</code>）。アプリケーションは asyncpg で直接接続するため通常アクセスの権限判定はAPI層で行うが、Supabaseの他経路（PostgREST等）からの意図しない参照を遮断する多層防御として全テーブルRLSを必須とする。特にmessages・message_blocksはチャンネル参加者・DM参加者以外に見えてはならないため、RLSポリシーはchannel_id指定時はchannel_members、<span class="diff-new">dm_id指定時はdirect_message_members</span>との結合で参加者本人のみに限定する。<span class="diff-new">channels（T-02）自体もRLSの対象とし、is_public=trueの行は認証済み全員に見えるが、is_public=falseの行はchannel_membersに自分が含まれる場合のみ見える。これにより、未参加の非公開チャンネルはAPI層のバグがあってもDB側で存在自体が露出しない（多層防御）。</span>
+  </div>
+
+  <!-- ============ 7. API設計 ============ -->
+  <h2 id="sec7">7. API設計</h2>
+  <p>ベースパスは <code>/api</code>。認証はセッションJWT（HttpOnly Cookie）により、A-01・A-02 を除き認証必須とする。エラー形式は lcc_crm を踏襲し <code>{"detail": "メッセージ"}</code> とする。権限不足は 403、対象なしは 404 を返す。リクエスト/レスポンスのフィールド詳細は詳細設計書を参照のこと。<strong>A-32は欠番</strong>（AIエージェントの応答生成はメッセージ投稿をトリガーに実行される内部処理であり、フロントエンドから直接呼び出すAPIとしては公開しない。8.1節参照）。</p>
+
+  <table>
+    <thead><tr><th>API ID</th><th>メソッド</th><th>パス</th><th>権限</th><th>概要</th></tr></thead>
+    <tbody>
+      <tr><td>A-01</td><td><span class="badge badge-get">GET</span></td><td><code>/api/auth/login</code></td><td>不要</td><td>Google OAuth認可URLへリダイレクト</td></tr>
+      <tr><td>A-02</td><td><span class="badge badge-get">GET</span></td><td><code>/api/auth/callback</code></td><td>不要</td><td>OAuthコールバック。ドメイン検証→ユーザー登録/取得→JWT発行→ / へリダイレクト</td></tr>
+      <tr><td>A-03</td><td><span class="badge badge-post">POST</span></td><td><code>/api/auth/logout</code></td><td>認証済</td><td>セッションCookie破棄</td></tr>
+      <tr><td>A-04</td><td><span class="badge badge-get">GET</span></td><td><code>/api/auth/me</code></td><td>認証済</td><td>ログイン中ユーザー情報</td></tr>
+      <tr><td>A-05</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels</code></td><td>認証済</td><td>参加中チャンネル一覧＋参加可能な<span class="diff-new">公開</span>チャンネル一覧（補足01の「参加する」タブ用。<span class="diff-new">非公開チャンネルは自分が参加しているものだけが参加中一覧に含まれ、未参加の非公開チャンネルはどちらの一覧にも出さない。F-34</span>）</td></tr>
+      <tr><td>A-06</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}</code></td><td>チャンネル参加者</td><td>チャンネル詳細（名前・トピック・参加人数・AI有効状態）</td></tr>
+      <tr><td>A-07</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels</code></td><td>認証済</td><td>チャンネル作成。<span class="diff-new">is_public（公開/非公開。既定true）を指定。</span>作成者を自動的にchadminとして登録（補足01の「作成する」タブ）</td></tr>
+      <tr><td>A-08</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/members</code></td><td><span class="diff-new">公開チャンネル: 認証済（本人を追加）／非公開チャンネル: 当該チャンネルの参加者（対象user_idを指定してメンバーを追加。F-34）</span></td><td>公開チャンネルへの参加（承認不要・即時参加）<span class="diff-new">。非公開チャンネルは、参加者が他の利用者をuser_id指定で追加する（本人による自己参加は不可）</span></td></tr>
+      <tr><td>A-09</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}</code></td><td>当該chadmin or admin</td><td>チャンネル削除</td></tr>
+      <tr><td>A-10</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/messages</code></td><td>チャンネル参加者</td><td>メッセージ履歴取得。<code>since</code> パラメータでポーリング差分取得</td></tr>
+      <tr><td>A-11</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/messages</code></td><td>チャンネル参加者</td><td>メッセージ投稿。AIへのメンション時は8章のAIエージェント処理を非同期起動<span class="diff-new">。あわせてtrigger_matcher.pyが自動応答トリガー（T-21）との一致を判定し、一致すれば同期的にBOT発言を作成する（F-38、5.19節）</span>。<span class="diff-new">リクエストに人間へのメンション（mentions: [{user_id, display_name}]）が含まれる場合、T-05への保存とあわせてT-07 message_blocksへblock_type='mention'の行を作成する（F-41、5.22節）</span></td></tr>
+      <tr><td>A-12</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/messages/{id}</code></td><td>投稿者本人 or admin</td><td>メッセージ削除（論理削除）</td></tr>
+      <tr><td>A-13</td><td><span class="badge badge-get">GET</span></td><td><code>/api/messages/{id}/thread</code></td><td>チャンネル参加者</td><td>スレッド内の返信一覧</td></tr>
+      <tr><td>A-14</td><td><span class="badge badge-post">POST</span></td><td><code>/api/messages/{id}/thread</code></td><td>チャンネル参加者</td><td>スレッドへの返信投稿</td></tr>
+      <tr><td>A-15</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/summarize</code></td><td>チャンネル参加者</td><td>要約実行（F-14。<code>thread_id</code> 指定時はスレッド全体、未指定時はチャンネル直近100件）</td></tr>
+      <tr><td>A-16</td><td><span class="badge badge-get">GET</span></td><td><code>/api/dms</code></td><td>認証済</td><td>参加中DM一覧（一対一・グループDMを含む）</td></tr>
+      <tr><td>A-17</td><td><span class="badge badge-post">POST</span></td><td><code>/api/dms</code></td><td>認証済</td><td><span class="diff-new">DM開始（相手のuser_idを配列で指定。1件でも複数件でもよい。指定した参加者の集合と完全一致する既存DMがあれば既存を返す。補足02）</span></td></tr>
+      <tr><td>A-18</td><td><span class="badge badge-get">GET</span></td><td><code>/api/dms/{id}/messages</code></td><td><span class="diff-new">参加者</span></td><td>DMメッセージ履歴</td></tr>
+      <tr><td>A-19</td><td><span class="badge badge-post">POST</span></td><td><code>/api/dms/{id}/messages</code></td><td><span class="diff-new">参加者</span></td><td>DMメッセージ投稿</td></tr>
+      <tr><td>A-20</td><td><span class="badge badge-get">GET</span></td><td><code>/api/search</code></td><td>認証済</td><td>横断検索。クエリ: q, type（message/file/document）, page<span class="diff-new">, in（channel_id）, from（user_id）, with（user_id）, before/after/on（YYYY-MM-DD）, during（YYYY-MM）。モディファイア（in/from/with/before/after/on/during）を1つ以上含む場合、type=documentの結果は返さない（F-42、5.23節）</span>。結果は参照権限で絞り込む</td></tr>
+      <tr><td>A-21</td><td><span class="badge badge-post">POST</span></td><td><code>/api/attachments</code></td><td>チャンネル/DM参加者</td><td>ファイルアップロード（20MB上限、Supabase Storage）</td></tr>
+      <tr><td>A-22</td><td><span class="badge badge-get">GET</span></td><td><code>/api/attachments/{id}</code></td><td>参加者</td><td>ファイルダウンロード</td></tr>
+      <tr><td>A-23</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/ai-settings</code></td><td>当該chadmin/admin</td><td>AI設定一括取得（S-06）</td></tr>
+      <tr><td>A-24</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/general</code></td><td>当該chadmin/admin</td><td>AI有効/無効・反応モード更新</td></tr>
+      <tr><td>A-25</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/character</code></td><td>当該chadmin/admin</td><td>キャラクタ（名前・アイコン・口調）更新。<span class="diff-new">アイコンはA-61で画像をアップロードしてから、返却されたURLをpersona_icon_urlとして指定する（F-10）</span></td></tr>
+      <tr><td>A-26</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/prompt</code></td><td>当該chadmin/admin</td><td>振る舞い定義の更新（上書き保存。監査ログに記録）</td></tr>
+      <tr><td>A-27</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/doc-scope</code></td><td>当該chadmin/admin</td><td>参照ドキュメント範囲の選択（T-09候補からT-10へ反映）<span class="diff-new">。指定範囲外の質問への対応方針（out_of_scope_policy）もあわせて更新</span></td></tr>
+      <tr><td>A-28</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/skills</code></td><td>当該chadmin/admin</td><td>スキル追加</td></tr>
+      <tr><td>A-29</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/skills/{skillId}</code></td><td>当該chadmin/admin</td><td>スキル更新</td></tr>
+      <tr><td>A-30</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/skills/{skillId}</code></td><td>当該chadmin/admin</td><td>スキル削除</td></tr>
+      <tr><td>A-31</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/auto-response</code></td><td>当該chadmin/admin</td><td>自動対応範囲の更新</td></tr>
+      <tr><td>A-33</td><td><span class="badge badge-get">GET</span></td><td><code>/api/pending-actions/{id}</code></td><td>依頼した本人</td><td>実行前確認の内容取得（S-07表示用）</td></tr>
+      <tr><td>A-34</td><td><span class="badge badge-post">POST</span></td><td><code>/api/pending-actions/{id}/confirm</code></td><td>依頼した本人</td><td>実行を確定（本リリースでは呼び出し先の書き込み操作自体が対象外のためモック応答）</td></tr>
+      <tr><td>A-35</td><td><span class="badge badge-post">POST</span></td><td><code>/api/pending-actions/{id}/cancel</code></td><td>依頼した本人</td><td>キャンセル</td></tr>
+      <tr><td>A-36</td><td><span class="badge badge-get">GET</span></td><td><code>/api/admin/users</code></td><td>admin</td><td>利用者一覧（ロール・有効状態含む）</td></tr>
+      <tr><td>A-37</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/admin/users/{id}</code></td><td>admin</td><td>ロール変更・有効/無効化</td></tr>
+      <tr><td>A-38</td><td><span class="badge badge-get">GET</span></td><td><code>/api/admin/doc-folders</code></td><td>admin</td><td>参照ドキュメントフォルダ候補の一覧</td></tr>
+      <tr><td>A-39</td><td><span class="badge badge-post">POST</span></td><td><code>/api/admin/doc-folders</code></td><td>admin</td><td>フォルダ候補の追加</td></tr>
+      <tr><td>A-40</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/admin/doc-folders/{id}</code></td><td>admin</td><td>フォルダ候補の削除</td></tr>
+      <tr><td>A-41</td><td><span class="badge badge-post">POST</span></td><td><code>/api/admin/doc-folders/sync</code></td><td>admin</td><td>今すぐ同期（F-22）</td></tr>
+      <tr><td>A-42</td><td><span class="badge badge-get">GET</span></td><td><code>/api/admin/usage</code></td><td>admin</td><td>AI利用状況・概算コストの月次集計</td></tr>
+      <tr><td>A-43</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/admin/usage/limits</code></td><td>admin</td><td>上限設定・通知先の更新</td></tr>
+      <tr><td>A-44</td><td><span class="badge badge-get">GET</span></td><td><code>/api/admin/audit-logs</code></td><td>admin</td><td>監査ログ一覧（種別・期間・対象者で絞り込み）</td></tr>
+      <tr class="diff-new"><td>A-45</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/handoff</code></td><td>当該chadmin/admin</td><td>スキルにない業務依頼の引き継ぎ先を設定（fallback_handoff_user_id。未指定時は既定のchadminへ戻す）</td></tr>
+      <tr class="diff-new"><td>A-46</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/members</code></td><td>チャンネル参加者</td><td>チャンネルのメンバー一覧（chadminバッジ表示用。補足03）。<span class="diff-new">氏名・メールアドレス・アイコンを含むため、S-03の@メンション候補（F-41）・表示名重複時のメール併記判定（F-39）にも流用する</span></td></tr>
+      <tr class="diff-new"><td>A-47</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/admins</code></td><td>当該chadmin/admin</td><td>チャンネル管理者を追加（対象はこのチャンネルの参加者に限る。F-33）</td></tr>
+      <tr class="diff-new"><td>A-48</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/admins/{userId}</code></td><td>当該chadmin/admin</td><td>チャンネル管理者を解除（最後の1人は400で拒否。F-33）</td></tr>
+      <tr class="diff-new"><td>A-49</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/visibility</code></td><td>当該chadmin/admin</td><td>公開／非公開を切り替える（is_public。F-34）</td></tr>
+      <tr class="diff-new"><td>A-50</td><td><span class="badge badge-post">POST</span></td><td><code>/api/scheduled-messages</code></td><td>チャンネル/DM参加者</td><td>送信予約を作成（channel_id または dm_id、任意でthread_parent_id、body、scheduled_at。scheduled_atは未来日時のみ許可。F-35）</td></tr>
+      <tr class="diff-new"><td>A-51</td><td><span class="badge badge-get">GET</span></td><td><code>/api/scheduled-messages</code></td><td>認証済</td><td>自分が予約したメッセージの一覧（status='pending'のみ。宛先チャンネル/DMを横断。補足04）</td></tr>
+      <tr class="diff-new"><td>A-52</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/scheduled-messages/{id}</code></td><td>予約した本人</td><td>予約をキャンセル（status='cancelled'に変更。既にstatus='sent'の場合は404）</td></tr>
+      <tr class="diff-new"><td>A-53</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/recurring-posts</code></td><td>当該chadmin/admin</td><td>このチャンネルの定期投稿ルール一覧（F-36）</td></tr>
+      <tr class="diff-new"><td>A-54</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/recurring-posts</code></td><td>当該chadmin/admin</td><td>定期投稿ルールを作成（body, bot_display_name, bot_icon<span class="diff-new">またはbot_icon_url（A-61で取得したURL）</span>, frequency, anchor_at）。bot_display_name未指定時・アイコン未指定時はAPI側で既定値を補う</td></tr>
+      <tr class="diff-new"><td>A-55</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/recurring-posts/{ruleId}</code></td><td>当該chadmin/admin</td><td>定期投稿ルールを更新（内容変更、またはis_activeの切り替えによる一時停止/再開）</td></tr>
+      <tr class="diff-new"><td>A-56</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/recurring-posts/{ruleId}</code></td><td>当該chadmin/admin</td><td>定期投稿ルールを削除（既に送信済みのT-05発言は残る。recurring_post_idはそのまま参照として残す）</td></tr>
+      <tr class="diff-new"><td>A-61</td><td><span class="badge badge-post">POST</span></td><td><code>/api/icons</code></td><td>認証済</td><td>アイコン画像をアップロードし、URLを返す（JPEG/PNG/WebP、5MBまで）。個人・チャンネルAI・BOTのいずれのアイコンにも共通で使う汎用API。アップロード自体に権限制約はなく、返却されたURLを実際に設定する側（A-25, A-54, A-55, A-62）で権限を検証する（F-37）</td></tr>
+      <tr class="diff-new"><td>A-62</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/users/me</code></td><td>認証済</td><td>自分のプロフィールを更新（picture_url。A-61で取得したURLを指定。<span class="diff-new">name＝表示名も1.12版から受け付ける。1〜100文字、NOT NULL。F-39</span>）。メールアドレスはGoogleアカウントの情報を正としており本APIでは変更しない（<span class="diff-new">emailを含めて呼び出した場合は400で拒否する。誤解を防ぐため無視ではなく明示的にエラーとする、A-62新設時からの既存方針を踏襲</span>）</td></tr>
+      <tr class="diff-new"><td>A-67</td><td><span class="badge badge-get">GET</span></td><td><code>/api/users/{id}</code></td><td>認証済</td><td>指定した利用者のプロフィール（id, name, email, picture_url, role）を取得する。S-03のプロフィールカード（F-40）用</td></tr>
+      <tr class="diff-new"><td>A-68</td><td><span class="badge badge-get">GET</span></td><td><code>/api/users</code></td><td>認証済</td><td>利用者を氏名・メールアドレスで部分一致検索する（クエリ: q, limit。既定20件）。<code>is_active=true</code>のみを対象とする。DM相手を選ぶ（補足02、F-05）のユーザーピッカー、検索モディファイアのfrom:/with:（F-42）のオートコンプリート候補として使う</td></tr>
+      <tr class="diff-new"><td>A-69</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/read</code></td><td>チャンネル参加者</td><td>このチャンネルを既読にする（サイドバーの未読バッジ用。T-22 read_states）</td></tr>
+      <tr class="diff-new"><td>A-70</td><td><span class="badge badge-post">POST</span></td><td><code>/api/dms/{id}/read</code></td><td>DM参加者</td><td>このDMを既読にする（同上）</td></tr>
+      <tr class="diff-new"><td>A-63</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/trigger-rules</code></td><td>当該chadmin/admin</td><td>このチャンネルの自動応答トリガー一覧（F-38）</td></tr>
+      <tr class="diff-new"><td>A-64</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/trigger-rules</code></td><td>当該chadmin/admin</td><td>自動応答トリガーを作成（trigger_type, trigger_value, action_body, bot_display_name, bot_icon/bot_icon_url）。action_typeは'post_message'固定</td></tr>
+      <tr class="diff-new"><td>A-65</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/trigger-rules/{ruleId}</code></td><td>当該chadmin/admin</td><td>自動応答トリガーを更新（内容変更、またはis_activeの切り替えによる一時停止/再開）</td></tr>
+      <tr class="diff-new"><td>A-66</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/trigger-rules/{ruleId}</code></td><td>当該chadmin/admin</td><td>自動応答トリガーを削除（既に投稿済みのT-05発言は残る）</td></tr>
+    </tbody>
+  </table>
+
+  <p>ルーターは <code>routers/auth.py</code>（A-01〜A-04）, <code>routers/channels.py</code>（A-05〜A-15<span class="diff-new">, A-46〜A-49, A-69</span>）, <code>routers/dms.py</code>（A-16〜A-19<span class="diff-new">, A-70</span>）, <code>routers/search.py</code>（A-20）, <code>routers/attachments.py</code>（A-21, A-22<span class="diff-new">, A-61</span>）, <code>routers/ai_settings.py</code>（A-23〜A-31<span class="diff-new">, A-45</span>）, <code>routers/pending_actions.py</code>（A-33〜A-35）, <code>routers/admin.py</code>（A-36〜A-44）<span class="diff-new">, <code>routers/scheduled_messages.py</code>（A-50〜A-52）, <code>routers/recurring_posts.py</code>（A-53〜A-56）, <code>routers/users.py</code>（A-62<span class="diff-new">, A-67, A-68</span>）, <code>routers/trigger_rules.py</code>（A-63〜A-66）</span>に分割する。権限判定は <code>auth_helpers.py</code> の権限デコレーターで共通化する。</p>
+
+  <!-- ============ 8. AIエージェント設計 ============ -->
+  <h2 id="sec8">8. AIエージェント設計</h2>
+  <p>本章は要件定義書5章「AI回答・エージェント連携要件」を実現するための処理方式を定める。Kogackの中核である第1〜3層（要求仕様書1.4節）の実現方式にあたる。</p>
+
+  <h3>8.1 AI応答生成の全体フロー</h3>
+  <p>AIへの依頼は主にメンション（F-04）を契機とする。反応モードが「投稿に自ら反応」（F-15）の場合は、メンションが無くても投稿内容に応じて起動することがある。</p>
+  <ol>
+    <li>A-11（メッセージ投稿）でメンションを検知すると、FastAPIは<code>services/ai_agent.py</code>の処理を非同期タスクとして起動し、A-11自体は即座に投稿完了を返す（REQ-N-05、8.7節）。<span class="diff-new">A-11では同時に<code>services/trigger_matcher.py</code>による自動応答トリガー（F-38、5.19節）の判定も行うが、こちらはLLM呼び出しを伴わず同期的に完結するためAIエージェント処理とは別系統である。</span></li>
+    <li>対象チャンネルの T-08 channel_ai_settings（振る舞い定義・キャラクタ・反応モード）、T-11 channel_skills、T-12 channel_auto_response_rules を取得する。</li>
+    <li>チャンネル履歴（直近30日・直近200件のいずれか少ない方。F-13）を取得し、システムプロンプトに含める（8.3節）。</li>
+    <li>依頼内容を自動対応範囲（T-12）と照合し、「人が対応」に区分される場合はAI呼び出しを行わず、チャンネル管理者へのメンション付き引き継ぎメッセージを直接投稿する（F-17）。</li>
+    <li>「自動対応可」「確認のうえ対応」の場合、OpenAI APIをFunction Calling付きで呼び出す。ツールとして <code>search_documents</code>（8.2節）、<code>get_seat_availability</code>（8.4節）を、質問者のロールに応じて渡す。</li>
+    <li>ツール呼び出しの結果を踏まえてAIが最終回答を生成する。回答文と、根拠・参照結果はメッセージ本文＋T-07 message_blocksとして保存し、T-05に sender_type='ai' の発言として投稿する。</li>
+    <li>呼び出しごとにモデル・トークン数・概算コストを T-13 ai_usage_logs に記録する（8.6節）。</li>
+    <li>フロントエンドは3秒間隔のポーリングで新着メッセージ（「生成中」状態を含む）を取得し表示する（8.7節）。</li>
+  </ol>
+
+  <h3>8.2 ドキュメント質問応答と閲覧権限フィルタリング（F-19〜F-21）</h3>
+  <div class="callout warn">
+    要件定義書で「本システムで最も注意を要する機能」とされた事項（REQ-F-20）。質問者がGoogleドライブ上で閲覧権限を持たない文書の内容を、AIが回答に含めてはならない。
+  </div>
+  <p><strong>設計判断（索引とアクセス時フィルタリングの2段構成）:</strong> 検索速度とコストを両立するため、次の2段構成とする。</p>
+  <ol>
+    <li><strong>索引（バックグラウンド）:</strong> T-09/T-10 で選択された範囲のGoogle Driveフォルダを対象に、ドキュメントのテキストと埋め込みベクトルを索引化する（S-08の「今すぐ同期」A-41で実行）。索引には文書ID・フォルダパス・抜粋のみを保持し、全文をアプリDBに複製することは避ける。</li>
+    <li><strong>権限フィルタリング（質問のたび）:</strong> AIが<code>search_documents</code>ツールを呼び出すと、索引から候補文書を取得したうえで、<strong>質問者本人のGoogleアカウントに対しGoogle Drive APIで当該文書の閲覧権限を都度確認</strong>し、権限のない文書は候補から除外してから回答生成に渡す。権限確認結果は短時間（数分程度）キャッシュしてよいが、キャッシュ中の権限変更が反映されるまでの遅延は許容範囲とする（要件定義書5.1節）。</li>
+  </ol>
+  <p>「S-08で管理者が登録した範囲（T-09/T-10）」と「質問者本人の閲覧権限」は独立した制約であり、両方を満たす文書のみを回答の根拠にできる。回答には根拠文書名・該当箇所へのリンクを T-07 message_blocks（block_type='citation'）として付与する（F-20）。</p>
+  <p class="diff-new"><strong>指定範囲外の質問への対応（out_of_scope_policy、F-11）:</strong> 権限フィルタリング後、参照範囲内に根拠となる文書が1件も見つからなかった場合の挙動をチャンネルごとに分岐する。channel_ai_settings.out_of_scope_policy が<code>'strict'</code>（既定）のときは、AIは一般知識を使わず「担当外のためお答えできません」の旨を回答し、<code>'general'</code>のときはAIの一般的な知識で回答してよいが、その場合も文書根拠が無い旨とF-30の注意喚起を必ず付記するようプロンプトで指示する。</p>
+
+  <h3>8.3 チャンネル振る舞い定義とプロンプト構成（F-09, F-10, F-12）</h3>
+  <p>AI呼び出し時のシステムプロンプトは、次の要素を結合して構成する。</p>
+  <ol>
+    <li>キャラクタ（persona_name・persona_tone）に基づく口調の指示</li>
+    <li>振る舞い定義（behavior_prompt）の全文</li>
+    <li>割り当てられたスキル（channel_skills.instructions）の一覧</li>
+    <li>自動対応範囲（channel_auto_response_rules）の要約（何を自動で答えてよいか）</li>
+    <li class="diff-new">指定範囲外の質問への対応方針（out_of_scope_policy）と、スキルにない業務依頼の引き継ぎ先（fallback_handoff_user_id、8.1節F-17参照）</li>
+    <li>「過去のやり取りを参照する場合は参考情報である旨を必ず示す」「文書を根拠にできる場合は過去のやり取りより優先する」等、5.3節の断定回避ルール（全チャンネル共通の固定指示）</li>
+  </ol>
+  <p>チャンネル管理者が編集するのは1〜3<span class="diff-new">・5</span>のみで、4の自動対応範囲はUI（S-06）で別途構造化して保存し、AIへの指示文には自動生成して埋め込む。<span class="diff-new">末尾の断定回避ルール</span>は全チャンネル共通のシステム指示としてアプリ側で固定する。</p>
+
+  <h3>8.4 外部システム連携（座席予約システム、F-23）</h3>
+  <p>座席予約システムの空き状況参照は、Function Callingの<code>get_seat_availability(date, time_range, area)</code>ツールとして実装する。AIがツールを呼び出すと、<code>services/seat_reservation_client.py</code>が座席予約システムのREST APIを呼び出し、結果をT-07 message_blocks（block_type='external_system'）として整形する。</p>
+  <div class="callout warn">
+    座席予約システムが参照可能な手段を用意できるかは連携先の状況に依存する外部要因であり、要件定義書8.2節のとおり確認が取れない場合はF-23の実装可否を見直す。連携方式（認証方式・レスポンス形式）は連携先システム側の担当者と確認のうえ詳細設計書で確定する。
+  </div>
+  <p>座席の空き状況は個人に紐づかない情報のため、AI専用の特権アカウントで参照してよいものとし、依頼した利用者本人の資格に基づく権限委譲の作り込みは行わない（要件定義書5.5節、簡易な扱い）。将来、書き込み系の連携（座席予約の登録等）を追加する場合は、この前提を見直す必要がある。</p>
+
+  <h3>8.5 実行前確認の仕組み（F-25）</h3>
+  <p>社内システムへの登録・変更を行うツールが呼ばれた場合（本リリースでは該当ツールを実装しないため到達しない）、AIは即座に操作を実行せず、T-15 pending_actions に <code>status='pending'</code> で登録し、S-03/S-04上にS-07モーダルを表示する。利用者が「実行する」（A-34）を選ぶまで、実際のシステムへの書き込みは行わない。参照のみのツール（<code>search_documents</code>、<code>get_seat_availability</code>）はこのフローを経由しない（要件定義書5.5節の既定に従う）。</p>
+
+  <h3>8.6 AI利用コストの管理（F-29）</h3>
+  <p>OpenAI APIの呼び出しごとに、リクエスト・レスポンスのトークン数を取得し、モデルごとの単価表（環境変数または設定ファイルで保持）から概算コストを算出してT-13 ai_usage_logsに記録する。<strong>質問文・回答文そのものは記録しない</strong>（発言本文はT-05に既に保存されているため二重に保持しない設計とし、利用量集計に必要な最小限のメタデータのみを残す）。S-08の「AI利用状況・コスト」タブは、T-13を月次・チャンネル別・利用者別に集計して表示する（A-42）。T-14 ai_usage_limitsで設定した上限（全体・チャンネル単位）の80%（既定値）に達すると通知メールを送信する。上限到達時にAIの応答自体を止めるかは別途協議中であり（要件定義書8.2節）、本リリースでは通知のみを実装し、応答停止の制御ロジックは持たない。</p>
+
+  <h3>8.7 非同期応答・生成中表示（F-31, REQ-N-05）</h3>
+  <p>A-11でのメッセージ投稿と、AIの応答生成（8.1節）を分離した非同期処理とすることで、AIの応答生成中も人間同士の会話が滞らないようにする。AI発言の投稿前は、フロントエンドが「生成中」のプレースホルダー行を表示する（T-05に <code>status='generating'</code> の仮レコードを作成し、生成完了時に本文で更新する方式、または生成完了まで専用のポーリングエンドポイントで状態を返す方式のいずれかを詳細設計書で確定する）。フロントエンドの3秒間隔ポーリングにより、要件定義書7章の目標値（5秒以内反映）を満たす。</p>
+
+  <h3>8.8 過去のやり取りを参照する際の扱い（5.3節）</h3>
+  <p>AIが過去の発言（AI自身の過去の回答を含む）を根拠の一部として参照する場合、それを確定した正解として扱わない。該当発言を T-07 message_blocks（block_type='quote_reference'）として引用元・日時・リンク付きで提示し、フロントエンドは「過去の発言を参照（参考情報）」である旨を明示するスタイルで描画する（画面モックアップS-03参照）。社内ドキュメントを根拠にできる質問については、8.2節の文書根拠を優先し、過去のやりとりのみに頼らない指示をシステムプロンプトに含める（8.3節）。</p>
+
+  <!-- ============ 9. 非機能設計 ============ -->
+  <h2 id="sec9">9. 非機能設計</h2>
+
+  <h3>9.1 性能</h3>
+  <table>
+    <thead><tr><th>項目</th><th>方針</th></tr></thead>
+    <tbody>
+      <tr><td>応答時間</td><td>チャンネル・DMの発言表示・検索は2秒以内（200名規模）。新着メッセージは5秒以内に画面へ反映（8.7節ポーリング方式）</td></tr>
+      <tr class="diff-new"><td>予約メッセージ・定期投稿の送信遅延（F-35, F-36）</td><td>指定時刻から最大30秒程度の遅延を許容する（2.2節のディスパッチャのポーリング間隔に依存）。新着メッセージの反映（5秒以内）とは別の目標値とする</td></tr>
+      <tr class="diff-new"><td>自動応答トリガーの反応速度（F-38）</td><td>A-11の投稿処理内で同期的に判定するため、追加の遅延は発生しない（通常のメッセージ投稿と同じ応答時間に含まれる）。1チャンネルあたりのトリガー件数が少数（数十件程度）であることを前提とする</td></tr>
+      <tr><td>想定規模</td><td>利用者200名程度。初期リリースは対象チャンネルの担当部署・利用者を絞って先行運用する</td></tr>
+      <tr><td>実現方針</td><td>A-10（メッセージ履歴）は<code>since</code>パラメータによる差分取得でポーリング負荷を抑制。横断検索（A-20）は必要なインデックスを付与（詳細は詳細設計書）。フロントはSWRによるキャッシュ・再検証で体感速度を確保</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.2 可用性</h3>
+  <table>
+    <thead><tr><th>項目</th><th>方針</th></tr></thead>
+    <tbody>
+      <tr><td>稼働時間</td><td>業務時間内（平日9-18時）の利用を前提。計画停止は3営業日前までにチャンネルで周知</td></tr>
+      <tr><td>基盤</td><td>Koyeb（アプリ）と Supabase（DB・Storage）のマネージドサービスの可用性に依拠し、自前の冗長化は行わない</td></tr>
+      <tr><td>外部依存</td><td>外部AI API・Google Drive API・座席予約システムのいずれかが一時的に利用不能でも、チャット自体（人間同士の会話）は継続できるよう、AI呼び出し部分の失敗を会話全体の失敗にしない設計とする</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.3 セキュリティ</h3>
+  <table>
+    <thead><tr><th>項目</th><th>方針</th></tr></thead>
+    <tbody>
+      <tr><td>通信</td><td>HTTPS必須（本番）</td></tr>
+      <tr><td>認証</td><td>許可ドメイン外のGoogleアカウントはログイン不可（ALLOWED_DOMAINS）。無効化ユーザー（is_active=false）はログイン不可</td></tr>
+      <tr><td>認可</td><td>APIは全てサーバー側で権限検証（フロントの表示制御には依存しない）</td></tr>
+      <tr><td>セッション</td><td>セッションJWTはHttpOnly Cookieに格納しXSSによる窃取を防止</td></tr>
+      <tr><td>秘密情報</td><td>秘密情報（DATABASE_URL, GOOGLE_CLIENT_SECRET, JWT_SECRET, OPENAI_API_KEY 等）は環境変数管理とし、リポジトリに含めない</td></tr>
+      <tr><td>外部AI APIへの送信範囲</td><td>質問に必要な範囲（メンションを含む発言・関連するチャンネル履歴・検索でヒットした文書抜粋）に限定し、無関係な他チャンネルの内容は送信しない</td></tr>
+      <tr><td>DB</td><td>全テーブルRLS有効（6.3節参照）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.4 監査ログ</h3>
+  <table>
+    <thead><tr><th>項目</th><th>方針</th></tr></thead>
+    <tbody>
+      <tr><td>記録対象</td><td>ログイン（成功/失敗）、チャンネルAI設定の変更（振る舞い定義・キャラクタ・参照範囲・スキル・反応モード・自動対応範囲）をT-16 audit_logsに記録</td></tr>
+      <tr><td>記録内容</td><td>日時・実行者・対象チャンネル・変更項目・概要。振る舞い定義等の本文差分は保持しない（過去バージョン一覧・差分表示は対象外）</td></tr>
+      <tr><td>閲覧</td><td>S-08「監査ログ」タブで種別・期間・実行者/チャンネルにより絞り込み表示（admin限定）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.5 コスト管理</h3>
+  <table>
+    <thead><tr><th>項目</th><th>方針</th></tr></thead>
+    <tbody>
+      <tr><td>集計</td><td>AI利用量・概算コストを月次で把握できること（8.6節、T-13・T-14）</td></tr>
+      <tr><td>要約の起動</td><td>手動実行のみとし、自動起動によるコスト増を避ける（F-14）</td></tr>
+      <tr><td>上限・通知</td><td>チャンネル単位・全体単位で上限設定・通知ができること。上限到達時の応答停止可否は8.2節参照の別途協議事項</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.6 デプロイ</h3>
+  <table>
+    <thead><tr><th>項目</th><th>方針</th></tr></thead>
+    <tbody>
+      <tr><td>ホスティング</td><td>Koyeb。main ブランチ=本番 / staging ブランチ=ステージング</td></tr>
+      <tr><td>リリースフロー</td><td>staging へマージ→ステージング環境で動作確認→main へマージ→本番反映（Gitブランチ連動の自動デプロイ）</td></tr>
+      <tr><td>ビルド</td><td>デプロイ時にフロントを <code>vite build</code> でビルドし、FastAPIが静的配信する（2.3節参照）</td></tr>
+      <tr><td>環境分離</td><td>環境変数を環境ごとにKoyeb上で設定。DBも環境ごとに分離</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.7 保守性</h3>
+  <table>
+    <thead><tr><th>項目</th><th>方針</th></tr></thead>
+    <tbody>
+      <tr><td>コード規約</td><td>LCC CRMのコード規約に準拠</td></tr>
+      <tr><td>ドキュメント</td><td>設計ドキュメントをdocs/で管理し、ID体系（REQ-xx/F-xx/S-xx/T-xx/A-xx）でトレーサビリティを保つ</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 10. 前提・制約 ============ -->
+  <h2 id="sec10">10. 前提・制約</h2>
+
+  <div class="callout">
+    <strong>本書で確定した4項目:</strong> 要件定義書8.1節で「基本設計書で定める」とされていたAI提供元（OpenAI API）・リアルタイム配信方式（3秒間隔ポーリング）・ファイルストレージ（Supabase Storage）・座席予約システム連携方式（REST API前提、詳細は連携先次第）は本書2.2節・8.4節で確定した。ただし座席予約システム側の実装状況に依存する外部要因は残る。
+  </div>
+
+  <ul>
+    <li>技術スタック・コード規約・エラー形式・ディレクトリ構成は既存システム LCC CRM の規約に準拠する（REQ-N-07）。本書で定義しない実装上の細則は LCC CRM の慣例に従う。</li>
+    <li>利用者は Google Workspace アカウント保有者（許可ドメイン: kogasoftware.com）に限る。ドメイン外ユーザー向けの代替認証手段は提供しない。</li>
+    <li>想定規模は利用者200名程度・初期リリースは対象部署を絞った先行運用。対象部署・想定人数は別途協議により確定する（要件定義書8.2節）。</li>
+    <li>社内ドキュメントはGoogleドライブ上にあり、文書ごとの閲覧権限を前提として扱う（8.2節）。</li>
+    <li>座席予約システムが参照可能な手段を用意できるかは、連携先の状況に依存する外部要因である（8.4節）。</li>
+    <li>AI利用コストが想定を超えた場合にAIの応答自体を止めるか、通知のみで応答は継続するかは別途協議により確定する（9.5節）。</li>
+    <li>既存Slackとの併存を前提とし、本システムでSlackを置き換えることは行わない。既存Slackへの通知・連携の要否は別途協議する。</li>
+    <li class="diff-new">予約メッセージの送信・定期投稿（F-35, F-36）を担うディスパッチャは、FastAPIプロセスが単一インスタンスであることを前提とする（6.2節「設計判断」）。将来Koyebで水平スケールする場合は、二重送信を防ぐ排他制御（アトミックなUPDATE、または専用ワーカーへの切り出し）への変更が必要になる。</li>
+    <li>本ドキュメント一式は新人社員のAI開発研修のサンプル成果物として作成されている。</li>
+  </ul>
+
+</div>
+</body>
+</html>

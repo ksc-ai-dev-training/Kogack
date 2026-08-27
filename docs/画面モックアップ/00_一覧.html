@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kogack 画面モックアップ一覧</title>
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<script src="../_sidenav.js"></script>
+
+<div class="index-page">
+  <div class="index-header">
+    <div class="brand-mark">K</div>
+    <h1>Kogack 画面モックアップ一覧</h1>
+  </div>
+  <p class="index-lead">AIネイティブチャットシステム（Kogack）の画面モックアップ（静的HTML）です。各カードをクリックすると画面イメージを確認できます。<br>
+  <span style="font-size:11.5px;color:var(--text-subtle)">Ver 3.3 ／ 要件定義書 v1.18・基本設計書 v1.15（2026-08-26時点）に対応。S-01・S-03〜S-08 完成（S-02はS-03以降の共通サイドバーとして実装、単独モックアップなし）。</span><br>
+  <span style="font-size:11.5px;color:var(--text-subtle)">※ 各モックアップはそれ自体が製品画面の見た目を再現するため、このドキュメント一式共通のサイドナビは読み込んでいません。設定項目・入力項目の詳細は <a href="../02_要件定義書.html">要件定義書</a> および今後作成する基本設計書・詳細設計書を参照してください。</span></p>
+
+  <div class="mock-cards">
+    <a class="mock-card" href="S-01_ログイン.html">
+      <div class="card-top">
+        <span class="card-id">S-01</span>
+        <span class="card-name">ログイン</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge">全員（未認証）</span>
+      </div>
+      <p class="card-desc">Googleでログインボタンのみのシンプルな画面。許可ドメイン（kogasoftware.com）のみ利用可。許可ドメイン外エラー時の表示例も切替表示できる。</p>
+    </a>
+
+    <div class="mock-card mock-card-note">
+      <div class="card-top">
+        <span class="card-id">S-02</span>
+        <span class="card-name">ワークスペース</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-member">member</span>
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">参加中のチャンネル・DM一覧を表示するサイドバー（要件定義書4.1節）。単独の空状態画面としては起こしておらず、S-03以降の各画面に共通のサイドバーとして実装済み。個別モックアップファイルはなし。</p>
+    </div>
+
+    <a class="mock-card" href="S-03_チャンネル会話.html">
+      <div class="card-top">
+        <span class="card-id">S-03</span>
+        <span class="card-name">チャンネル会話</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge">チャンネル参加者</span>
+      </div>
+      <p class="card-desc">メッセージ一覧・投稿欄。AI発言のバッジと注意喚起、ドキュメント根拠・連携先システム参照結果・過去のやり取り参照をカードで区別して表示する。要約ボタン、送信予約ボタンあり。定期投稿・自動応答トリガー（BOT）はBOTバッジで区別。</p>
+    </a>
+
+    <a class="mock-card" href="S-04_スレッド表示.html">
+      <div class="card-top">
+        <span class="card-id">S-04</span>
+        <span class="card-name">スレッド表示</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge">チャンネル参加者</span>
+      </div>
+      <p class="card-desc">特定の発言への返信をまとめて表示する右側パネル。元発言をハイライトし、AIとのやり取りをチャンネル本体の会話から分離する。</p>
+    </a>
+
+    <a class="mock-card" href="S-05_横断検索.html">
+      <div class="card-top">
+        <span class="card-id">S-05</span>
+        <span class="card-name">横断検索</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-member">member</span>
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">メッセージ・ファイル・ドキュメント根拠を横断検索するタブ構成の結果画面。結果は参加チャンネル・DM、閲覧権限のある文書の範囲に限定される。in:/from:/with:/日付等の検索条件モディファイア（1.17版）に対応。</p>
+    </a>
+
+    <a class="mock-card" href="S-06_チャンネル設定.html">
+      <div class="card-top">
+        <span class="card-id">S-06</span>
+        <span class="card-name">チャンネル設定</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">「チャンネル管理者」タブ（公開／非公開の切り替えを含む）・「定期投稿」タブ・「自動応答トリガー」タブと、「AI設定の項目」（基本設定・キャラクタ〈アイコンは画像アップロード対応〉・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・自動対応範囲の7タブ）に分けた構成。編集はそのチャンネルのchadminとadminのみ。</p>
+    </a>
+
+    <a class="mock-card" href="S-07_AI操作確認ダイアログ.html">
+      <div class="card-top">
+        <span class="card-id">S-07</span>
+        <span class="card-name">AI操作確認ダイアログ</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge">依頼した本人</span>
+      </div>
+      <p class="card-desc">AIが社内システムへの登録・変更を実行する前に、実行内容を提示し同意を得るモーダル。座席予約の登録を例に表現（登録機能自体は次フェーズの実装対象）。</p>
+    </a>
+
+    <a class="mock-card" href="S-08_管理コンソール.html">
+      <div class="card-top">
+        <span class="card-id">S-08</span>
+        <span class="card-name">管理コンソール</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">利用者管理（ロール変更・有効/無効化）・ドキュメント参照範囲（フォルダ追加/削除・同期）・AI利用状況とコスト（F-29）・監査ログ（ログイン記録、チャンネルAI設定の変更履歴）の4タブ構成。</p>
+    </a>
+  </div>
+
+  <div class="flow-section">
+    <div class="flow-title">画面遷移図</div>
+    <div class="flow-diagram">
+      <div class="flow-lane">
+        <div class="flow-node flow-start">
+          <div class="flow-id">S-01</div>
+          <div class="flow-name">ログイン</div>
+        </div>
+        <div class="flow-arrow">
+          <span class="arrow-label">ログイン成功</span>
+          <span class="arrow-line"></span>
+        </div>
+        <div class="flow-node" style="border-style:dashed;background:var(--bg-muted);">
+          <div class="flow-id">S-02</div>
+          <div class="flow-name">ワークスペース<br><span style="font-weight:400;color:var(--text-subtle);font-size:10px;">（共通サイドバー）</span></div>
+        </div>
+        <div class="flow-arrow">
+          <span class="arrow-label">チャンネル選択</span>
+          <span class="arrow-line"></span>
+        </div>
+        <div class="flow-node">
+          <div class="flow-id">S-03</div>
+          <div class="flow-name">チャンネル会話</div>
+        </div>
+        <div class="flow-arrow">
+          <span class="arrow-label">返信を開く</span>
+          <span class="arrow-line"></span>
+        </div>
+        <div class="flow-node">
+          <div class="flow-id">S-04</div>
+          <div class="flow-name">スレッド表示</div>
+        </div>
+      </div>
+
+      <div class="flow-branch">
+        <div class="flow-node">
+          <div class="flow-id">S-05</div>
+          <div class="flow-name">横断検索</div>
+        </div>
+        <div class="flow-branch-note">← ヘッダー中央の検索欄からいつでも遷移（全画面共通）</div>
+      </div>
+
+      <div class="flow-branch">
+        <div class="flow-node">
+          <div class="flow-id">S-06</div>
+          <div class="flow-name">チャンネル設定</div>
+        </div>
+        <div class="flow-branch-note">← チャンネル管理者が自分の管理するチャンネルのS-03ヘッダーから遷移（chadmin/adminのみメニュー表示）</div>
+      </div>
+
+      <div class="flow-branch">
+        <div class="flow-node">
+          <div class="flow-id">S-07</div>
+          <div class="flow-name">AI操作確認ダイアログ</div>
+        </div>
+        <div class="flow-branch-note">← AIが社内システムへの登録・変更を実行する直前に、S-03/S-04上へモーダル表示</div>
+      </div>
+
+      <div class="flow-branch">
+        <div class="flow-node">
+          <div class="flow-id">S-08</div>
+          <div class="flow-name">管理コンソール</div>
+        </div>
+        <div class="flow-branch-note">← ヘッダーのユーザーメニューから遷移（システム管理者のみメニュー表示）</div>
+      </div>
+
+      <div class="flow-branch">
+        <div class="flow-branch-note">※ S-04（スレッド表示）はS-03に重ねて表示するパネルで、閉じるとS-03に戻る（⇄）。</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 style="font-size:13px;font-weight:700;color:var(--text-muted);margin:40px 0 4px;">補足モックアップ</h2>
+  <p style="font-size:12px;color:var(--text-subtle);margin:0 0 14px;">要件定義書4.1節の画面一覧（S-01〜S-08）には独立した画面IDとして定義されていないが、F-02（チャンネル作成・参加）・F-05（DM）・F-35（送信予約）・F-37（プロフィール画像）の操作や、チャンネル管理者の可視化に必要なため補足として作成したモーダル。S-03サイドバーの「＋」、ヘッダーの参加人数、ヘッダーの「🕐 予約中」、またはヘッダーのユーザーメニューから遷移する。</p>
+  <div class="mock-cards" style="margin-bottom:40px;">
+    <a class="mock-card" href="補足01_チャンネルに参加.html">
+      <div class="card-top">
+        <span class="card-id" style="color:#92400e;background:#fef3c7;border-color:#fde68a;">補足</span>
+        <span class="card-name">チャンネルに参加／作成</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-member">member</span>
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">公開チャンネルの一覧から検索して参加する（即時参加）タブと、新しいチャンネルを公開／非公開を選んで作成するタブの2タブ構成のモーダル。作成者は自動的にchadminになる。非公開チャンネルは参加済みのものしか一覧に出ない。</p>
+    </a>
+    <a class="mock-card" href="補足02_DM相手を選ぶ.html">
+      <div class="card-top">
+        <span class="card-id" style="color:#92400e;background:#fef3c7;border-color:#fde68a;">補足</span>
+        <span class="card-name">DMの相手を選ぶ</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-member">member</span>
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">氏名・メールアドレスで利用者を検索し、チェックボックスで複数選択してDMを開始するモーダル。1人なら一対一、2人以上ならグループDM。既存のDMがある相手は区別して表示し、無効化されたアカウントは新規DMの対象外とする。</p>
+    </a>
+    <a class="mock-card" href="補足03_メンバー一覧.html">
+      <div class="card-top">
+        <span class="card-id" style="color:#92400e;background:#fef3c7;border-color:#fde68a;">補足</span>
+        <span class="card-name">メンバー一覧</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-member">member</span>
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">チャンネルの参加人数（S-03ヘッダー）から開くメンバー一覧。chadminバッジで誰が管理者かを表示する。管理者の変更はS-06から行う。非公開チャンネルでは参加者なら誰でも「メンバーを追加」できる。</p>
+    </a>
+    <a class="mock-card" href="補足04_予約中メッセージ.html">
+      <div class="card-top">
+        <span class="card-id" style="color:#92400e;background:#fef3c7;border-color:#fde68a;">補足</span>
+        <span class="card-name">予約中のメッセージ</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-member">member</span>
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">ヘッダーの「🕐 予約中」から開く、自分が予約したメッセージの一覧。チャンネル・DMを横断して表示し、送信前ならいつでもキャンセルできる。指定時刻になると自動送信され、通常のメッセージと同じ扱いになる。</p>
+    </a>
+    <a class="mock-card" href="補足06_プロフィール画像を変更.html">
+      <div class="card-top">
+        <span class="card-id" style="color:#92400e;background:#fef3c7;border-color:#fde68a;">補足06</span>
+        <span class="card-name">プロフィールを編集</span>
+      </div>
+      <div class="card-roles">
+        <span class="badge badge-role role-member">member</span>
+        <span class="badge badge-role role-chadmin">chadmin</span>
+        <span class="badge badge-role role-admin">admin</span>
+      </div>
+      <p class="card-desc">ヘッダーのユーザーメニュー（自分のアバター）から開く、自分のアイコン画像・表示名の編集画面（1.16版で表示名の編集を追加）。同じアイコンの仕組みをチャンネルAI・定期投稿の送り主アイコンにも使う。</p>
+    </a>
+  </div>
+
+  <h2 style="font-size:13px;font-weight:700;color:var(--text-muted);margin:40px 0 12px;">改訂履歴</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:40px;">
+    <thead>
+      <tr style="background:var(--accent-50);">
+        <th style="text-align:left;padding:7px 10px;border:1px solid var(--border-strong);color:var(--accent-700);">版数</th>
+        <th style="text-align:left;padding:7px 10px;border:1px solid var(--border-strong);color:var(--accent-700);">日付</th>
+        <th style="text-align:left;padding:7px 10px;border:1px solid var(--border-strong);color:var(--accent-700);">改訂内容</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">0.1</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">初版。S-01（ログイン）のモックアップを作成。要件定義書4.1節「画面一覧」に基づきS-02〜S-08の枠のみ用意。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">0.2</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-02（ワークスペース）のモックアップを追加。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">0.3</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-03（チャンネル会話）のモックアップを追加。メッセージ一覧・投稿欄、AI発言バッジ・注意喚起（F-18・F-30）、ドキュメント根拠（F-20）、連携先システム参照（F-23）、過去のやり取り参照（5.3節）、人への引き継ぎ（F-17）、要約ボタン（F-14）を表現。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">0.4</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-04（スレッド表示）のモックアップを追加。S-03のチャンネル会話に右側スレッドパネルを重ねた構成とし、元発言のハイライト・返信一覧・返信用投稿欄・AIとのやり取りの分離（F-03）を表現。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">0.5</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-05（横断検索）のモックアップを追加。メッセージ・ファイル・ドキュメント根拠を横断するタブ構成の検索結果画面とし、参照権限の範囲に限定される旨（F-06・REQ-N-02）を表現。各画面共通のヘッダー検索欄からS-05へ遷移するリンクをS-02〜S-04に接続。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">0.6</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-06（チャンネルAI設定）のモックアップを追加。要件定義書4.2節の7項目をタブ構成で実装し、タブ切替が実際に動作する。S-03のヘッダーにS-06への導線を接続。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">0.7</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-07（AI操作確認ダイアログ）のモックアップを追加。座席予約の登録を例に、S-03上へのモーダル表示・操作内容の提示・確認/キャンセルを実装。座席予約の登録自体（F-24）は本リリース対象外のため、内容は次フェーズを見越した例示である旨を注記。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.0</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-08（管理コンソール）のモックアップを追加し、S-01〜S-08が完成。3タブ（利用者管理・ドキュメント参照範囲・AI利用状況とコスト）を実装。S-02のユーザーメニューからS-08へのリンクを接続。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.1</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">一覧ページのデザインをカード形式＋画面遷移図の構成に刷新（他プロジェクトのモックアップ一覧の書式に合わせた）。独立したmock.cssを新設。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.2</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-02_ワークスペース.htmlを削除。S-02（ワークスペース）は要件定義書4.1節の画面定義としては残るが、単独の空状態画面としては起こさず、S-03以降の各画面に共通のサイドバーとして実装済みであることを一覧・画面遷移図に注記した。S-08の「戻る」リンク先をS-03に変更。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.3</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">「補足モックアップ」として、チャンネル検索・参加／作成（補足01）とDM相手を選ぶ（補足02）を追加。要件定義書4.1節のS-01〜S-08には独立した画面として定義されていないが、F-02・F-05の操作に必要なため作成。S-03サイドバーの「＋」ボタンから接続。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.4</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-08管理コンソールに「監査ログ」タブを追加（4タブ構成に変更）。要件定義書7章「監査」（ログイン、チャンネルAI設定の変更を記録し後から確認できること）に対応する閲覧画面が未定義だったための追加。S-06の変更履歴の注記からリンクを接続。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.5</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-06「参照ドキュメント範囲」タブに「指定範囲外の質問が来た場合の対応方針」（厳格に制限／一般回答を許可の2択）を追加。要件定義書に対応するF-IDが無い追加設定のため、画面モックアップのみへの反映とした。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.6</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-06「スキル」タブに「スキルにない業務依頼の引き継ぎ先」（チャンネル管理者に引き継ぐ／指定した相手に引き継ぐの2択）を追加。要件定義書F-17は引き継ぎ先を「チャンネル管理者」に固定しているため、これを拡張する変更として画面モックアップのみへの反映とした。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.7</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">利用者管理（S-08）のロール表示をadmin/memberの2種類に整理し、chadminは「チャンネル管理者」列に参考表示する形に変更（基本設計書3.3節の設計判断と整合）。S-06「基本設定」タブにチャンネル管理者の追加・解除機能を追加。チャンネルの参加人数から開く読み取り専用の「メンバー一覧」（補足03）を新設し、S-03ヘッダーから接続してchadminを可視化した。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.8</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-19</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">S-06のタブ構成を「チャンネル設定」（チャンネル管理者）と「AI設定の項目」（基本設定ほか6タブ）の2グループに分割。チャンネル管理者の変更機能を「基本設定」タブから独立した「チャンネル管理者」タブへ移動した。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">1.9</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">要件定義書F-05のグループDM対応（v1.7）を受け、DM相手を選ぶ（補足02）をチェックボックスによる複数選択に変更。1人選べば一対一、2人以上選べばグループDMとして開始する。サイドバーにグループDMの表示例を追加。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.0</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">要件定義書F-34「チャンネルの公開範囲」新設（v1.8）を受け、非公開チャンネルに対応。チャンネルに参加／作成（補足01）の「作成する」タブに公開／非公開トグルを追加し、「参加する」タブは非公開チャンネルを参加済みのものだけに限定。メンバー一覧（補足03）に、非公開チャンネルの参加者なら誰でも使える「メンバーを追加」ボタンを追加（例として非公開チャンネル「経営会議」🔒を新設）。S-06「チャンネル管理者」タブに公開／非公開の切り替えトグルを追加。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.1</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">新規F-35「メッセージの送信予約」に対応。S-03（チャンネル会話）・S-04（スレッド表示）の投稿欄に、送信ボタン隣の🕐ボタンから開く日時指定ポップオーバーを追加。ヘッダーに「🕐 予約中」の件数バッジを追加し、新規補足04「予約中のメッセージ」で送信前の確認・キャンセルができるようにした。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.2</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">新規F-36「定期投稿（bot投稿）」に対応。S-06「チャンネル設定」グループに「定期投稿」タブを追加し、頻度（1回のみ／毎日／毎週／毎月）・初回送信日時・本文・送り主の表示名/アイコンを設定して自動投稿を作成・編集・削除・一時停止できるようにした。S-03のメッセージ一覧に、専用アイコンと<span class="badge" style="background:#fef3c7;color:#92400e;">BOT</span>バッジを持つ定期投稿の例を追加し、人間・チャンネルAIの発言と区別できるようにした。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.3</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">F-36の宛先をチャンネルに加えて個人（複数可）に拡張。個人宛ては誰でも自分用に作成でき、宛先ごとにDMで個別に届く。ヘッダーに「🔁 リマインダー」を追加し、新規補足05「リマインダー」で宛先選択（補足02と同じ複数選択UI）・本文・頻度・送り主表示を設定して作成・編集・一時停止・削除できるようにした。S-06「定期投稿」タブはチャンネル宛て専用である旨を明記した。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.4</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">新規F-37「プロフィール画像のアップロード」に対応。ヘッダーのユーザーメニュー（自分のアバター）から新規補足06「プロフィール画像を変更」を開けるようにした。S-06「キャラクタ」タブのAIアイコン、「定期投稿」タブ・補足05の送り主アイコンも、絵文字入力に加えて画像アップロードを選べるようにした（アップロード優先）。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.5</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">新規F-38「トリガーによる自動応答」に対応。S-06「チャンネル設定」グループに「自動応答トリガー」タブを追加し、トリガー（キーワード／絵文字）・実行する処理（現時点ではメッセージ投稿のみ）・送り主表示を設定して作成・編集・一時停止・削除できるようにした。S-03のメッセージ一覧に、キーワードに反応して自動投稿された例を追加した。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.6</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">各モックアップ右下の「モックアップ注記」を、既定で非表示のトグル式パネル（📝ボタンで開閉、パネル内にも「✕ 閉じる」）に変更し、縦方向はスクロール可能（最大約58vh）にした。S-03・S-06は改訂を重ねて注記が長くなり画面を覆っていたための対応で、全画面モックアップ・補足モックアップに一律適用した（00_一覧.html自体は対象外）。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.7</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">F-36の宛先を、2.3版で拡張した個人（複数可）からチャンネルのみに戻した。補足05「リマインダー」を削除し、S-03・S-04のヘッダーから「🔁 リマインダー」ボタンを削除した。S-06「定期投稿」タブ・補足06のプロフィール注記から個人宛て関連の記述を削除し、チャンネル宛て定期投稿のみを扱う構成に戻した。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.8</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">画面S-06の名称を「チャンネルAI設定」から「チャンネル設定」に改称した（機能追加ではなく名称の見直し）。チャンネル管理者・定期投稿・自動応答トリガーなどAI設定以外の項目が増え、旧名称が実態と合わなくなったための対応。S-03ヘッダーのボタン名、S-06の画面タイトル・screen-tag、S-08・補足03からのリンク文言、一覧ページのカード名・画面遷移図を更新した（画面ID・ファイル名は変更なし）。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">2.9</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-20</td><td style="padding:7px 10px;border:1px solid var(--border-strong);"><code>S-06_チャンネルAI設定.html</code>を<code>S-06_チャンネル設定.html</code>にファイル名変更した。参照している一覧・S-03・補足03・補足06のリンクを更新した。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">3.0</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-24</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">新規F-39「表示名の変更・同姓同名時の自動識別」・F-40「発言者・メンバーのプロフィール確認」・F-41「@メンションの候補選択・ID参照化」に対応（200名規模では氏名重複が起こりうるにもかかわらず発言者表示・@メンションが氏名一致に依存していた課題への対応。詳細は検討資料「発言者表示・メンションの識別性改善」）。S-03に、発言者アイコン/表示名クリックで開くプロフィールカード（F-40）、表示名が完全一致する参加者が同一チャンネルにいる場合のメールアドレス自動併記（F-39）、投稿欄の候補選択式メンション（アイコン・表示名・メールアドレス付き、F-41）を追加。補足06にプロフィール画像に加えて表示名の編集欄を追加し、モーダル見出しを「プロフィールを編集」に改めた（ファイル名は据え置き）。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">3.1</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-24</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">新規F-42「検索条件モディファイア」に対応。Slackを参考に、S-05の検索欄へ<code>in:</code>（チャンネル指定）・<code>from:</code>（投稿者指定）・<code>with:</code>（DM相手指定）・<code>before:</code>/<code>after:</code>/<code>on:</code>/<code>during:</code>（日付指定）・<code>"完全一致"</code>（フレーズ検索）を追加。検索欄クリックで開く候補ポップオーバー（in:/from:/with:は氏名・メールアドレス付きの候補から選択）、解決済み条件のチップ表示（個別に解除可）を実装した。モディファイアはメッセージ・ファイルのみに適用され、Google Drive文書には対応する属性がないためドキュメント根拠タブは対象外（グレーアウト表示）とした。</td></tr>
+      <tr><td style="padding:7px 10px;border:1px solid var(--border-strong);">3.2</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">2026-08-24</td><td style="padding:7px 10px;border:1px solid var(--border-strong);">権限外パスへの直接アクセス時のフロントエンド挙動を確定（基本設計書4.2節「設計判断」、v1.14）。S-03に、chadmin以外がS-06のURLを直接開いた場合のトースト通知例を追加した（「このページを表示する権限がありません」。実際には表示されない状態で説明のため常時表示、✕で閉じられる）。非公開チャンネルへの未参加者や非adminのS-08アクセスは、存在を伏せるためトーストなしでワークスペースへ静かにリダイレクトする方針とし、こちらは新規UIを追加していない。</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="mock-note">画面モックアップ 一覧 ／ 新人研修サンプル</div>
+
+</body>
+</html>

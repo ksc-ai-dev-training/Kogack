@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>予約中のメッセージ | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af; --accent-700: #1e3a8a; --accent-100: #dbeafe; --accent-50: #eff6ff;
+    --bg: #ffffff; --bg-subtle: #fafbfc; --bg-muted: #f5f7f9;
+    --border: #e7eaee; --border-strong: #d9dde3;
+    --text: #1a1d21; --text-muted: #60656d; --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9; --member-text: #475569;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text); background: var(--bg);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  .screen-tag {
+    position: fixed; top: 14px; left: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 5px; padding: 3px 9px; z-index: 60;
+  }
+
+  .topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg); z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 460px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px;
+  }
+  .topbar .user { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 20px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+  .scheduled-btn.active {
+    flex: none; display: flex; align-items: center; gap: 6px; text-decoration: none;
+    font-size: 12px; font-weight: 600; color: var(--accent-700);
+    border: 1px solid var(--accent-600); background: var(--accent-50); border-radius: 20px; padding: 6px 12px;
+  }
+  .scheduled-btn .count { background: var(--accent-600); color: #fff; border-radius: 10px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; }
+
+  .body-row { flex: 1; display: flex; min-height: 0; }
+  .sidebar {
+    width: 260px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 14px 10px 20px;
+  }
+  .sidebar-section-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px; }
+  .sidebar-section-head .label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; }
+  .nav-list { list-style: none; margin: 0 0 16px; padding: 0; }
+  .nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 13px; margin: 1px 0; }
+  .nav-item .hash { color: var(--text-subtle); flex: none; }
+  .nav-item .lock { color: var(--text-subtle); flex: none; font-size: 11px; }
+  .main { flex: 1; background: var(--bg-subtle); }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(20, 24, 33, 0.45);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal {
+    width: 100%; max-width: 480px; max-height: 82vh; background: var(--bg); border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(16,24,40,0.28); overflow: hidden; display: flex; flex-direction: column;
+  }
+  .modal-head { display: flex; align-items: center; gap: 10px; padding: 18px 22px 4px; }
+  .modal-head .title-wrap { flex: 1; }
+  .modal-head h2 { font-size: 15.5px; margin: 0; }
+  .modal-head .sub { font-size: 11.5px; color: var(--text-subtle); margin-top: 2px; }
+  .modal-close { background: none; border: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; }
+
+  .sched-list { overflow-y: auto; padding: 6px 10px 18px; }
+  .s-row { padding: 12px 12px; border-radius: 10px; border: 1px solid var(--border); margin: 6px 0; }
+  .s-row .s-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .s-row .s-dest { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 5px; }
+  .s-row .s-dest .lock { font-size: 10.5px; color: var(--text-subtle); }
+  .s-row .s-when { margin-left: auto; font-size: 11px; color: var(--accent-700); font-weight: 600; background: var(--accent-50); border-radius: 6px; padding: 2px 8px; }
+  .s-row .s-body { font-size: 12.5px; color: var(--text); line-height: 1.6; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .s-row .s-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .s-cancel-btn {
+    background: none; border: 1px solid var(--border-strong); border-radius: 7px; color: #b91c1c;
+    padding: 5px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  }
+  .empty-note { text-align: center; font-size: 12px; color: var(--text-subtle); padding: 30px 10px; }
+
+  .modal-foot { padding: 12px 22px 18px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-subtle); line-height: 1.7; }
+  .modal-foot a { color: var(--accent-700); }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 60;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #fbbf24; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">補足 予約中のメッセージ</span>
+
+  <div class="topbar">
+    <div class="brand"><div class="mark">K</div><div class="name">Kogack</div></div>
+    <div class="search-wrap">
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>メッセージ・ファイル・ドキュメントを検索</span>
+      </div>
+    </div>
+    <span class="scheduled-btn active">🕐 予約中<span class="count">2</span></span>
+    <div class="user"><div class="avatar">山</div><span class="uname">山田 太郎</span><span class="badge badge-member">member</span></div>
+  </div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <div class="sidebar-section-head"><span class="label">チャンネル</span></div>
+      <ul class="nav-list">
+        <li class="nav-item"><span class="hash">#</span>総務問い合わせ</li>
+        <li class="nav-item"><span class="hash">#</span>開発相談</li>
+        <li class="nav-item"><span class="hash">#</span>新人質問</li>
+        <li class="nav-item"><span class="hash">#</span>雑談</li>
+        <li class="nav-item"><span class="lock">🔒</span>経営会議</li>
+      </ul>
+      <div class="sidebar-section-head"><span class="label">ダイレクトメッセージ</span></div>
+      <ul class="nav-list">
+        <li class="nav-item"><span class="hash">@</span>佐藤 花子</li>
+      </ul>
+    </nav>
+    <div class="main"></div>
+  </div>
+
+  <div class="modal-overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="title-wrap">
+          <h2>予約中のメッセージ</h2>
+          <div class="sub">送信前の内容確認・キャンセルができます（自分が予約したものだけ表示）</div>
+        </div>
+        <button class="modal-close" type="button">✕</button>
+      </div>
+
+      <div class="sched-list">
+        <div class="s-row">
+          <div class="s-head">
+            <span class="s-dest"># 開発相談</span>
+            <span class="s-when">明日 9:00 に送信予定</span>
+          </div>
+          <div class="s-body">お疲れ様です。本日のデプロイ手順を確認しましたので、明朝のミーティング前に共有します。@鈴木一郎 さんもご確認をお願いします。</div>
+          <div class="s-actions">
+            <button class="s-cancel-btn" type="button">予約をキャンセル</button>
+          </div>
+        </div>
+
+        <div class="s-row">
+          <div class="s-head">
+            <span class="s-dest"><span class="lock">🔒</span>DM: 佐藤 花子</span>
+            <span class="s-when">明後日 10:00 に送信予定</span>
+          </div>
+          <div class="s-body">ご確認をお願いします。来週の定例の資料を添付予定でしたが、予約送信では添付できないため別途お送りします。</div>
+          <div class="s-actions">
+            <button class="s-cancel-btn" type="button">予約をキャンセル</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        指定した時刻になると自動的に送信され、通常のメッセージと同じ扱いになります（@メンションでのAI呼び出しも通常どおり動作します）。送信前ならいつでもキャンセルできます。一度送信されたメッセージはここから取り消せません（通常の削除操作を使ってください）。
+      </div>
+    </div>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>補足モックアップ</strong>（要件定義書4.1節の画面一覧S-01〜S-08には含まれない）<br>
+    ヘッダーの「🕐 予約中」から開くモーダル。チャンネル・DM・スレッド返信を問わず、自分が予約したすべてのメッセージを横断して一覧表示する（<code>F-35</code>）。予約はチャンネル・DMの投稿欄にある🕐ボタンから行う（<a href="S-03_チャンネル会話.html">S-03</a>参照）。他の参加者にはこの一覧も予約中の内容も見えない。「予約をキャンセル」を押すと即座に取り消され、二度と送信されない。<a href="../02_要件定義書.html#sec3">要件定義書F-35</a>参照。
+  </div>
+
+</body>
+</html>

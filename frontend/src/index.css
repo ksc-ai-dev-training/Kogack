@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+/* 画面モックアップ（docs/画面モックアップ/*.html）の配色トークンをそのまま移植したもの。
+   実装画面の見た目をモックアップに揃えるため、Tailwindの既定色ではなくこちらを使う。 */
+@theme {
+  --color-accent-50: #eff6ff;
+  --color-accent-100: #dbeafe;
+  --color-accent-600: #1e40af;
+  --color-accent-700: #1e3a8a;
+
+  --color-surface: #ffffff;
+  --color-surface-subtle: #fafbfc;
+  --color-surface-muted: #f5f7f9;
+
+  --color-line: #e7eaee;
+  --color-line-strong: #d9dde3;
+
+  --color-ink: #1a1d21;
+  --color-ink-muted: #60656d;
+  --color-ink-subtle: #8a8f98;
+
+  --color-member-bg: #f1f5f9;
+  --color-member-text: #475569;
+  --color-chadmin-bg: #ccfbf1;
+  --color-chadmin-text: #0f766e;
+  --color-admin-bg: #ede9fe;
+  --color-admin-text: #6d28d9;
+  --color-bot-bg: #fef3c7;
+  --color-bot-text: #92400e;
+  --color-ok-bg: #dcfce7;
+  --color-ok-text: #15803d;
+  --color-off-bg: #f1f5f9;
+  --color-off-text: #94a3b8;
+
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+  --color-danger-text: #b91c1c;
+}
+
+body {
+  @apply bg-surface-muted text-ink;
+  font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+}
+
+/* クリックできる要素は一律で指カーソルにする。無効化されているものは既定の矢印に戻す。 */
+button:not(:disabled),
+label:has(> input[type='checkbox']:not(:disabled)),
+label:has(> input[type='radio']:not(:disabled)),
+summary,
+a[href],
+[role='option'],
+[role='tab'],
+[role='button'] {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled='true'] {
+  cursor: default;
+}

@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>開発相談 — スレッド | Kogack</title>
+<style>
+  :root {
+    --accent-600: #1e40af;
+    --accent-700: #1e3a8a;
+    --accent-100: #dbeafe;
+    --accent-50: #eff6ff;
+    --bg: #ffffff;
+    --bg-subtle: #fafbfc;
+    --bg-muted: #f5f7f9;
+    --border: #e7eaee;
+    --border-strong: #d9dde3;
+    --text: #1a1d21;
+    --text-muted: #60656d;
+    --text-subtle: #8a8f98;
+    --member-bg: #f1f5f9;
+    --member-text: #475569;
+    --chadmin-bg: #ccfbf1;
+    --chadmin-text: #0f766e;
+    --ai-bg: #dbeafe;
+    --ai-text: #1d4ed8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .screen-tag {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #0369a1;
+    background: #e0f2fe;
+    border: 1px solid #bae6fd;
+    border-radius: 5px;
+    padding: 3px 9px;
+    z-index: 30;
+  }
+
+  /* ---- topbar ---- */
+  .topbar {
+    height: 56px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    z-index: 20;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+  .topbar .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-600), var(--accent-700));
+    color: #fff; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .brand .name { font-size: 15px; font-weight: 700; color: var(--accent-700); }
+  .search-wrap { flex: 1; display: flex; justify-content: center; }
+  .search-box {
+    width: 100%; max-width: 460px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; color: var(--text-subtle); font-size: 13px; text-decoration: none;
+  }
+  .search-box:hover { border-color: var(--border-strong); background: var(--bg); }
+  .search-box svg { flex: none; }
+  .search-box .kbd {
+    margin-left: auto; font-size: 10.5px; color: var(--text-subtle);
+    border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px; background: var(--bg);
+  }
+  .topbar .user {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px 4px 4px; border-radius: 20px;
+  }
+  .topbar .user:hover { background: var(--bg-muted); }
+  .scheduled-btn {
+    flex: none; display: flex; align-items: center; gap: 6px; text-decoration: none;
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 20px; padding: 6px 12px;
+  }
+  .scheduled-btn:hover { background: var(--bg-muted); }
+  .scheduled-btn .count { background: var(--accent-600); color: #fff; border-radius: 10px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: #cbd5f5; color: var(--accent-700);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .topbar .user .uname { font-size: 12.5px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .badge-member { background: var(--member-bg); color: var(--member-text); }
+  .badge-chadmin { background: var(--chadmin-bg); color: var(--chadmin-text); }
+  .badge-ai { background: var(--ai-bg); color: var(--ai-text); }
+
+  /* ---- body row ---- */
+  .body-row { flex: 1; display: flex; min-height: 0; }
+
+  /* ---- sidebar ---- */
+  .sidebar {
+    width: 260px; flex: none; background: var(--bg-subtle); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 14px 10px 20px;
+  }
+  .sidebar-section { margin-bottom: 18px; }
+  .sidebar-section-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px; }
+  .sidebar-section-head .label { font-size: 11px; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.03em; }
+  .add-btn {
+    width: 20px; height: 20px; border-radius: 5px; border: none; background: transparent;
+    color: var(--text-subtle); font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .add-btn:hover { background: var(--accent-100); color: var(--accent-700); }
+  .nav-list { list-style: none; margin: 0; padding: 0; }
+  .nav-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px;
+    font-size: 13px; color: var(--text); margin: 1px 0;
+  }
+  .nav-item:hover { background: var(--bg-muted); }
+  .nav-item.active {
+    background: var(--accent-50); color: var(--accent-700); font-weight: 700;
+    box-shadow: inset 3px 0 0 var(--accent-600);
+  }
+  .nav-item .hash { color: var(--text-subtle); flex: none; font-weight: 400; }
+  .nav-item.active .hash { color: var(--accent-600); }
+  .nav-item .chname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item.unread .chname { font-weight: 700; }
+  .unread-badge {
+    flex: none; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+    background: var(--accent-600); color: #fff; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dm-avatar {
+    width: 20px; height: 20px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex: none; color: #fff; position: relative;
+  }
+  .dot-online {
+    position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 50%;
+    background: #22c55e; border: 1.5px solid var(--bg-subtle);
+  }
+  .sidebar-footer { margin-top: 8px; padding: 8px; border-top: 1px solid var(--border); }
+
+  /* ---- main pane ---- */
+  .main { flex: 1; min-width: 320px; display: flex; flex-direction: column; background: var(--bg); }
+  .main-head {
+    height: 52px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 20px; border-bottom: 1px solid var(--border);
+  }
+  .main-head .hash { color: var(--text-subtle); font-size: 16px; }
+  .main-head .cname { font-size: 15px; font-weight: 700; }
+  .main-head .members { font-size: 12px; color: var(--text-subtle); margin-left: 4px; }
+  .summarize-btn {
+    margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600;
+    color: var(--accent-700); background: var(--accent-50); border: 1px solid var(--accent-100);
+    border-radius: 7px; padding: 5px 11px;
+  }
+
+  .msg-list { flex: 1; overflow-y: auto; padding: 12px 0 8px; }
+  .day-sep {
+    display: flex; align-items: center; gap: 10px; margin: 6px 20px 10px; font-size: 11px;
+    color: var(--text-subtle); font-weight: 600;
+  }
+  .day-sep::before, .day-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .msg { display: flex; gap: 10px; padding: 7px 20px; }
+  .msg:hover { background: var(--bg-subtle); }
+  .msg.origin { background: var(--accent-50); box-shadow: inset 3px 0 0 var(--accent-600); }
+  .msg .av {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff;
+  }
+  .msg .av.ai { border-radius: 9px; background: linear-gradient(135deg, var(--accent-600), var(--accent-700)); }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-head { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+  .msg-head .name { font-size: 13px; font-weight: 700; color: var(--text); }
+  .msg-head .time { font-size: 11px; color: var(--text-subtle); }
+  .msg-text { font-size: 13.5px; line-height: 1.75; color: var(--text); margin-top: 2px; white-space: pre-wrap; }
+  .mention { background: var(--accent-100); color: var(--accent-700); border-radius: 4px; padding: 0 4px; font-weight: 600; }
+
+  .ai-disclaimer { display: flex; align-items: center; gap: 5px; margin-top: 7px; font-size: 11px; color: var(--text-subtle); }
+
+  .cite-card { margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; background: var(--bg-subtle); font-size: 12px; max-width: 460px; }
+  .cite-card .cite-head { font-weight: 700; color: var(--text-muted); margin-bottom: 4px; font-size: 11px; }
+  .cite-card a { color: var(--accent-700); text-decoration: none; }
+  .cite-card a:hover { text-decoration: underline; }
+  .cite-card .excerpt { color: var(--text-muted); margin-top: 2px; }
+
+  .thread-link {
+    margin-top: 6px; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+    color: var(--accent-700); background: var(--accent-50); border: 1px solid var(--accent-100); border-radius: 6px; padding: 4px 9px;
+    font-weight: 700;
+  }
+
+  /* ---- composer (shared) ---- */
+  .composer { border-top: 1px solid var(--border); padding: 10px 20px 14px; flex: none; }
+  .composer-box { border: 1px solid var(--border-strong); border-radius: 10px; padding: 9px 12px; }
+  .composer-input { font-size: 13px; color: var(--text-subtle); }
+  .composer-toolbar { display: flex; align-items: center; gap: 2px; margin-top: 8px; }
+  .composer-toolbar .icon-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: none; background: none;
+    display: flex; align-items: center; justify-content: center; color: var(--text-subtle);
+  }
+  .composer-toolbar .icon-btn:hover { background: var(--bg-muted); }
+  .composer-toolbar .schedule-btn { margin-left: auto; }
+  .send-btn {
+    background: var(--accent-600); color: #fff; border: none; border-radius: 7px;
+    padding: 6px 16px; font-size: 12.5px; font-weight: 700;
+  }
+  .composer-hint { font-size: 11px; color: var(--text-subtle); margin-top: 6px; }
+
+  /* ---- thread panel (S-04) ---- */
+  .thread-panel {
+    width: 380px; flex: none; display: flex; flex-direction: column;
+    background: var(--bg); border-left: 1px solid var(--border-strong);
+    box-shadow: -4px 0 16px rgba(16,24,40,0.05);
+  }
+  .thread-head {
+    height: 52px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; border-bottom: 1px solid var(--border);
+  }
+  .thread-head .title-wrap { display: flex; flex-direction: column; }
+  .thread-head .title { font-size: 14px; font-weight: 700; }
+  .thread-head .sub { font-size: 11px; color: var(--text-subtle); }
+  .thread-close {
+    margin-left: auto; width: 26px; height: 26px; border: none; background: none; border-radius: 6px;
+    color: var(--text-subtle); font-size: 15px; display: flex; align-items: center; justify-content: center;
+  }
+  .thread-close:hover { background: var(--bg-muted); }
+
+  .thread-body { flex: 1; overflow-y: auto; padding: 6px 0 4px; }
+  .thread-origin { padding: 12px 16px 14px; border-bottom: 1px solid var(--border); }
+  .thread-origin .msg { padding: 0; }
+  .thread-origin .msg:hover { background: none; }
+
+  .thread-count {
+    display: flex; align-items: center; gap: 10px; margin: 12px 16px 6px; font-size: 11px;
+    color: var(--text-subtle); font-weight: 600;
+  }
+  .thread-count::before, .thread-count::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .thread-body .msg { padding: 8px 16px; }
+  .thread-body .msg .cite-card,
+  .thread-body .msg .ai-disclaimer { max-width: none; }
+
+  .thread-note {
+    margin: 4px 16px 0; font-size: 11px; color: var(--text-subtle); background: var(--bg-subtle);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; line-height: 1.6;
+  }
+
+  .mock-note {
+    position: fixed; bottom: 14px; right: 14px; max-width: 340px; background: #1e2530; color: #dce3ec;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px; line-height: 1.7;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 30;
+  }
+  .mock-note { display: none; max-height: min(58vh, 440px); overflow-y: auto; }
+  .mock-note.open { display: block; }
+  .mock-note-toggle {
+    position: fixed; bottom: 14px; right: 14px; z-index: 61;
+    background: #1e2530; color: #fbbf24; border: 1px solid #33415a; border-radius: 20px;
+    padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .mock-note-toggle:hover { background: #252d3a; }
+  .mock-note-close {
+    display: block; width: fit-content; margin: -2px -2px 8px auto; background: none; border: 1px solid #33415a;
+    color: #93c5fd; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  }
+
+  .mock-note strong { color: #93c5fd; }
+  .mock-note code { font-family: "SF Mono", ui-monospace, "Consolas", monospace; background: rgba(255,255,255,0.08); border-radius: 3px; padding: 0 4px; }
+  .mock-note a { color: #93c5fd; }
+</style>
+</head>
+<body>
+
+  <span class="screen-tag">S-04 スレッド表示</span>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">K</div>
+      <div class="name">Kogack</div>
+    </div>
+    <div class="search-wrap">
+      <a class="search-box" href="S-05_横断検索.html">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#8a8f98" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#8a8f98" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>メッセージ・ファイル・ドキュメントを検索</span>
+        <span class="kbd">S-05</span>
+      </a>
+    </div>
+    <a class="scheduled-btn" href="補足04_予約中メッセージ.html">🕐 予約中<span class="count">2</span></a>
+    <div class="user">
+      <div class="avatar">山</div>
+      <span class="uname">山田 太郎</span>
+      <span class="badge badge-member">member</span>
+    </div>
+  </div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-head">
+          <span class="label">チャンネル</span>
+          <button class="add-btn" title="チャンネルを作成" type="button">＋</button>
+        </div>
+        <ul class="nav-list">
+          <li class="nav-item unread">
+            <span class="hash">#</span><span class="chname">総務問い合わせ</span><span class="unread-badge">3</span>
+          </li>
+          <li class="nav-item active">
+            <span class="hash">#</span><span class="chname">開発相談</span>
+          </li>
+          <li class="nav-item unread">
+            <span class="hash">#</span><span class="chname">新人質問</span><span class="unread-badge">1</span>
+          </li>
+          <li class="nav-item">
+            <span class="hash">#</span><span class="chname">雑談</span>
+          </li>
+        </ul>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-head">
+          <span class="label">ダイレクトメッセージ</span>
+          <button class="add-btn" title="DMを開始" type="button">＋</button>
+        </div>
+        <ul class="nav-list">
+          <li class="nav-item unread">
+            <span class="dm-avatar" style="background:#f97316;">佐</span><span class="chname">佐藤 花子</span><span class="unread-badge">2</span>
+          </li>
+          <li class="nav-item">
+            <span class="dm-avatar" style="background:#0ea5e9;">鈴<span class="dot-online"></span></span><span class="chname">鈴木 一郎</span>
+          </li>
+          <li class="nav-item">
+            <span class="dm-avatar" style="background:#a855f7;">高</span><span class="chname">高橋 美咲</span>
+          </li>
+        </ul>
+      </div>
+      <div class="sidebar-footer">
+        <div class="nav-item">
+          <span class="avatar" style="width:22px;height:22px;font-size:10px;">山</span><span class="chname">山田 太郎</span>
+        </div>
+      </div>
+    </nav>
+
+    <div class="main">
+      <div class="main-head">
+        <span class="hash">#</span>
+        <span class="cname">開発相談</span>
+        <span class="members">12名</span>
+        <button class="summarize-btn" type="button">
+          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h7" stroke="#1e3a8a" stroke-width="1.6" stroke-linecap="round"/></svg>
+          要約
+        </button>
+      </div>
+
+      <div class="msg-list">
+        <div class="day-sep">2026年8月19日</div>
+
+        <div class="msg origin">
+          <div class="av" style="background:#f97316;">佐</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">佐藤 花子</span><span class="time">10:02</span></div>
+            <div class="msg-text">本番デプロイの前に、DBマイグレーションの手順を確認したいです。</div>
+            <div class="thread-link">
+              <span>💬 3件の返信 — スレッドを表示中</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#0ea5e9;">鈴</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">鈴木 一郎</span><span class="time">10:05</span></div>
+            <div class="msg-text"><span class="mention">@Kogack AI</span> 直近のデプロイ手順書のリンクを教えて</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av ai">AI</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">Kogack AI</span>
+              <span class="badge badge-ai">AI</span>
+              <span class="time">10:06</span>
+            </div>
+            <div class="msg-text">デプロイ手順は次の3ステップです。①ステージングでマイグレーションを検証 ②バックアップ取得 ③本番マイグレーション実行→デプロイ。詳細は根拠文書をご確認ください。</div>
+            <div class="ai-disclaimer">⚠ AIの回答には誤りが含まれる場合があります。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-box">
+          <div class="composer-input"># 開発相談 にメッセージを送る（@でメンション）</div>
+          <div class="composer-toolbar">
+            <button class="icon-btn" title="ファイルを添付" type="button">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M14.5 8.5l-6 6a3 3 0 1 1-4.2-4.2l6.7-6.7a2 2 0 1 1 2.8 2.8L7.1 12.2a1 1 0 1 1-1.4-1.4l5.7-5.7" stroke="#8a8f98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="icon-btn schedule-btn" title="送信日時を指定" type="button">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.2" stroke="#8a8f98" stroke-width="1.5"/><path d="M10 6v4l3 2" stroke="#8a8f98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="send-btn" type="button">送信</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="thread-panel">
+      <div class="thread-head">
+        <div class="title-wrap">
+          <span class="title">スレッド</span>
+          <span class="sub"># 開発相談</span>
+        </div>
+        <button class="thread-close" title="閉じる" type="button">✕</button>
+      </div>
+
+      <div class="thread-body">
+        <div class="thread-origin">
+          <div class="msg">
+            <div class="av" style="background:#f97316;">佐</div>
+            <div class="msg-body">
+              <div class="msg-head"><span class="name">佐藤 花子</span><span class="time">10:02</span></div>
+              <div class="msg-text">本番デプロイの前に、DBマイグレーションの手順を確認したいです。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="thread-count">3件の返信</div>
+
+        <div class="msg">
+          <div class="av" style="background:#0ea5e9;">鈴</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">鈴木 一郎</span><span class="time">10:18</span></div>
+            <div class="msg-text">ステージングでの検証は今週末までに完了予定です。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av ai">AI</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="name">Kogack AI</span>
+              <span class="badge badge-ai">AI</span>
+              <span class="time">10:20</span>
+            </div>
+            <div class="msg-text">マイグレーション実行前のチェックリストはこちらです。バックアップ取得・接続数の確認・ロールバック手順の3点をご確認ください。</div>
+            <div class="cite-card">
+              <div class="cite-head">📄 回答の根拠</div>
+              <a href="#">デプロイ手順書.md ＞ 3.2 実行前チェックリスト</a>
+            </div>
+            <div class="ai-disclaimer">⚠ AIの回答には誤りが含まれる場合があります。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="av" style="background:#f97316;">佐</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">佐藤 花子</span><span class="time">10:24</span></div>
+            <div class="msg-text">ありがとうございます、それでは金曜17時以降に実施します。</div>
+          </div>
+        </div>
+
+        <div class="thread-note">このスレッド内のやり取りは # 開発相談 本体のタイムラインには流れません。AIへの質問もスレッド内で完結し、他の会話と分離されます（F-03）。</div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-box">
+          <div class="composer-input">スレッドに返信</div>
+          <div class="composer-toolbar">
+            <button class="icon-btn" title="ファイルを添付" type="button">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M14.5 8.5l-6 6a3 3 0 1 1-4.2-4.2l6.7-6.7a2 2 0 1 1 2.8 2.8L7.1 12.2a1 1 0 1 1-1.4-1.4l5.7-5.7" stroke="#8a8f98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="icon-btn schedule-btn" title="送信日時を指定" type="button">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.2" stroke="#8a8f98" stroke-width="1.5"/><path d="M10 6v4l3 2" stroke="#8a8f98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="send-btn" type="button">送信</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <button class="mock-note-toggle" type="button" onclick="document.getElementById('mockNote').classList.toggle('open')">📝 モックアップ注記</button>
+
+    <div class="mock-note" id="mockNote">
+    <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
+
+    <strong>モックアップ注記</strong><br>
+    画面ID: <code>S-04</code> ／ 対応機能: <code>F-03</code>（スレッド）, <code>F-35</code>（送信予約）, <code>F-36</code>（定期投稿）<br>
+    S-03のチャンネル会話から特定の発言の「返信」を開くと右側にスレッドパネルが表示される（4.3節: S-03⇄S-04）。パネル内は元発言＋返信一覧＋返信用の投稿欄で構成し、AIとのやり取りをスレッド内に閉じることでチャンネル本体の会話と分離する。左のチャンネル本体では対象発言がハイライトされ、スレッドの返信自体は本体タイムラインには表示されない。詳細は<a href="../02_要件定義書.html#sec3">要件定義書F-03</a>参照。<br>
+    <span style="color:#fbbf24;">1.9版で追加:</span> チャンネル本体・スレッド返信、両方の投稿欄に送信予約ボタン🕐を追加した（挙動はS-03と共通。日時ピッカーの展開例はS-03参照）。ヘッダーの「🕐 予約中」から<a href="補足04_予約中メッセージ.html">予約中のメッセージ一覧（補足04）</a>を開ける。<a href="../02_要件定義書.html#sec3">要件定義書F-35</a>参照。<br>
+    <span style="color:#fbbf24;">1.14版で削除:</span> F-36の宛先を個人（複数可）に拡張していたが、チャンネル運用への注力を優先し対象外に戻した。ヘッダーの「🔁 リマインダー」ボタンと補足05「リマインダー」も削除した。
+  </div>
+
+</body>
+</html>
