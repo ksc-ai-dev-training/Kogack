@@ -121,6 +121,9 @@ def _message_out(row) -> dict:
         "body": row["body"],
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],
+        # F-41 @メンションはチャンネルのみ対応（候補元のA-46がチャンネル参加者一覧のため）。
+        # DM発言は常に空配列とし、フロント側でMessage型の形を揃える。
+        "blocks": [],
         "created_at": row["created_at"].isoformat(),
     }
 

@@ -148,6 +148,22 @@ CREATE TABLE IF NOT EXISTS read_states (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_read_states_channel ON read_states (user_id, channel_id) WHERE channel_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_read_states_dm ON read_states (user_id, dm_id) WHERE dm_id IS NOT NULL;
 ALTER TABLE read_states ENABLE ROW LEVEL SECURITY;
+
+-- T-07 message_blocks: 発言内の構造化ブロック（05-1_詳細設計書_DB設計.html 3.7節）。
+-- 種類ごとにテーブルを分けずblock_type＋JSONB payloadに集約する設計（基本設計書6.2節「設計判断」）。
+-- このスライスではblock_type='mention'（F-41 @メンション）のみ実際に作成する。
+-- citation/external_system/quote_reference/pending_actionはAIサポート未実装のため対象外。
+CREATE TABLE IF NOT EXISTS message_blocks (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    message_id   BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    block_type   TEXT NOT NULL
+                 CHECK (block_type IN ('citation', 'external_system', 'quote_reference', 'pending_action', 'mention')),
+    payload      JSONB NOT NULL,
+    sort_order   INT NOT NULL DEFAULT 0,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_message_blocks_message ON message_blocks (message_id);
+ALTER TABLE message_blocks ENABLE ROW LEVEL SECURITY;
 """
 
 

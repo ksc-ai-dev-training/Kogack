@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { apiFetch } from '../lib/api'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
-import type { Message } from '../types'
+import type { ChannelMember, Message } from '../types'
 
 export function formatTime(iso: string) {
   const d = new Date(iso)
@@ -28,6 +29,42 @@ function DaySeparator({ label }: { label: string }) {
       <span className="h-px flex-1 bg-line" />
     </div>
   )
+}
+
+// F-41 @メンションの描画。本文中の「@display_name_snapshot」を検出し、target_user_idを
+// 現在のチャンネル参加者一覧で解決した最新の表示名でハイライト表示する（05-1_詳細設計書_DB設計.html
+// 3.7節「表示時はtarget_user_idを解決して現在の表示名・アイコンを描画」）。A-62プロフィール編集が
+// 未実装で表示名が変わる経路が無いため、実際にはdisplay_name_snapshotと現在名は常に一致する。
+export function renderMessageBody(body: string, blocks: Message['blocks'], members?: ChannelMember[]): ReactNode {
+  const mentions = (blocks ?? []).filter(
+    (b): b is { block_type: 'mention'; payload: { target_user_id: string; display_name_snapshot: string }; sort_order: number } =>
+      b.block_type === 'mention',
+  )
+  if (mentions.length === 0) return body
+
+  const matches: { start: number; end: number; label: string }[] = []
+  for (const block of mentions) {
+    const current = members?.find((m) => m.id === block.payload.target_user_id)?.name
+    const label = `@${current ?? block.payload.display_name_snapshot}`
+    const idx = body.indexOf(`@${block.payload.display_name_snapshot}`)
+    if (idx !== -1) matches.push({ start: idx, end: idx + block.payload.display_name_snapshot.length + 1, label })
+  }
+  matches.sort((a, b) => a.start - b.start)
+
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  matches.forEach((m, i) => {
+    if (m.start < cursor) return
+    if (m.start > cursor) nodes.push(body.slice(cursor, m.start))
+    nodes.push(
+      <span key={i} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
+        {m.label}
+      </span>,
+    )
+    cursor = m.end
+  })
+  if (cursor < body.length) nodes.push(body.slice(cursor))
+  return nodes
 }
 
 export function Avatar({ message }: { message: Message }) {
@@ -67,6 +104,7 @@ export default function MessageList({
   openThreadId,
   onDeleted,
   showDaySeparators = true,
+  members,
 }: {
   messages: Message[]
   emptyMessage?: string
@@ -75,6 +113,8 @@ export default function MessageList({
   onDeleted?: (messageId: string) => void
   /** S-04スレッド返信欄では表示しない（画面モックアップに合わせる。既定はtrue） */
   showDaySeparators?: boolean
+  /** F-41 @メンションの表示名解決に使う（チャンネル参加者一覧。DM会話では渡さない） */
+  members?: ChannelMember[]
 }) {
   const { me } = useMe()
   const confirm = useConfirm()
@@ -130,7 +170,9 @@ export default function MessageList({
                   )}
                   <span className="text-[11px] text-ink-subtle">{formatTime(m.created_at)}</span>
                 </div>
-                <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">{m.body}</div>
+                <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
+                  {renderMessageBody(m.body, m.blocks, members)}
+                </div>
                 {onOpenThread && (m.thread_reply_count ?? 0) > 0 && (
                   <button
                     type="button"

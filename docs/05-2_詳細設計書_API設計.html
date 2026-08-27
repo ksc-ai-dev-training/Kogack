@@ -35,6 +35,7 @@
       <tr><td>1.4</td><td>2026-08-27</td><td>A-12（メッセージ削除）のリクエスト/レスポンス例と権限判定（投稿者本人またはadmin、参加していない会話には404、参加しているが権限が無い場合は403）を新規追加した（基本設計書4.3節にAPI一覧のみ記載で詳細が未反映だった抜けをbackfill）。新規DB列は無い（T-05.deleted_at/deleted_byは既存）。</td></tr>
       <tr><td>1.5</td><td>2026-08-27</td><td>基本設計書v1.16（未読バッジ、新規T-22 read_states）を反映し、新規API A-05のjoined/A-16のunread_count追加、新規API A-69（チャンネル既読化）・A-70（DM既読化）を追加した（サイドバーの未読バッジは4.2節に記載済みだったがAPI設計側が未反映だった抜けをbackfill）。</td></tr>
       <tr><td>1.6</td><td>2026-08-27</td><td>A-08の非公開チャンネル招待（既存参加者がuser_id指定で追加）を実装し、非参加者からの呼び出しは404（存在を伏せる）であることを明記した。招待時の入室通知（F-43）は追加された本人の氏名を使うことを追記。新規API A-46（参加者一覧。補足03）のリクエスト/レスポンス例を新規追加し、role・is_active列を追加した（補足03メンバー一覧のchadmin/adminバッジ・無効化アカウント表示に対応。従来テーブル一覧のみで未記載だった抜けをbackfill）。</td></tr>
+      <tr><td>1.7</td><td>2026-08-27</td><td>F-41 @メンションを実装し、A-13・A-14のリクエスト/レスポンス例を新規追加した（従来はA-12の説明文中の参照のみで詳細未記載だった抜けをbackfill）。mentionsはA-11と同じくチャンネル参加者（A-46）であることを検証してT-07 message_blocksへ保存し、DM発言（元発言がDMのスレッド返信を含む）は候補元が無いため常にblocks空とすることを明記した。A-10・A-13のblocksフィールド自体は05-1 DB設計3.7節に既存記載済みのため新規記載は無い。</td></tr>
     </tbody>
   </table>
 
@@ -146,6 +147,21 @@ POST /api/channels/42/members
   <pre><code>DELETE /api/messages/10301
 // response 200: { "id": "10301", "deleted": true }</code></pre>
   <p class="muted">論理削除（T-05.deleted_at/deleted_by）。投稿者本人またはadminのみ実行できる。チャンネル・DMどちらの発言、スレッド返信・元発言のいずれも同じエンドポイントで扱う。削除に成功すると以後A-10/A-18/A-13の一覧から除外される（元発言を削除した場合、そのスレッドのA-13/A-14は404になる）。参加していない会話の発言に対しては存在自体を伏せるため404、参加しているが投稿者本人でもadminでもない場合は403を返す（総論5.3節と同じ使い分け）。</p>
+
+  <p><strong>A-13 <span class="badge badge-get">GET</span> /api/messages/{id}/thread（スレッド内の返信一覧）</strong></p>
+  <pre><code>// response 200
+{ "items": [ { "id": "10305", "channel_id": "42", "dm_id": null, "thread_parent_id": "10301",
+    "sender_type": "human", "sender_user_id": "15", "body": "@田中 智子 確認しました",
+    "generation_status": null, "blocks": [ { "block_type": "mention",
+      "payload": { "target_user_id": "7", "display_name_snapshot": "田中 智子" }, "sort_order": 0 } ],
+    "created_at": "..." } ] }</code></pre>
+  <p class="muted">古い順。A-10と同じくblocksを含む（F-41）。</p>
+
+  <p><strong>A-14 <span class="badge badge-post">POST</span> /api/messages/{id}/thread（スレッドへの返信投稿）</strong></p>
+  <pre><code>{ "body": "@田中 智子 確認しました",
+  "mentions": [ { "target_user_id": "7", "display_name_snapshot": "田中 智子" } ] }
+// response 201: A-11と同じ形（channel_id/dm_idは元発言から継承、blocksを含む）</code></pre>
+  <p class="muted"><code>mentions</code>はA-11と同じ扱い（対象がチャンネル参加者であることを検証してT-07へ保存）。元発言がDMの場合はメンション候補元（A-46）が存在しないためmentionsを送っても無視され、blocksは常に空になる。</p>
 
   <p><strong>A-49 <span class="badge badge-put">PUT</span> /api/channels/{id}/visibility（公開/非公開切替）</strong></p>
   <pre><code>{ "is_public": false }

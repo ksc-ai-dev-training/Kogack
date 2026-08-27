@@ -53,6 +53,19 @@ export interface ChannelMembersResponse {
   items: ChannelMember[]
 }
 
+/** T-07 message_blocks（05-1詳細設計書DB設計3.7節）。このスライスで実際に作成されるのは
+ * block_type='mention'のみ（citation/external_system/quote_reference/pending_actionはAIサポート未実装）。 */
+export interface MentionPayload {
+  target_user_id: string
+  display_name_snapshot: string
+}
+
+export interface MessageBlock {
+  block_type: string
+  payload: MentionPayload | Record<string, unknown>
+  sort_order: number
+}
+
 export interface Message {
   id: string
   channel_id?: string | null
@@ -65,6 +78,8 @@ export interface Message {
   generation_status: 'generating' | null
   /** 元発言のみに含まれる（S-04スレッド表示への導線。A-10/A-18）。返信自体には付かない */
   thread_reply_count?: number
+  /** F-41 @メンション。DM発言は常に空配列（候補元のA-46がチャンネル専用のため） */
+  blocks?: MessageBlock[]
   created_at: string
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
+import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useMessages } from '../hooks/useMessages'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError } from '../lib/api'
@@ -8,8 +9,9 @@ import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
+import type { MentionPayload } from '../types'
 
-// S-03 チャンネル会話＋S-04 スレッド表示（このスライスはメンション・添付・送信予約・要約は未実装）
+// S-03 チャンネル会話＋S-04 スレッド表示（このスライスは添付・送信予約・要約は未実装）
 export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -17,6 +19,7 @@ export default function ChannelView() {
   const { me } = useMe()
   const { channel, error: channelError } = useChannel(channelId)
   const { mutate: mutateChannelsList } = useChannels()
+  const { members } = useChannelMembers(channelId)
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined)
@@ -89,17 +92,19 @@ export default function ChannelView() {
             onOpenThread={openThread}
             openThreadId={threadId}
             onDeleted={removeMessage}
+            members={members}
           />
         </div>
 
         <div className="flex-none border-t border-line px-5 py-2.5">
           <Composer
-            placeholder={`# ${channel?.name ?? ''} にメッセージを送る`}
-            onSend={async (body) => {
+            placeholder={`# ${channel?.name ?? ''} にメッセージを送る（@でメンション）`}
+            mentionCandidates={members.filter((m) => m.is_active)}
+            onSend={async (body, mentions: MentionPayload[]) => {
               if (!channelId) return
               await apiFetch(`/api/channels/${channelId}/messages`, {
                 method: 'POST',
-                body: JSON.stringify({ body }),
+                body: JSON.stringify({ body, mentions }),
               })
               await mutateMessages()
             }}
@@ -112,6 +117,7 @@ export default function ChannelView() {
           messageId={threadId}
           parentMessage={messages.find((m) => m.id === threadId) ?? null}
           headerSub={`# ${channel?.name ?? ''}`}
+          members={members}
           onClose={closeThread}
           onReplyPosted={() => bumpThreadReplyCount(threadId)}
           onReplyDeleted={() => decrementThreadReplyCount(threadId)}

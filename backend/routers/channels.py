@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_auth, require_channel_admin, require_channel_member
 from database import get_pool
+from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -274,7 +275,7 @@ async def mark_channel_read(channel_id: int, user: CurrentUser = Depends(require
     return {"channel_id": str(channel_id), "read": True}
 
 
-def _message_out(row) -> dict:
+def _message_out(row, blocks: list[dict] | None = None) -> dict:
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]),
@@ -285,6 +286,7 @@ def _message_out(row) -> dict:
         "body": row["body"],
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],
+        "blocks": blocks or [],
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -313,29 +315,37 @@ async def list_messages(
                ORDER BY m.created_at ASC""",
             channel_id, since_dt,
         )
-        return {"items": [_message_out(r) for r in rows], "has_more": False}
-    rows = await pool.fetch(
-        f"""{_MESSAGES_SELECT}
-           WHERE m.channel_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
-           ORDER BY m.created_at DESC LIMIT $2""",
-        channel_id, limit,
-    )
-    return {"items": [_message_out(r) for r in reversed(rows)], "has_more": len(rows) == limit}
+    else:
+        rows = list(reversed(await pool.fetch(
+            f"""{_MESSAGES_SELECT}
+               WHERE m.channel_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
+               ORDER BY m.created_at DESC LIMIT $2""",
+            channel_id, limit,
+        )))
+    blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
+    items = [_message_out(r, blocks_by_message.get(r["id"])) for r in rows]
+    if since:
+        return {"items": items, "has_more": False}
+    return {"items": items, "has_more": len(rows) == limit}
 
 
 class PostMessageRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
+    mentions: list[MentionInput] = []
 
 
 @router.post("/{channel_id}/messages", status_code=201)
 async def post_message(
     channel_id: int, body: PostMessageRequest, user: CurrentUser = Depends(require_channel_member),
 ):
-    """A-11: メッセージ投稿。このスライスは人間の発言保存のみ（AI応答・トリガー判定は次スライス）"""
+    """A-11: メッセージ投稿。人間へのメンション（F-41）はT-07へ保存する。AIメンション検知・
+    自動応答トリガー判定はAIサポート未実装のため対象外（CLAUDE.md 実装状況節）"""
     pool = get_pool()
-    row = await pool.fetchrow(
-        """INSERT INTO messages (channel_id, sender_type, sender_user_id, body)
-           VALUES ($1, 'human', $2, $3) RETURNING *""",
-        channel_id, user.id, body.body,
-    )
-    return _message_out({**dict(row), "sender_name": user.name, "thread_reply_count": 0})
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            """INSERT INTO messages (channel_id, sender_type, sender_user_id, body)
+               VALUES ($1, 'human', $2, $3) RETURNING *""",
+            channel_id, user.id, body.body,
+        )
+        blocks = await insert_mention_blocks(conn, row["id"], channel_id, body.mentions)
+    return _message_out({**dict(row), "sender_name": user.name, "thread_reply_count": 0}, blocks)

@@ -7,11 +7,12 @@ from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_auth, require_thread_access
 from database import get_pool
+from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 
-def _message_out(row) -> dict:
+def _message_out(row, blocks: list[dict] | None = None) -> dict:
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]) if row["channel_id"] is not None else None,
@@ -23,6 +24,7 @@ def _message_out(row) -> dict:
         "sender_name": row["bot_display_name"] if row["sender_type"] == "bot" else row["sender_name"],
         "body": row["body"],
         "generation_status": row["generation_status"],
+        "blocks": blocks or [],
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -73,25 +75,33 @@ async def list_thread(message_id: int, user: CurrentUser = Depends(require_threa
            ORDER BY m.created_at ASC""",
         message_id,
     )
-    return {"items": [_message_out(r) for r in rows]}
+    blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
+    return {"items": [_message_out(r, blocks_by_message.get(r["id"])) for r in rows]}
 
 
 class PostReplyRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
+    mentions: list[MentionInput] = []
 
 
 @router.post("/{message_id}/thread", status_code=201)
 async def post_reply(
     message_id: int, body: PostReplyRequest, user: CurrentUser = Depends(require_thread_access),
 ):
-    """A-14: スレッドへの返信投稿。channel_id/dm_idは元発言から引き継ぐ"""
+    """A-14: スレッドへの返信投稿。channel_id/dm_idは元発言から引き継ぐ。@メンション（F-41）は
+    元発言がチャンネルの場合のみT-07へ保存する（DMは候補元のA-46が無いため対象外）"""
     pool = get_pool()
     parent = await pool.fetchrow("SELECT channel_id, dm_id FROM messages WHERE id = $1", message_id)
     if parent is None:
         raise HTTPException(404, detail="見つかりません")
-    row = await pool.fetchrow(
-        """INSERT INTO messages (channel_id, dm_id, thread_parent_id, sender_type, sender_user_id, body)
-           VALUES ($1, $2, $3, 'human', $4, $5) RETURNING *""",
-        parent["channel_id"], parent["dm_id"], message_id, user.id, body.body,
-    )
-    return _message_out({**dict(row), "sender_name": user.name})
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            """INSERT INTO messages (channel_id, dm_id, thread_parent_id, sender_type, sender_user_id, body)
+               VALUES ($1, $2, $3, 'human', $4, $5) RETURNING *""",
+            parent["channel_id"], parent["dm_id"], message_id, user.id, body.body,
+        )
+        blocks = (
+            await insert_mention_blocks(conn, row["id"], parent["channel_id"], body.mentions)
+            if parent["channel_id"] is not None else []
+        )
+    return _message_out({**dict(row), "sender_name": user.name}, blocks)

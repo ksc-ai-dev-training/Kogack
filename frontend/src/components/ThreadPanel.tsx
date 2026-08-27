@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { useThread } from '../hooks/useThread'
 import { apiFetch } from '../lib/api'
-import MessageList, { Avatar, formatTime } from './MessageList'
+import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageList'
 import Composer from './Composer'
-import type { Message } from '../types'
+import type { ChannelMember, MentionPayload, Message } from '../types'
 
 // S-04 スレッド表示（画面モックアップ S-04）。S-03/DmViewの右側に重ねて表示するパネル。
 // 元発言はChannelView/DmView側で既に読み込み済みのmessages一覧から渡してもらう
@@ -12,6 +12,7 @@ export default function ThreadPanel({
   messageId,
   parentMessage,
   headerSub,
+  members,
   onClose,
   onReplyPosted,
   onReplyDeleted,
@@ -19,6 +20,8 @@ export default function ThreadPanel({
   messageId: string
   parentMessage: Message | null
   headerSub: string
+  /** F-41 @メンション用（チャンネルのスレッドのみ渡す。DMのスレッドでは渡さない） */
+  members?: ChannelMember[]
   onClose: () => void
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
@@ -30,10 +33,10 @@ export default function ThreadPanel({
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
   }, [replies.length])
 
-  const send = async (body: string) => {
+  const send = async (body: string, mentions: MentionPayload[]) => {
     await apiFetch(`/api/messages/${messageId}/thread`, {
       method: 'POST',
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body, mentions }),
     })
     await mutateReplies()
     onReplyPosted?.()
@@ -65,7 +68,9 @@ export default function ThreadPanel({
                 <span className="text-sm font-bold text-ink">{parentMessage.sender_name ?? '(不明)'}</span>
                 <span className="text-[11px] text-ink-subtle">{formatTime(parentMessage.created_at)}</span>
               </div>
-              <div className="whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">{parentMessage.body}</div>
+              <div className="whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
+                {renderMessageBody(parentMessage.body, parentMessage.blocks, members)}
+              </div>
             </div>
           </div>
         )}
@@ -79,6 +84,7 @@ export default function ThreadPanel({
         <MessageList
           messages={replies}
           showDaySeparators={false}
+          members={members}
           onDeleted={() => {
             mutateReplies()
             onReplyDeleted?.()
@@ -91,7 +97,11 @@ export default function ThreadPanel({
       </div>
 
       <div className="flex-none border-t border-line px-4 py-2.5">
-        <Composer placeholder="スレッドに返信" onSend={send} />
+        <Composer
+          placeholder="スレッドに返信"
+          onSend={send}
+          mentionCandidates={members?.filter((m) => m.is_active)}
+        />
       </div>
     </aside>
   )

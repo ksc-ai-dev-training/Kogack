@@ -164,6 +164,6 @@ async def logout(response: Response, user: CurrentUser = Depends(require_auth)):
 async def me(user: CurrentUser = Depends(require_auth)):
     # A-04: ログイン中ユーザー情報
     return {
-        "id": user.id, "email": user.email, "name": user.name,
+        "id": str(user.id), "email": user.email, "name": user.name,
         "role": user.role, "picture_url": user.picture_url,
     }
