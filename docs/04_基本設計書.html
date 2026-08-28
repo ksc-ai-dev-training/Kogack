@@ -17,7 +17,7 @@
     <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
     <div class="meta">
       <span>作成日: 2026-08-19</span>
-      <span>版数: 1.17</span>
+      <span>版数: 1.18</span>
       <span>作成: コガソフトウェア株式会社</span>
     </div>
     <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
@@ -46,6 +46,7 @@
       <tr class="diff-new"><td>1.15</td><td>2026-08-26</td><td>要件定義書v1.18（新規F-43「チャンネル参加の通知」）を反映（変更箇所は本文中に赤字で表示）。誰かがチャンネルに参加すると「（氏名）さんが参加しました。」というsender_type='bot'の発言をA-08の処理内でT-05へ作成する。新規テーブル・列は追加せず、F-36/F-38で確立したsender_type='bot'の枠組みをそのまま流用（bot_display_nameは固定で「システム通知」）。チャンネル作成（A-07）時の自動参加は対象外。5.2節・6.2節「設計判断」を更新した。詳細な検討経緯は<a href="../検討資料/README.md">検討資料</a>「チャンネル入室通知の追加」を参照。</td></tr>
       <tr class="diff-new"><td>1.16</td><td>2026-08-27</td><td>サイドバーの未読バッジ（4.2節に記載済みだったがDB/API設計が未反映だった抜け）を実現するため、新規T-22 read_states（利用者ごとの最終既読時刻のみを保持）と、既読化API（チャンネル・DMそれぞれに新設）、A-05/A-16レスポンスへのunread_count追加を6.2節「設計判断」に記録した。未読件数はスレッド返信を含まない本体タイムラインの発言数として都度計算し、既読はその画面を開いていることをもって記録する（専用の既読ボタンは設けない）。</td></tr>
       <tr class="diff-new"><td>1.17</td><td>2026-08-27</td><td>F-02にチャンネル名・説明文の編集を追加し、新規API A-71を5.2節・API一覧に追記した。あわせてA-09（チャンネル削除）を初めて実装し、参加者・発言・メッセージブロック・送信予約・AI設定等がON DELETE CASCADEで連動削除されることを明記した。要件定義書v1.19・画面モックアップ（S-06、v3.4）を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.18</td><td>2026-08-28</td><td>F-02にチャンネル情報の確認とチャンネルからの退出を追加し、新規API A-72を5.2節・API一覧に追記した。自分が最後のチャンネル管理者の場合は退出を拒否する（A-48と同じ考え方）。補足03「メンバー一覧」を「チャンネル情報」「メンバー」の2タブ構成にした。要件定義書v1.20・画面モックアップ（補足03）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -512,10 +513,10 @@
   </table>
 
   <h3>5.2 F-02〜F-04 チャンネル・スレッド・メンション</h3>
-  <p><strong>処理概要:</strong> 目的ごとのチャンネルの作成・参加（F-02。<span class="diff-new">公開・非公開の別はF-34参照</span>）、特定の発言への返信をスレッドとしてまとめる機能（F-03）、人間・チャンネルAIへの呼びかけ（F-04）。チャンネル作成者は自動的にそのチャンネルの chadmin になる（T-03.is_channel_admin）。<span class="diff-new">人間へのメンションは、投稿欄のオートコンプリートで候補（当該チャンネル参加者）から選んで確定し、内部的には対象user_idの参照として本文とは別にT-07 message_blocks（block_type='mention'）に保持する。表示は選択時点の表示名をメッセージ本文中の<code>@表示名</code>としてそのまま残す（検索・可読性のため）が、宛先の解決・通知はmessage_blocksのuser_id参照を正とする（F-41、5.22節「設計判断」）。</span>AIへのメンションは、従来どおりメッセージ本文中の<code>@チャンネルAI名</code>を解析して検知し、8章のAIエージェント処理をトリガーする（チャンネルAIはT-01 usersを持たない単一の存在のため、氏名重複によるあて先の曖昧さが生じずID参照化の対象外とした）。<span class="diff-new">誰かがチャンネルに参加する（A-08）と、「（氏名）さんが参加しました。」というsender_type='bot'の発言を同一トランザクション内でT-05へ作成する（F-43。bot_display_nameは固定で「システム通知」）。チャンネル作成（A-07）時に作成者が自動参加する場合は対象外とする（6.2節「設計判断」）。</span><span class="diff-new">チャンネル名・説明文は作成後もチャンネル管理者・システム管理者がS-06「チャンネル管理者」タブから編集でき（A-71）、不要になったチャンネルは削除できる（A-09。参加者・発言・AI設定等はON DELETE CASCADEで連動削除される）。</span></p>
+  <p><strong>処理概要:</strong> 目的ごとのチャンネルの作成・参加（F-02。<span class="diff-new">公開・非公開の別はF-34参照</span>）、特定の発言への返信をスレッドとしてまとめる機能（F-03）、人間・チャンネルAIへの呼びかけ（F-04）。チャンネル作成者は自動的にそのチャンネルの chadmin になる（T-03.is_channel_admin）。<span class="diff-new">人間へのメンションは、投稿欄のオートコンプリートで候補（当該チャンネル参加者）から選んで確定し、内部的には対象user_idの参照として本文とは別にT-07 message_blocks（block_type='mention'）に保持する。表示は選択時点の表示名をメッセージ本文中の<code>@表示名</code>としてそのまま残す（検索・可読性のため）が、宛先の解決・通知はmessage_blocksのuser_id参照を正とする（F-41、5.22節「設計判断」）。</span>AIへのメンションは、従来どおりメッセージ本文中の<code>@チャンネルAI名</code>を解析して検知し、8章のAIエージェント処理をトリガーする（チャンネルAIはT-01 usersを持たない単一の存在のため、氏名重複によるあて先の曖昧さが生じずID参照化の対象外とした）。<span class="diff-new">誰かがチャンネルに参加する（A-08）と、「（氏名）さんが参加しました。」というsender_type='bot'の発言を同一トランザクション内でT-05へ作成する（F-43。bot_display_nameは固定で「システム通知」）。チャンネル作成（A-07）時に作成者が自動参加する場合は対象外とする（6.2節「設計判断」）。</span><span class="diff-new">チャンネル名・説明文は作成後もチャンネル管理者・システム管理者がS-06「チャンネル管理者」タブから編集でき（A-71）、不要になったチャンネルは削除できる（A-09。参加者・発言・AI設定等はON DELETE CASCADEで連動削除される）。</span><span class="diff-new">参加者は補足03「メンバー一覧」の「チャンネル情報」タブから説明・公開範囲・作成者・作成日時を確認でき、自分がそのチャンネルから退出できる（A-72）。作成者の表示にはA-67を使い、退出済みでも作成者の氏名は表示できる（A-67は当該チャンネルの参加者に限定しない、基本設計書5.21節）。</span></p>
   <table>
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
-    <tbody><tr><td>S-02, S-03, S-04</td><td>A-05, A-07〜A-14<span class="diff-new">, A-46, A-69, A-71</span></td><td>T-01〜T-03, T-05<span class="diff-new">, T-07, T-22</span></td></tr></tbody>
+    <tbody><tr><td>S-02, S-03, S-04</td><td>A-05, A-07〜A-14<span class="diff-new">, A-46, A-69, A-71, A-72</span></td><td>T-01〜T-03, T-05<span class="diff-new">, T-07, T-22</span></td></tr></tbody>
   </table>
 
   <h3>5.3 F-05 ダイレクトメッセージ</h3>
@@ -938,6 +939,7 @@
       <tr><td>A-06</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}</code></td><td>チャンネル参加者</td><td>チャンネル詳細（名前・トピック・参加人数・AI有効状態）</td></tr>
       <tr><td>A-07</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels</code></td><td>認証済</td><td>チャンネル作成。<span class="diff-new">is_public（公開/非公開。既定true）を指定。</span>作成者を自動的にchadminとして登録（補足01の「作成する」タブ）</td></tr>
       <tr><td>A-08</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/members</code></td><td><span class="diff-new">公開チャンネル: 認証済（本人を追加）／非公開チャンネル: 当該チャンネルの参加者（対象user_idを指定してメンバーを追加。F-34）</span></td><td>公開チャンネルへの参加（承認不要・即時参加）<span class="diff-new">。非公開チャンネルは、参加者が他の利用者をuser_id指定で追加する（本人による自己参加は不可）</span></td></tr>
+      <tr class="diff-new"><td>A-72</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/members/me</code></td><td>チャンネル参加者</td><td>チャンネルからの退出。自分が最後のチャンネル管理者の場合は400で拒否する（A-48と同じ管理者不在防止の考え方。最後の1人は必ずchadminであるため、参加者ゼロになる事態も同時に防げる）</td></tr>
       <tr class="diff-new"><td>A-71</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}</code></td><td>当該chadmin or admin</td><td>チャンネル名・説明文（トピック）の編集。name/topicいずれも省略可（指定したフィールドのみ更新）。nameはA-07作成時と同じく全チャンネルで一意</td></tr>
       <tr><td>A-09</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}</code></td><td>当該chadmin or admin</td><td>チャンネル削除<span class="diff-new">。参加者・発言・メッセージブロック・送信予約・AI設定等はいずれもDB上のON DELETE CASCADEで連動削除される（取り消せない操作のため、画面側は削除対象のチャンネル名の再入力を確認手段とする）</span></td></tr>
       <tr><td>A-10</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/messages</code></td><td>チャンネル参加者</td><td>メッセージ履歴取得。<code>since</code> パラメータでポーリング差分取得</td></tr>

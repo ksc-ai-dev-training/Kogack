@@ -39,6 +39,7 @@
       <tr><td>1.8</td><td>2026-08-27</td><td>F-35 送信予約を実装し、A-50〜A-52のリクエスト/レスポンス例をchannel_id/dm_id/thread_parent_idを含む完全な形に更新した（従来の例はchannel_idのみの簡略形だった）。参加者チェックはA-11/A-19と同じ基準（非公開チャンネルの非参加者404、公開チャンネルの非参加者403）であることを明記。@メンションの構造化（T-07 message_blocks）・ファイル添付との併用はこのスライスでは対象外（本文への「@氏名」入力自体は可能だがプレーンテキストのまま発言化される）であることを明記した。</td></tr>
       <tr><td>1.9</td><td>2026-08-27</td><td>AIサポート基盤の初回スライス（チャンネルAIのメンション時応答）を実装し、A-23・A-24・A-26のリクエスト/レスポンス例を新規追加した（従来はA-25のみ記載でテーブル一覧のみだった抜けをbackfill）。A-23はT-08 channel_ai_settingsのget-or-create（既存チャンネル向けの既定値補完）であることを明記。A-27（参照ドキュメント範囲）・A-28〜A-31（スキル・自動対応範囲）はドキュメントQ&A・自動対応分類が未実装のため対象外のまま。</td></tr>
       <tr><td>1.10</td><td>2026-08-27</td><td>新規API A-71（チャンネル名・説明文の編集）を追加し、リクエスト/レスポンス例を記載した。あわせてA-09（チャンネル削除）を初めて実装し、参加者・発言・メッセージブロック・送信予約・AI設定・AI利用ログ・既読状態がいずれもON DELETE CASCADEで連動削除されることを明記した（従来はテーブル一覧のみで詳細未記載だった抜けをbackfill）。要件定義書v1.19・基本設計書v1.17・画面モックアップ（S-06、v3.4）を一貫して更新した。</td></tr>
+      <tr><td>1.11</td><td>2026-08-28</td><td>新規API A-72（チャンネルからの退出）を追加し、リクエスト/レスポンス例を記載した。自分が最後のチャンネル管理者の場合は400で拒否する（A-48と同じ管理者不在防止の考え方）ことを明記した。要件定義書v1.20・基本設計書v1.18・画面モックアップ（補足03）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -87,7 +88,7 @@
     </tbody>
   </table>
 
-  <h3>4.3 チャンネル・メッセージ（A-05〜A-15, A-46〜A-49, A-69, A-71）</h3>
+  <h3>4.3 チャンネル・メッセージ（A-05〜A-15, A-46〜A-49, A-69, A-71〜A-72）</h3>
   <p><strong>A-05 <span class="badge badge-get">GET</span> /api/channels（参加中＋参加可能一覧）</strong></p>
   <pre><code>// response 200
 { "joined": [ { "id": "42", "name": "開発相談", "topic": "...", "is_public": true,
@@ -127,6 +128,11 @@ POST /api/channels/42/members
 // response 201
 { "channel_id": "42", "user_id": "15", "is_channel_admin": false, "joined_at": "..." }</code></pre>
   <p class="muted">非公開チャンネルで本文の <code>user_id</code> を省略（自己参加）した場合は403。公開チャンネルで他者の <code>user_id</code> を指定した場合も403（本人のみ自己参加可）。非公開チャンネルの非参加者が呼び出した場合は存在を伏せるため404。<span class="diff-new">参加者の追加に成功すると、同一トランザクション内でT-05へ<code>sender_type='bot'</code>・<code>bot_display_name='システム通知'</code>の発言「（氏名）さんが参加しました。」を1件作成する（F-43。基本設計書6.2節「設計判断」）。招待の場合は<strong>追加された本人</strong>の氏名を使う（招待した人ではない）。</span></p>
+
+  <p><strong>A-72 <span class="badge badge-delete">DELETE</span> /api/channels/{id}/members/me（退出）</strong></p>
+  <pre><code>DELETE /api/channels/42/members/me
+// response 204</code></pre>
+  <p class="muted">呼び出し元がチャンネル参加者であることが前提（<code>require_channel_member</code>）。自分が当該チャンネルの最後のチャンネル管理者である場合は400（<code>「最後のチャンネル管理者は退出できません。先に他の参加者をチャンネル管理者にしてください」</code>）。A-48（chadmin解除）と同じ管理者不在防止の考え方だが、chadmin権限だけでなく参加自体を取り消す点が異なる。最後の1人は必ずchadminであるため、この判定だけでチャンネルが参加者ゼロになる事態も同時に防げる。</p>
 
   <p><strong>A-46 <span class="badge badge-get">GET</span> /api/channels/{id}/members（参加者一覧。補足03）</strong></p>
   <pre><code>// response 200

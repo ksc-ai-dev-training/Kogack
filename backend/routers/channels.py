@@ -217,6 +217,29 @@ async def join_channel(
     }
 
 
+@router.delete("/{channel_id}/members/me", status_code=204)
+async def leave_channel(channel_id: int, user: CurrentUser = Depends(require_channel_member)):
+    """A-72: チャンネルからの退出。管理者不在を防ぐため、自分が最後のチャンネル管理者の場合は拒否する
+    （A-48「最後の管理者は解除できません」と同じ考え方。最後の1人は必ずchadminであるため、
+    このチェックだけでチャンネルが参加者ゼロになる事態も同時に防げる）"""
+    pool = get_pool()
+    is_admin = await pool.fetchval(
+        "SELECT is_channel_admin FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+        channel_id, user.id,
+    )
+    if is_admin:
+        admin_count = await pool.fetchval(
+            "SELECT count(*) FROM channel_members WHERE channel_id = $1 AND is_channel_admin", channel_id
+        )
+        if admin_count <= 1:
+            raise HTTPException(
+                400, detail="最後のチャンネル管理者は退出できません。先に他の参加者をチャンネル管理者にしてください"
+            )
+    await pool.execute(
+        "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, user.id
+    )
+
+
 @router.get("/{channel_id}/members")
 async def list_channel_members(channel_id: int, user: CurrentUser = Depends(require_channel_member)):
     """A-46: 参加者一覧（chadmin/adminバッジ表示・補足03メンバー一覧、S-06チャンネル管理者タブでの

@@ -1,19 +1,38 @@
 import { useEffect, useState } from 'react'
-import { useChannel } from '../hooks/useChannels'
+import { useNavigate } from 'react-router'
+import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
+import { useUserProfile } from '../hooks/useUserProfile'
 import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from './Toast'
+import { useConfirm } from './ui/ConfirmDialog'
 import type { UserSearchResult } from '../types'
 
-// 補足03 メンバー一覧（S-03ヘッダーの参加人数から開くモーダル）。chadmin/adminバッジを表示し、
-// 非公開チャンネルのみ「＋メンバーを追加」（A-08招待。参加者なら誰でも追加できる、F-34）を表示する。
-// 管理者（chadmin）の変更はここでは行わず、S-06チャンネル設定に一本化する。
-export default function MembersModal({ channelId, onClose }: { channelId: string; onClose: () => void }) {
+// 補足03 メンバー一覧＋チャンネル情報（S-03ヘッダーの参加人数／チャンネル名から開くモーダル）。
+// 「メンバー」タブはchadmin/adminバッジを表示し、非公開チャンネルのみ「＋メンバーを追加」
+// （A-08招待。参加者なら誰でも追加できる、F-34）を表示する。管理者（chadmin）の変更はここでは
+// 行わず、S-06チャンネル設定に一本化する。「チャンネル情報」タブは説明・作成者・作成日時と、
+// このチャンネルから退出する操作（A-72、新規）を提供する。
+export default function MembersModal({
+  channelId,
+  initialTab = 'members',
+  onClose,
+}: {
+  channelId: string
+  initialTab?: 'info' | 'members'
+  onClose: () => void
+}) {
+  const navigate = useNavigate()
   const { channel } = useChannel(channelId)
   const { members, mutate: mutateMembers } = useChannelMembers(channelId)
+  const { mutate: mutateChannelsList } = useChannels()
+  const { profile: creator } = useUserProfile(channel?.created_by)
   const toast = useToast()
+  const confirm = useConfirm()
 
+  const [tab, setTab] = useState<'info' | 'members'>(initialTab)
+  const [leaving, setLeaving] = useState(false)
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
   const [addQuery, setAddQuery] = useState('')
@@ -59,6 +78,30 @@ export default function MembersModal({ channelId, onClose }: { channelId: string
     }
   }
 
+  const leaveChannel = async () => {
+    if (!channel) return
+    const ok = await confirm({
+      title: 'チャンネルを退出',
+      message: channel.is_public
+        ? `# ${channel.name} から退出しますか？`
+        : `# ${channel.name} から退出しますか？\n非公開チャンネルのため、再度参加するには他の参加者による招待が必要です。`,
+      confirmLabel: '退出する',
+      danger: true,
+    })
+    if (!ok) return
+    setLeaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/members/me`, { method: 'DELETE' })
+      await mutateChannelsList()
+      toast('チャンネルを退出しました')
+      onClose()
+      navigate('/', { replace: true })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '退出に失敗しました', 'error')
+      setLeaving(false)
+    }
+  }
+
   const subLabel = channel
     ? `${channel.is_public ? '#' : '🔒'} ${channel.name}${channel.is_public ? '' : '（非公開）'}・ ${members.length}名`
     : ''
@@ -74,7 +117,7 @@ export default function MembersModal({ channelId, onClose }: { channelId: string
       >
         <div className="flex items-center gap-2.5 px-[22px] pb-1 pt-4.5">
           <div className="flex-1">
-            <h2 className="text-[15.5px] font-bold text-ink">メンバー一覧</h2>
+            <h2 className="text-[15.5px] font-bold text-ink">{channel?.name ?? '読み込み中...'}</h2>
             <div className="mt-0.5 text-[11.5px] text-ink-subtle">{subLabel}</div>
           </div>
           <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted">
@@ -82,7 +125,63 @@ export default function MembersModal({ channelId, onClose }: { channelId: string
           </button>
         </div>
 
-        {adding ? (
+        <div className="mx-[22px] mt-3 flex gap-0 border-b border-line">
+          <button
+            type="button"
+            onClick={() => setTab('info')}
+            className={`mr-5.5 border-b-2 pb-2 text-[13px] font-semibold ${
+              tab === 'info' ? 'border-accent-600 text-accent-700' : 'border-transparent text-ink-subtle'
+            }`}
+          >
+            チャンネル情報
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('members')}
+            className={`border-b-2 pb-2 text-[13px] font-semibold ${
+              tab === 'members' ? 'border-accent-600 text-accent-700' : 'border-transparent text-ink-subtle'
+            }`}
+          >
+            メンバー
+          </button>
+        </div>
+
+        {tab === 'info' && channel && (
+          <div className="overflow-y-auto px-[22px] py-4">
+            <div className="mb-4">
+              <div className="mb-1 text-[11px] font-bold text-ink-muted">説明</div>
+              <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">
+                {channel.topic || 'このチャンネルには説明が設定されていません。'}
+              </div>
+            </div>
+            <div className="mb-4">
+              <div className="mb-1 text-[11px] font-bold text-ink-muted">公開範囲</div>
+              <div className="text-[13px] text-ink">{channel.is_public ? '公開チャンネル' : '非公開チャンネル'}</div>
+            </div>
+            <div className="mb-4">
+              <div className="mb-1 text-[11px] font-bold text-ink-muted">作成者</div>
+              <div className="text-[13px] text-ink">{creator?.name ?? '読み込み中...'}</div>
+            </div>
+            <div className="mb-5">
+              <div className="mb-1 text-[11px] font-bold text-ink-muted">作成日時</div>
+              <div className="text-[13px] text-ink">
+                {new Date(channel.created_at).toLocaleString('ja-JP', {
+                  year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                })}
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={leaving}
+              onClick={leaveChannel}
+              className="w-full rounded-lg border border-danger-border bg-danger-bg px-4 py-2 text-[13px] font-bold text-danger-text disabled:opacity-40"
+            >
+              このチャンネルを退出する
+            </button>
+          </div>
+        )}
+
+        {tab === 'members' && (adding ? (
           <>
             <div className="mx-[22px] mb-2 mt-3 flex items-center gap-2 rounded-lg border border-line-strong px-3 py-2">
               <input
@@ -232,7 +331,7 @@ export default function MembersModal({ channelId, onClose }: { channelId: string
               )}
             </div>
           </>
-        )}
+        ))}
       </div>
     </div>
   )

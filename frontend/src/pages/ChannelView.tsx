@@ -24,7 +24,7 @@ export default function ChannelView() {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined)
   const listRef = useRef<HTMLDivElement>(null)
-  const [membersOpen, setMembersOpen] = useState(false)
+  const [membersModalTab, setMembersModalTab] = useState<'info' | 'members' | null>(null)
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
@@ -64,21 +64,26 @@ export default function ChannelView() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-5">
           <span className="text-base text-ink-subtle">{channel?.is_public === false ? '🔒' : '#'}</span>
-          <span className="text-[15px] font-bold text-ink">{channel?.name ?? '読み込み中...'}</span>
+          <span
+            onClick={channel ? () => setMembersModalTab('info') : undefined}
+            className={`text-[15px] font-bold text-ink ${channel ? 'cursor-pointer hover:underline' : ''}`}
+          >
+            {channel?.name ?? '読み込み中...'}
+          </span>
+          {channel?.topic && <span className="ml-1 truncate text-xs text-ink-subtle">{channel.topic}</span>}
           {channel && (
             <button
               type="button"
-              onClick={() => setMembersOpen(true)}
-              className="text-xs text-ink-subtle hover:text-accent-700 hover:underline"
+              onClick={() => setMembersModalTab('members')}
+              className="ml-auto flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
             >
-              {channel.member_count}名
+              👥 所属メンバー：{channel.member_count}人
             </button>
           )}
-          {channel?.topic && <span className="ml-1 truncate text-xs text-ink-subtle">{channel.topic}</span>}
           {(channel?.is_channel_admin || me?.role === 'admin') && (
             <Link
               to={`/channels/${channelId}/settings`}
-              className="ml-auto flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
+              className="flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
             >
               ⚙ チャンネル設定
             </Link>
@@ -125,8 +130,12 @@ export default function ChannelView() {
         />
       )}
 
-      {membersOpen && channelId && (
-        <MembersModal channelId={channelId} onClose={() => setMembersOpen(false)} />
+      {membersModalTab && channelId && (
+        <MembersModal
+          channelId={channelId}
+          initialTab={membersModalTab}
+          onClose={() => setMembersModalTab(null)}
+        />
       )}
     </div>
   )

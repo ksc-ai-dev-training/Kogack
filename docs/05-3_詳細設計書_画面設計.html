@@ -30,6 +30,7 @@
     <tbody>
       <tr><td>1.0</td><td>2026-08-24</td><td>総論v1.4からの分冊化により新設。内容は総論v1.3時点の8章（画面項目定義）・11章（フロントエンドコンポーネント設計）と同一。以降、本分冊のみで完結する変更はここに追記し、分冊をまたぐ変更は総論の改訂履歴に記載する。</td></tr>
       <tr><td>1.1</td><td>2026-08-27</td><td>S-06「チャンネル管理者」タブの項目にチャンネル名・説明文の編集（A-71、新規）とチャンネル削除（A-09）を追加した。</td></tr>
+      <tr><td>1.2</td><td>2026-08-28</td><td>補足03「メンバー一覧」を「チャンネル情報」「メンバー」の2タブ構成にした。「チャンネル情報」タブは説明・公開範囲・作成者・作成日時（A-06, A-67）と退出操作（A-72、新規）を提供する。MembersModalに<code>initialTab</code>プロパティを追加し、S-03ヘッダーのチャンネル名クリックと参加人数クリックで異なるタブを初期表示するようにした。</td></tr>
     </tbody>
   </table>
 
@@ -70,7 +71,8 @@
     <thead><tr><th>項目</th><th>種別</th><th>必須</th><th>対応API</th></tr></thead>
     <tbody>
       <tr><td>チャンネル名・トピック・参加人数</td><td>ヘッダー表示</td><td>-</td><td>A-06</td></tr>
-      <tr><td>参加人数（クリック）</td><td>リンク</td><td>-</td><td>補足03メンバー一覧を開く（A-46）</td></tr>
+      <tr><td>チャンネル名（クリック）</td><td>リンク</td><td>-</td><td>補足03を「チャンネル情報」タブで開く（A-06, A-67）</td></tr>
+      <tr><td>参加人数（クリック）</td><td>リンク</td><td>-</td><td>補足03を「メンバー」タブで開く（A-46）</td></tr>
       <tr><td>チャンネル設定</td><td>ボタン</td><td>-</td><td>S-06を開く（chadmin/adminのみ表示）</td></tr>
       <tr><td>要約</td><td>ボタン</td><td>-</td><td>A-15</td></tr>
       <tr><td>発言者アイコン・表示名（クリック）</td><td>リンク</td><td>-</td><td>プロフィールカードをポップオーバー表示（A-67、F-40）</td></tr>
@@ -143,7 +145,7 @@
       <tr><td>補足01 チャンネルに参加</td><td>「参加する」タブ: 公開チャンネル一覧＋参加ボタン</td><td>一覧</td><td>A-05, A-08</td></tr>
       <tr><td>補足01 チャンネルに参加</td><td>「作成する」タブ: チャンネル名<span class="required-mark">*</span>、説明（任意）、公開範囲</td><td>フォーム</td><td>A-07</td></tr>
       <tr><td>補足02 DM相手を選ぶ</td><td>相手選択（複数選択可）、DMを開始</td><td>ユーザーピッカー</td><td>A-68（候補取得）→A-17</td></tr>
-      <tr><td>補足03 メンバー一覧</td><td>メンバー一覧（chadminバッジ）、＋メンバーを追加（非公開チャンネルのみ表示）</td><td>一覧＋ボタン</td><td>A-46, A-08</td></tr>
+      <tr><td>補足03 メンバー一覧</td><td>「チャンネル情報」タブ（説明・公開範囲・作成者・作成日時、退出ボタン）、「メンバー」タブ（メンバー一覧＋chadminバッジ、＋メンバーを追加。非公開チャンネルのみ表示）</td><td>タブ＋一覧＋ボタン</td><td>A-06, A-67, A-72, A-46, A-08</td></tr>
       <tr><td>補足04 予約中メッセージ</td><td>予約一覧、予約をキャンセル</td><td>一覧＋ボタン</td><td>A-51, A-52</td></tr>
       <tr><td>補足06 プロフィールを編集</td><td>画像をアップロード、表示名を編集、キャンセル/保存</td><td>画像＋テキスト入力＋ボタン</td><td>A-61→A-62</td></tr>
     </tbody>
@@ -236,7 +238,7 @@
       <tr><td>AuditLogTab<br>Tab / S-08</td><td>なし</td><td>filters<br>→ <code>useAuditLogs</code>（A-44）</td><td>ログイン・チャンネルAI設定変更の監査ログ一覧</td></tr>
       <tr><td>JoinChannelModal<br>Shared / 補足01</td><td>onClose</td><td>tab（参加する/作成する）, form<br>→ <code>useChannels</code>（A-05）, A-07, A-08</td><td>公開チャンネル一覧＋参加、またはチャンネル作成フォーム</td></tr>
       <tr><td>DmPickerModal<br>Shared / 補足02</td><td>onClose</td><td>query, selected: string[]<br>→ <code>useUserSearch</code>（A-68）, A-17</td><td>ui/UserPickerで複数選択し、1人なら一対一・2人以上ならグループDMを開始</td></tr>
-      <tr><td>MembersModal<br>Shared / 補足03</td><td>channelId, onClose</td><td>なし<br>→ <code>useChannelMembers</code>（A-46）, A-08</td><td>参加者一覧とchadminバッジ。非公開チャンネルは参加者なら誰でも「メンバーを追加」できる（F-34）</td></tr>
+      <tr><td>MembersModal<br>Shared / 補足03</td><td>channelId, initialTab?: 'info' | 'members', onClose</td><td>tab<br>→ <code>useChannel</code>（A-06）, <code>useUserProfile</code>（A-67）, A-72, <code>useChannelMembers</code>（A-46）, A-08</td><td>「チャンネル情報」（説明・公開範囲・作成者・作成日時、退出ボタン）と「メンバー」（参加者一覧とchadminバッジ。非公開チャンネルは参加者なら誰でも「メンバーを追加」できる、F-34）の2タブ。初期タブはS-03ヘッダーのチャンネル名/参加人数どちらをクリックしたかで決まる</td></tr>
       <tr><td>ScheduledMessagesModal<br>Shared / 補足04</td><td>onClose</td><td>なし<br>→ <code>useScheduledMessages</code>（A-51）, A-52</td><td>自分が予約したメッセージの一覧とキャンセル。Layoutのバッジ件数と同じフックを共有</td></tr>
       <tr><td>ProfileEditModal<br>Shared / 補足06</td><td>me: Me, onClose</td><td>name, selectedFile, previewUrl, saving<br>→ A-61→A-62, <code>useMe().mutate</code></td><td>表示名の編集（F-39）とアイコン画像のアップロード（F-37）。プレビューのObject URLは<code>useEffect</code>のクリーンアップで解放する</td></tr>
       <tr><td>PendingActionModal<br>Shared / S-07</td><td>pendingActionId, onClose</td><td>なし<br>→ A-33, A-34/A-35</td><td>実行前確認の内容表示と「実行する」「キャンセル」（F-25）</td></tr>
