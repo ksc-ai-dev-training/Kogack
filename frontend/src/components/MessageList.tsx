@@ -95,9 +95,22 @@ export function Avatar({
   // アイコン画像を設定済みならそれを表示し、無ければ種別ごとのフォールバックにする
   // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）。
   // AI発言はペルソナアイコン（未設定なら後段の「AI」表示にフォールバック）、人間の発言は
-  // プロフィール画像が対象（services/ai_agent.py・A-62）。BOT発言（F-36/F-38）は送り主アイコン画像
-  // （bot_icon_url、この分岐の対象）を優先し、次点でbot_icon（絵文字、次の分岐）、
-  // どちらも未設定なら🔔（F-43システム通知と同じ既定表示）にフォールバックする
+  // プロフィール画像が対象（services/ai_agent.py・A-62）。
+  // BOT発言（F-36定期投稿・F-38トリガー・F-43システム通知）は、画像アップロード済みかどうかに
+  // 関わらず常に角丸四角（rounded-[9px]）で表示し、人間・AIの円形アイコンと形で区別できるようにする
+  // （BOTかどうかをアイコンの形だけでも判別できるようにする設計判断）。優先順位は送り主アイコン画像
+  // （bot_icon_url）→bot_icon（絵文字）→🔔（F-43システム通知と同じ既定表示）。
+  if (message.sender_type === 'bot') {
+    return (
+      <div className="h-[34px] w-[34px] flex-none overflow-hidden rounded-[9px] bg-bot-bg">
+        {message.sender_picture_url ? (
+          <img src={message.sender_picture_url} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-base">{message.bot_icon || '🔔'}</div>
+        )}
+      </div>
+    )
+  }
   if (message.sender_picture_url) {
     return (
       <img
@@ -107,13 +120,6 @@ export function Avatar({
         onClick={onClick}
         className={`h-[34px] w-[34px] flex-none rounded-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
       />
-    )
-  }
-  if (message.sender_type === 'bot') {
-    return (
-      <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-bot-bg text-base">
-        {message.bot_icon || '🔔'}
-      </div>
     )
   }
   if (message.sender_type === 'ai') {
