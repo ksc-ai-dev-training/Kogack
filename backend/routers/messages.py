@@ -38,11 +38,15 @@ async def delete_message(message_id: int, user: CurrentUser = Depends(require_au
     チャンネル・DMどちらの発言、スレッド返信・元発言のいずれも同じ経路で扱う。"""
     pool = get_pool()
     row = await pool.fetchrow(
-        "SELECT channel_id, dm_id, sender_user_id FROM messages WHERE id = $1 AND deleted_at IS NULL",
+        """SELECT channel_id, dm_id, sender_user_id, sender_type, bot_display_name
+           FROM messages WHERE id = $1 AND deleted_at IS NULL""",
         message_id,
     )
     if row is None:
         raise HTTPException(404, detail="見つかりません")
+    if row["sender_type"] == "bot" and row["bot_display_name"] == "システム通知":
+        # F-43のシステム通知（参加・退出の記録）は削除対象外とする（基本設計書6.2節「設計判断」）
+        raise HTTPException(400, detail="システム通知は削除できません")
 
     if user.role != "admin":
         if row["channel_id"] is not None:
@@ -94,9 +98,14 @@ async def post_reply(
     """A-14: スレッドへの返信投稿。channel_id/dm_idは元発言から引き継ぐ。@メンション（F-41）は
     元発言がチャンネルの場合のみT-07へ保存する（DMは候補元のA-46が無いため対象外）"""
     pool = get_pool()
-    parent = await pool.fetchrow("SELECT channel_id, dm_id FROM messages WHERE id = $1", message_id)
+    parent = await pool.fetchrow(
+        "SELECT channel_id, dm_id, sender_type, bot_display_name FROM messages WHERE id = $1", message_id
+    )
     if parent is None:
         raise HTTPException(404, detail="見つかりません")
+    if parent["sender_type"] == "bot" and parent["bot_display_name"] == "システム通知":
+        # F-43のシステム通知は返信対象外とする（基本設計書6.2節「設計判断」）
+        raise HTTPException(400, detail="システム通知には返信できません")
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             """INSERT INTO messages (channel_id, dm_id, thread_parent_id, sender_type, sender_user_id, body)

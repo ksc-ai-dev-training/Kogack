@@ -178,8 +178,11 @@ export default function MessageList({
   return (
     <>
       {messages.map((m, i) => {
-        const canDelete = !!me && (m.sender_user_id === me.id || me.role === 'admin')
-        const showReplyButton = onOpenThread && !(m.thread_reply_count ?? 0)
+        // システム通知（F-43）は参加・退出の記録として残すことに意味があるため、返信・削除の対象外とする
+        // （F-36定期投稿・F-38自動応答トリガーは内容のあるBOT発言のため対象外にしない。基本設計書6.2節「設計判断」）
+        const isSystemNotice = m.sender_type === 'bot' && m.sender_name === 'システム通知'
+        const canDelete = !isSystemNotice && !!me && (m.sender_user_id === me.id || me.role === 'admin')
+        const showReplyButton = !isSystemNotice && onOpenThread && !(m.thread_reply_count ?? 0)
         const isNewDay = showDaySeparators && (i === 0 || dayKey(messages[i - 1].created_at) !== dayKey(m.created_at))
 
         return (

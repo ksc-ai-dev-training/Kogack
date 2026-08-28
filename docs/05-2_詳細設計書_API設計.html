@@ -43,6 +43,7 @@
       <tr><td>1.12</td><td>2026-08-28</td><td>新規API A-73（メンバーをチャンネルから退出させる）を追加し、リクエスト/レスポンス例を記載した。当該chadmin/adminのみ実行できることと、対象が最後のチャンネル管理者の場合の拒否（A-48/A-72と同じ考え方）を明記した。<code>/{channel_id}/members/me</code>（A-72）より後にルーティング定義する必要がある実装上の注意点も記載。要件定義書v1.21・基本設計書v1.19・画面モックアップ（補足03）を一貫して更新した。</td></tr>
       <tr><td>1.13</td><td>2026-08-28</td><td>A-72・A-73のいずれも、退出成功時に参加通知（F-43）と対になる退出通知「（氏名）さんが退出しました。」をT-05へ作成するようにした。強制退出（A-73）でも本文には誰が退出させたかを含めないことを明記した。要件定義書v1.22・基本設計書v1.20を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.14</td><td>2026-08-28</td><td>A-08を拡張し、公開チャンネルでも既存の参加者が他の利用者をuser_id指定で招待できるようにした（従来は非公開チャンネルのみ対応。公開チャンネルの本人自己参加は従来どおり誰でも可能）。呼び出し元が当該チャンネルの参加者でない場合の403を明記した。要件定義書v1.23・基本設計書v1.21を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.15</td><td>2026-08-28</td><td>F-43のシステム通知（bot_display_name='システム通知'）をA-12（削除）・A-14（返信）の対象外とし、いずれも400を返すことを明記した。F-36/F-38のBOT発言は対象外にしない（sender_type='bot'一律ではなくbot_display_nameで判定）。基本設計書v1.23を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -174,7 +175,7 @@ POST /api/channels/42/members
   <p><strong>A-12 <span class="badge badge-delete">DELETE</span> /api/messages/{id}（メッセージ削除）</strong></p>
   <pre><code>DELETE /api/messages/10301
 // response 200: { "id": "10301", "deleted": true }</code></pre>
-  <p class="muted">論理削除（T-05.deleted_at/deleted_by）。投稿者本人またはadminのみ実行できる。チャンネル・DMどちらの発言、スレッド返信・元発言のいずれも同じエンドポイントで扱う。削除に成功すると以後A-10/A-18/A-13の一覧から除外される（元発言を削除した場合、そのスレッドのA-13/A-14は404になる）。参加していない会話の発言に対しては存在自体を伏せるため404、参加しているが投稿者本人でもadminでもない場合は403を返す（総論5.3節と同じ使い分け）。</p>
+  <p class="muted">論理削除（T-05.deleted_at/deleted_by）。投稿者本人またはadminのみ実行できる。チャンネル・DMどちらの発言、スレッド返信・元発言のいずれも同じエンドポイントで扱う。削除に成功すると以後A-10/A-18/A-13の一覧から除外される（元発言を削除した場合、そのスレッドのA-13/A-14は404になる）。参加していない会話の発言に対しては存在自体を伏せるため404、参加しているが投稿者本人でもadminでもない場合は403を返す（総論5.3節と同じ使い分け）。<span class="diff-new">F-43のシステム通知（<code>sender_type='bot'</code>かつ<code>bot_display_name='システム通知'</code>）はadminであっても削除できず、常に400（「システム通知は削除できません」）を返す（基本設計書6.2節「設計判断」）。</span></p>
 
   <p><strong>A-13 <span class="badge badge-get">GET</span> /api/messages/{id}/thread（スレッド内の返信一覧）</strong></p>
   <pre><code>// response 200
@@ -189,7 +190,7 @@ POST /api/channels/42/members
   <pre><code>{ "body": "@田中 智子 確認しました",
   "mentions": [ { "target_user_id": "7", "display_name_snapshot": "田中 智子" } ] }
 // response 201: A-11と同じ形（channel_id/dm_idは元発言から継承、blocksを含む）</code></pre>
-  <p class="muted"><code>mentions</code>はA-11と同じ扱い（対象がチャンネル参加者であることを検証してT-07へ保存）。元発言がDMの場合はメンション候補元（A-46）が存在しないためmentionsを送っても無視され、blocksは常に空になる。</p>
+  <p class="muted"><code>mentions</code>はA-11と同じ扱い（対象がチャンネル参加者であることを検証してT-07へ保存）。元発言がDMの場合はメンション候補元（A-46）が存在しないためmentionsを送っても無視され、blocksは常に空になる。<span class="diff-new">元発言がF-43のシステム通知の場合は400（「システム通知には返信できません」）を返し、返信自体を作成しない（基本設計書6.2節「設計判断」）。</span></p>
 
   <p><strong>A-49 <span class="badge badge-put">PUT</span> /api/channels/{id}/visibility（公開/非公開切替）</strong></p>
   <pre><code>{ "is_public": false }
