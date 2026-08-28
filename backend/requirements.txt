@@ -10,3 +10,5 @@ httpx>=0.28
 tzdata>=2025.1
 # A-61 アイコンアップロード（multipart/form-data）のパースに必要
 python-multipart>=0.0.20
+# チャンネルAIの応答生成（AIサポート10章）。Keirekiと同じ版指定
+openai>=2.9,<3

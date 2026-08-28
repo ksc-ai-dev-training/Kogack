@@ -38,6 +38,19 @@ export interface ChannelsResponse {
   joinable: Channel[]
 }
 
+/** T-08 channel_ai_settings（A-23〜A-26）。out_of_scope_policy/fallback_handoff_user_idは
+ * ドキュメントQ&A・自動対応分類が未実装のためこのスライスでは編集UIを設けない（値はサーバー側の
+ * 既定のまま）。reaction_modeも同様に常に'mention_only'（サーバー側の既定値をそのまま表示するのみ） */
+export interface AiSettings {
+  channel_id: string
+  is_ai_enabled: boolean
+  persona_name: string | null
+  persona_icon_url: string | null
+  persona_tone: string | null
+  behavior_prompt: string | null
+  reaction_mode: 'mention_only' | 'proactive'
+}
+
 export interface ChannelMember {
   id: string
   name: string
@@ -74,7 +87,8 @@ export interface Message {
   sender_type: 'human' | 'ai' | 'bot'
   sender_user_id: string | null
   sender_name: string | null
-  /** BOT/AI発言はsender_user_idが無いため常にnull（実写真を持たない） */
+  /** AI発言はペルソナアイコンのスナップショット（services/ai_agent.py）。
+   * BOT発言は常にnull（アイコン未実装、F-36/F-38） */
   sender_picture_url: string | null
   body: string
   generation_status: 'generating' | null

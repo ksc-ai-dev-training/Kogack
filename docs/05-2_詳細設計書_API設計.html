@@ -36,6 +36,8 @@
       <tr><td>1.5</td><td>2026-08-27</td><td>基本設計書v1.16（未読バッジ、新規T-22 read_states）を反映し、新規API A-05のjoined/A-16のunread_count追加、新規API A-69（チャンネル既読化）・A-70（DM既読化）を追加した（サイドバーの未読バッジは4.2節に記載済みだったがAPI設計側が未反映だった抜けをbackfill）。</td></tr>
       <tr><td>1.6</td><td>2026-08-27</td><td>A-08の非公開チャンネル招待（既存参加者がuser_id指定で追加）を実装し、非参加者からの呼び出しは404（存在を伏せる）であることを明記した。招待時の入室通知（F-43）は追加された本人の氏名を使うことを追記。新規API A-46（参加者一覧。補足03）のリクエスト/レスポンス例を新規追加し、role・is_active列を追加した（補足03メンバー一覧のchadmin/adminバッジ・無効化アカウント表示に対応。従来テーブル一覧のみで未記載だった抜けをbackfill）。</td></tr>
       <tr><td>1.7</td><td>2026-08-27</td><td>F-41 @メンションを実装し、A-13・A-14のリクエスト/レスポンス例を新規追加した（従来はA-12の説明文中の参照のみで詳細未記載だった抜けをbackfill）。mentionsはA-11と同じくチャンネル参加者（A-46）であることを検証してT-07 message_blocksへ保存し、DM発言（元発言がDMのスレッド返信を含む）は候補元が無いため常にblocks空とすることを明記した。A-10・A-13のblocksフィールド自体は05-1 DB設計3.7節に既存記載済みのため新規記載は無い。</td></tr>
+      <tr><td>1.8</td><td>2026-08-27</td><td>F-35 送信予約を実装し、A-50〜A-52のリクエスト/レスポンス例をchannel_id/dm_id/thread_parent_idを含む完全な形に更新した（従来の例はchannel_idのみの簡略形だった）。参加者チェックはA-11/A-19と同じ基準（非公開チャンネルの非参加者404、公開チャンネルの非参加者403）であることを明記。@メンションの構造化（T-07 message_blocks）・ファイル添付との併用はこのスライスでは対象外（本文への「@氏名」入力自体は可能だがプレーンテキストのまま発言化される）であることを明記した。</td></tr>
+      <tr><td>1.9</td><td>2026-08-27</td><td>AIサポート基盤の初回スライス（チャンネルAIのメンション時応答）を実装し、A-23・A-24・A-26のリクエスト/レスポンス例を新規追加した（従来はA-25のみ記載でテーブル一覧のみだった抜けをbackfill）。A-23はT-08 channel_ai_settingsのget-or-create（既存チャンネル向けの既定値補完）であることを明記。A-27（参照ドキュメント範囲）・A-28〜A-31（スキル・自動対応範囲）はドキュメントQ&A・自動対応分類が未実装のため対象外のまま。</td></tr>
     </tbody>
   </table>
 
@@ -223,10 +225,26 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p class="muted">JPEG/PNG/WebP、5MBまで。認証済みであれば誰でも呼べる（アップロード自体は無害。反映先API側で権限検証、総論5.5節）。</p>
 
   <h3>4.6 チャンネルAI設定（A-23〜A-31, A-45〜A-48）</h3>
+  <p><strong>A-23 <span class="badge badge-get">GET</span> /api/channels/{id}/ai-settings</strong></p>
+  <pre><code>// response 200
+{ "channel_id": "42", "is_ai_enabled": true, "persona_name": "AI", "persona_icon_url": null,
+  "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only" }</code></pre>
+  <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。out_of_scope_policy・fallback_handoff_user_idはドキュメントQ&A・自動対応分類が未実装のためレスポンスに含めない（値はDB上に既定のまま保持される）。</p>
+
+  <p><strong>A-24 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/general</strong></p>
+  <pre><code>{ "is_ai_enabled": false }
+// response 200: 更新後のT-08該当カラムを返す（A-23と同じ形）</code></pre>
+  <p class="muted">reaction_mode（反応モード）の変更はこのAPIでは受け付けない。UIからの編集自体が未実装で、常に既定値'mention_only'のまま（基本設計書8.1節「投稿に自ら反応」は次スライス以降）。</p>
+
   <p><strong>A-25 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/character</strong></p>
   <pre><code>{ "persona_name": "総務サポーター", "persona_icon_url": "https://.../icons/ab12cd34.png",
   "persona_tone": "丁寧語・簡潔" }
 // response 200: 更新後のT-08該当カラムを返す</code></pre>
+
+  <p><strong>A-26 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/prompt</strong></p>
+  <pre><code>{ "behavior_prompt": "あなたは開発部の「開発相談」チャンネルに常駐するAIアシスタントです。..." }
+// response 200: 更新後のT-08該当カラムを返す</code></pre>
+  <p class="muted">上書き保存のみで過去バージョンは持たない。監査ログ（T-16 audit_logs）への記録はS-08監査ログタブと同様に未実装のため、このスライスでは行わない。</p>
 
   <p><strong>A-27 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/doc-scope</strong></p>
   <pre><code>{ "folder_ids": ["3", "5"], "out_of_scope_policy": "strict" }

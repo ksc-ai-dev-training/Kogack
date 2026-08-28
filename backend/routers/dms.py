@@ -118,8 +118,10 @@ def _message_out(row) -> dict:
         "sender_user_id": str(row["sender_user_id"]) if row["sender_user_id"] is not None else None,
         # BOT発言（sender_user_id無し）はbot_display_nameを表示名として使う（F-36/F-38/F-43）
         "sender_name": row["bot_display_name"] if row["sender_type"] == "bot" else row["sender_name"],
-        # BOT/AI発言はsender_user_idが無いためJOIN結果が自然にNULLになる（実写真を持たない）
-        "sender_picture_url": row["sender_picture_url"],
+        # AI発言はbot_icon_urlにペルソナアイコンのスナップショットを持つ（services/ai_agent.py。
+        # ただしAI応答はチャンネルのみ対応のためDMでは実際には発生しない）。BOT発言は
+        # sender_user_idが無いためJOIN結果が自然にNULLになる（アイコン未実装、F-36/F-38）
+        "sender_picture_url": row["bot_icon_url"] if row["sender_type"] == "ai" else row["sender_picture_url"],
         "body": row["body"],
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],

@@ -70,6 +70,21 @@ export function renderMessageBody(body: string, blocks: Message['blocks'], membe
 }
 
 export function Avatar({ message, onClick }: { message: Message; onClick?: () => void }) {
+  // アイコン画像を設定済みならそれを表示し、無ければ種別ごとのフォールバックにする
+  // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）。
+  // AI発言はペルソナアイコン（未設定なら後段の「AI」表示にフォールバック）、人間の発言は
+  // プロフィール画像が対象（services/ai_agent.py・A-62）
+  if (message.sender_picture_url) {
+    return (
+      <img
+        src={message.sender_picture_url}
+        alt=""
+        referrerPolicy="no-referrer"
+        onClick={onClick}
+        className={`h-[34px] w-[34px] flex-none rounded-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
+      />
+    )
+  }
   if (message.sender_type === 'bot') {
     return (
       <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-bot-bg text-base">
@@ -82,19 +97,6 @@ export function Avatar({ message, onClick }: { message: Message; onClick?: () =>
       <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-gradient-to-br from-accent-600 to-accent-700 text-[11px] font-bold text-white">
         AI
       </div>
-    )
-  }
-  // アイコン画像を設定済みならそれを表示し、無ければ氏名から一意に決まる背景色＋頭文字にフォールバックする
-  // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）
-  if (message.sender_picture_url) {
-    return (
-      <img
-        src={message.sender_picture_url}
-        alt=""
-        referrerPolicy="no-referrer"
-        onClick={onClick}
-        className={`h-[34px] w-[34px] flex-none rounded-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
-      />
     )
   }
   const seed = message.sender_user_id ?? message.sender_name ?? message.id
@@ -205,9 +207,20 @@ export default function MessageList({
                   )}
                   <span className="text-[11px] text-ink-subtle">{formatTime(m.created_at)}</span>
                 </div>
-                <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
-                  {renderMessageBody(m.body, m.blocks, members)}
-                </div>
+                {m.generation_status === 'generating' ? (
+                  <div className="mt-0.5 flex items-center gap-1 text-[12.5px] text-ink-subtle">
+                    <span className="inline-flex gap-[3px]">
+                      <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle" />
+                      <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle [animation-delay:.2s]" />
+                      <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle [animation-delay:.4s]" />
+                    </span>
+                    生成中…
+                  </div>
+                ) : (
+                  <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
+                    {renderMessageBody(m.body, m.blocks, members)}
+                  </div>
+                )}
                 {onOpenThread && (m.thread_reply_count ?? 0) > 0 && (
                   <button
                     type="button"

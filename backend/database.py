@@ -188,6 +188,44 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_scheduled_messages_dispatch ON scheduled_messages (status, scheduled_at);
 ALTER TABLE scheduled_messages ENABLE ROW LEVEL SECURITY;
+
+-- T-08 channel_ai_settings（チャンネルAI設定、05-1_詳細設計書_DB設計.html 3.8節）。
+-- チャンネルAI応答生成（基本設計書8章、詳細設計書AIサポート10章）の初回スライス。
+-- out_of_scope_policy・fallback_handoff_user_idは列としては用意するが、ドキュメントQ&A・
+-- 自動対応範囲分類（層2/層3）が未実装のためAI応答生成のロジックからは未参照（services/ai_agent.py）。
+CREATE TABLE IF NOT EXISTS channel_ai_settings (
+    id                        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id                BIGINT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
+    is_ai_enabled             BOOLEAN NOT NULL DEFAULT true,
+    persona_name              TEXT DEFAULT 'AI',
+    persona_icon_url          TEXT,
+    persona_tone              TEXT,
+    behavior_prompt           TEXT DEFAULT '',
+    reaction_mode             TEXT NOT NULL DEFAULT 'mention_only' CHECK (reaction_mode IN ('mention_only', 'proactive')),
+    out_of_scope_policy       TEXT NOT NULL DEFAULT 'strict' CHECK (out_of_scope_policy IN ('strict', 'general')),
+    fallback_handoff_user_id  BIGINT REFERENCES users(id),
+    updated_by                BIGINT REFERENCES users(id),
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE channel_ai_settings ENABLE ROW LEVEL SECURITY;
+
+-- T-13 ai_usage_logs（05-1_詳細設計書_DB設計.html 3.11節）。質問文・回答文そのものは記録しない
+-- （発言本文はT-05に既に保存されているため。基本設計書8.6節）。T-14上限管理・80%通知（F-29後半）は
+-- このスライスでは対象外（記録のみ行う）。dm_idはDMでのAI応答が未実装のため現状常にNULL。
+CREATE TABLE IF NOT EXISTS ai_usage_logs (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id          BIGINT REFERENCES channels(id) ON DELETE CASCADE,
+    dm_id               BIGINT REFERENCES direct_messages(id) ON DELETE CASCADE,
+    requested_by        BIGINT NOT NULL REFERENCES users(id),
+    model               TEXT NOT NULL,
+    input_tokens        INT NOT NULL,
+    output_tokens       INT NOT NULL,
+    estimated_cost_yen  NUMERIC(10, 4) NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((channel_id IS NULL) <> (dm_id IS NULL))
+);
+ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
 """
 
 

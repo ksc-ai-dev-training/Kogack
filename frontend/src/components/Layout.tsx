@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, useMatch, useNavigate } from 'react-router'
+import { Link, NavLink, useMatch, useNavigate, useSearchParams } from 'react-router'
 import { apiFetch } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
@@ -41,9 +41,12 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const [scheduledModalOpen, setScheduledModalOpen] = useState(false)
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
-  // 実装済みなのはそれぞれ1タブのみのため、未実装タブは出さない
+  // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。実装済みなのは
+  // 4タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義）のみのため、未実装タブは出さない
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
+  const [searchParams] = useSearchParams()
+  const settingsTab = searchParams.get('tab') ?? 'admin'
 
   const logout = async () => {
     await apiFetch('/api/auth/logout', { method: 'POST' })
@@ -92,9 +95,41 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">チャンネル設定</div>
             <ul>
               <li>
-                <span className={navItemClass(true)}>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=admin`}
+                  className={navItemClass(settingsTab === 'admin')}
+                >
                   <span className="text-sm">👤</span>チャンネル管理者
-                </span>
+                </Link>
+              </li>
+            </ul>
+            <div className="mb-1.5 mt-4.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">
+              AI設定の項目
+            </div>
+            <ul>
+              <li>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=general`}
+                  className={navItemClass(settingsTab === 'general')}
+                >
+                  <span className="text-sm">⚙️</span>基本設定
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=character`}
+                  className={navItemClass(settingsTab === 'character')}
+                >
+                  <span className="text-sm">🎭</span>キャラクタ
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=prompt`}
+                  className={navItemClass(settingsTab === 'prompt')}
+                >
+                  <span className="text-sm">📝</span>振る舞い定義
+                </Link>
               </li>
             </ul>
           </div>

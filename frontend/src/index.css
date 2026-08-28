@@ -58,3 +58,18 @@ button:disabled,
 [aria-disabled='true'] {
   cursor: default;
 }
+
+/* AI発言の生成中インジケータ（画面モックアップS-03の.typing-dots相当。10.3節「生成中表示」） */
+@keyframes ai-typing-blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.ai-typing-dot {
+  animation: ai-typing-blink 1.2s infinite ease-in-out;
+}
