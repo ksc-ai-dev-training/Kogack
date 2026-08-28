@@ -103,6 +103,10 @@
   .content-head .title { font-size: 15px; font-weight: 700; margin-left: 4px; }
   .content-head .meta { font-size: 11px; color: var(--text-subtle); margin-left: auto; margin-right: 4px; text-align: right; }
   .save-btn { background: var(--accent-600); color: #fff; border: none; border-radius: 7px; padding: 7px 18px; font-size: 12.5px; font-weight: 700; flex: none; }
+  .danger-zone { margin-top: 34px; border: 1px solid #fecaca; background: #fef2f2; border-radius: 10px; padding: 16px 18px; }
+  .danger-zone .field-label { color: #b91c1c; }
+  .danger-zone input[type=text] { max-width: 260px; display: inline-block; }
+  .delete-btn { background: #b91c1c; color: #fff; border: none; border-radius: 7px; padding: 7px 16px; font-size: 12.5px; font-weight: 700; margin-left: 8px; }
 
   .tab-panel { display: none; padding: 22px 28px 48px; max-width: 700px; }
   .tab-panel.active { display: block; }
@@ -291,6 +295,17 @@
         <div class="field-hint" style="margin:0 0 16px;">対象チャンネル: # 開発相談（公開チャンネル・<a href="補足03_メンバー一覧.html">12名参加</a>）</div>
 
         <div class="field-group">
+          <label class="field-label">チャンネル名</label>
+          <input type="text" value="開発相談">
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">説明（任意）</label>
+          <input type="text" value="デプロイ・環境構築・社内システムの使い方などの相談窓口">
+        </div>
+        <button class="save-btn" type="button" style="margin-bottom:22px;">保存</button>
+
+        <div class="field-group">
           <label class="field-label">公開範囲</label>
           <div class="toggle-row">
             <div class="switch" style="background:var(--border-strong);"><div class="knob" style="left:2px;"></div></div>
@@ -312,6 +327,13 @@
           </div>
           <button class="add-skill-btn" type="button" style="margin-top:10px;">＋ 管理者を追加</button>
           <div class="field-hint">追加できるのはこのチャンネルの参加者のみです。システム管理者は全チャンネルのAI設定を編集できるため、ここへの追加は不要です。</div>
+        </div>
+
+        <div class="danger-zone">
+          <label class="field-label">チャンネルを削除</label>
+          <p class="field-hint" style="margin:0 0 10px;">会話ログ・スレッド・送信予約・AI設定を含め、このチャンネルのすべてのデータが完全に削除されます。この操作は取り消せません。削除するには、チャンネル名「開発相談」を下に入力してください。</p>
+          <input type="text" placeholder="開発相談" value="">
+          <button class="delete-btn" type="button" disabled style="opacity:0.4;">削除する</button>
         </div>
       </div>
 
@@ -673,7 +695,8 @@
     <span style="color:#fbbf24;">1.13版で追加:</span> 「チャンネル設定」グループに「自動応答トリガー」タブを新設した（<code>F-38</code>）。キーワードまたは絵文字を含む発言に反応し、指定したメッセージを自動投稿する。「定期投稿」と同じくBOTバッジ・専用アイコンで区別され、実行処理は現時点では「メッセージを投稿する」のみ（将来の拡張を見込んだセレクトボックスとして表現）。こちらも要件定義書・基本設計書に反映済み。<br>
     <span style="color:#fbbf24;">1.14版で削除:</span> F-36の宛先を個人（複数可）にも対応していたが（1.11版）、チャンネル運用への注力を優先し対象外に戻した。ヘッダーの「🔁 リマインダー」・補足05「リマインダー」を削除し、この「定期投稿」タブはチャンネル宛てのみを扱う。<br>
     <span style="color:#fbbf24;">1.15版で改称:</span> 画面名を「チャンネルAI設定」から「チャンネル設定」に変更した。チャンネル管理者・定期投稿・自動応答トリガーとAI設定以外の項目が増え、旧名称が実態と合わなくなったため。画面ID・ファイル名は変更していない。要件定義書・基本設計書にも反映済み。<br>
-    <span style="color:#fbbf24;">1.16版で改名:</span> モックアップのファイル名も<code>S-06_チャンネルAI設定.html</code>から<code>S-06_チャンネル設定.html</code>に変更した。参照している全ファイル（一覧・S-03・補足03・補足06）のリンクを更新済み。
+    <span style="color:#fbbf24;">1.16版で改名:</span> モックアップのファイル名も<code>S-06_チャンネルAI設定.html</code>から<code>S-06_チャンネル設定.html</code>に変更した。参照している全ファイル（一覧・S-03・補足03・補足06）のリンクを更新済み。<br>
+    <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル管理者」タブにチャンネル名・説明文の編集欄と、チャンネルを完全に削除する操作（危険な操作。削除対象のチャンネル名を再入力して初めて「削除する」ボタンが有効になる）を追加した。要件定義書F-02・権限マトリクスに反映済み（チャンネル名・説明文の編集は今回新規、削除自体は基本設計書に以前から記載されていたが未実装だった）。
   </div>
 
 <script>

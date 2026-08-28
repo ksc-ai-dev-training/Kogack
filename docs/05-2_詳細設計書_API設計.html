@@ -38,6 +38,7 @@
       <tr><td>1.7</td><td>2026-08-27</td><td>F-41 @メンションを実装し、A-13・A-14のリクエスト/レスポンス例を新規追加した（従来はA-12の説明文中の参照のみで詳細未記載だった抜けをbackfill）。mentionsはA-11と同じくチャンネル参加者（A-46）であることを検証してT-07 message_blocksへ保存し、DM発言（元発言がDMのスレッド返信を含む）は候補元が無いため常にblocks空とすることを明記した。A-10・A-13のblocksフィールド自体は05-1 DB設計3.7節に既存記載済みのため新規記載は無い。</td></tr>
       <tr><td>1.8</td><td>2026-08-27</td><td>F-35 送信予約を実装し、A-50〜A-52のリクエスト/レスポンス例をchannel_id/dm_id/thread_parent_idを含む完全な形に更新した（従来の例はchannel_idのみの簡略形だった）。参加者チェックはA-11/A-19と同じ基準（非公開チャンネルの非参加者404、公開チャンネルの非参加者403）であることを明記。@メンションの構造化（T-07 message_blocks）・ファイル添付との併用はこのスライスでは対象外（本文への「@氏名」入力自体は可能だがプレーンテキストのまま発言化される）であることを明記した。</td></tr>
       <tr><td>1.9</td><td>2026-08-27</td><td>AIサポート基盤の初回スライス（チャンネルAIのメンション時応答）を実装し、A-23・A-24・A-26のリクエスト/レスポンス例を新規追加した（従来はA-25のみ記載でテーブル一覧のみだった抜けをbackfill）。A-23はT-08 channel_ai_settingsのget-or-create（既存チャンネル向けの既定値補完）であることを明記。A-27（参照ドキュメント範囲）・A-28〜A-31（スキル・自動対応範囲）はドキュメントQ&A・自動対応分類が未実装のため対象外のまま。</td></tr>
+      <tr><td>1.10</td><td>2026-08-27</td><td>新規API A-71（チャンネル名・説明文の編集）を追加し、リクエスト/レスポンス例を記載した。あわせてA-09（チャンネル削除）を初めて実装し、参加者・発言・メッセージブロック・送信予約・AI設定・AI利用ログ・既読状態がいずれもON DELETE CASCADEで連動削除されることを明記した（従来はテーブル一覧のみで詳細未記載だった抜けをbackfill）。要件定義書v1.19・基本設計書v1.17・画面モックアップ（S-06、v3.4）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -86,7 +87,7 @@
     </tbody>
   </table>
 
-  <h3>4.3 チャンネル・メッセージ（A-05〜A-15, A-46〜A-49, A-69）</h3>
+  <h3>4.3 チャンネル・メッセージ（A-05〜A-15, A-46〜A-49, A-69, A-71）</h3>
   <p><strong>A-05 <span class="badge badge-get">GET</span> /api/channels（参加中＋参加可能一覧）</strong></p>
   <pre><code>// response 200
 { "joined": [ { "id": "42", "name": "開発相談", "topic": "...", "is_public": true,
@@ -107,6 +108,16 @@
 { "id": "42", "name": "経理連絡", "topic": "経理部からの連絡用", "is_public": true,
   "created_by": "7", "created_at": "2026-08-21T01:00:00Z" }</code></pre>
   <p class="muted">作成者は同一トランザクション内でT-03へ <code>is_channel_admin=true</code> として登録する。<code>name</code> は空文字不可・256文字まで。既存名との重複は409。</p>
+
+  <p><strong>A-71 <span class="badge badge-put">PUT</span> /api/channels/{id}（チャンネル名・説明文の編集）</strong></p>
+  <pre><code>{ "name": "開発相談（改称）", "topic": "デプロイ・環境構築の相談窓口" }
+// response 200: A-07と同じ形（更新後のチャンネル情報）</code></pre>
+  <p class="muted"><code>name</code>・<code>topic</code>いずれも省略可（指定したフィールドのみ更新）。<code>name</code>はA-07と同じ制約（空文字不可・256文字まで・既存名との重複は409）。<code>topic</code>に空文字を送ると説明文を削除する操作として扱いNULLにする。当該chadmin/adminのみ実行できる。</p>
+
+  <p><strong>A-09 <span class="badge badge-delete">DELETE</span> /api/channels/{id}（チャンネル削除）</strong></p>
+  <pre><code>DELETE /api/channels/42
+// response 204</code></pre>
+  <p class="muted">当該chadmin/adminのみ実行できる。参加者（T-03）・発言（T-05）・メッセージブロック（T-07）・送信予約（T-18）・AI設定（T-08）・AI利用ログ（T-13）・既読状態（T-22）はいずれもchannels(id)へのON DELETE CASCADEで連動削除される。取り消せない操作のため、フロントエンドは削除対象のチャンネル名の再入力を確認手段とする（S-06「チャンネル管理者」タブ）。</p>
 
   <p><strong>A-08 <span class="badge badge-post">POST</span> /api/channels/{id}/members（参加・招待。F-34）</strong></p>
   <pre><code>// 公開チャンネル: 本人を追加（本文なし）

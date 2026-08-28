@@ -106,6 +106,47 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
     return {**_channel_out(row), "member_count": member_count, "is_channel_admin": bool(is_admin)}
 
 
+class UpdateChannelRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    topic: str | None = None
+
+
+@router.put("/{channel_id}")
+async def update_channel(
+    channel_id: int, body: UpdateChannelRequest, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-71: チャンネル名・説明（トピック）の編集。name/topicいずれも省略可（指定したフィールドのみ
+    更新する）。nameは全チャンネルで一意（A-07作成時と同じ制約）。当該chadmin/adminのみ実行できる。
+    設計書に無い挙動のため基本設計書・詳細設計書API設計・画面モックアップをあわせて改訂した"""
+    pool = get_pool()
+    if body.name is not None:
+        duplicate = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channels WHERE name = $1 AND id != $2)", body.name, channel_id
+        )
+        if duplicate:
+            raise HTTPException(409, detail="既に使用されています")
+        await pool.execute(
+            "UPDATE channels SET name = $2, updated_at = now() WHERE id = $1", channel_id, body.name
+        )
+    if body.topic is not None:
+        # 空文字は説明文を削除する操作として扱いNULLにする
+        await pool.execute(
+            "UPDATE channels SET topic = $2, updated_at = now() WHERE id = $1",
+            channel_id, body.topic.strip() or None,
+        )
+    row = await pool.fetchrow("SELECT * FROM channels WHERE id = $1", channel_id)
+    return _channel_out(row)
+
+
+@router.delete("/{channel_id}", status_code=204)
+async def delete_channel(channel_id: int, user: CurrentUser = Depends(require_channel_admin)):
+    """A-09: チャンネル削除（設計書には以前からAPI一覧のみ記載で未実装だった。今回backfill）。
+    参加者・発言・メッセージブロック・送信予約・AI設定・利用ログ・既読状態はいずれも
+    channels(id)へのON DELETE CASCADEで連動削除される（database.py参照）。取り消せない操作の
+    ため、フロント側は削除対象のチャンネル名の再入力を経てから呼び出す（ChannelSettings.tsx）"""
+    await get_pool().execute("DELETE FROM channels WHERE id = $1", channel_id)
+
+
 class JoinChannelRequest(BaseModel):
     user_id: str | None = None
 

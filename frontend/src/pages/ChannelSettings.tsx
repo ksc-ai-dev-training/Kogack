@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { useChannel } from '../hooks/useChannels'
+import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useAiSettings } from '../hooks/useAiSettings'
 import { useMe } from '../hooks/useMe'
@@ -8,7 +8,7 @@ import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import type { AiSettings } from '../types'
+import type { AiSettings, ChannelDetail } from '../types'
 
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_ICON_BYTES = 5 * 1024 * 1024
@@ -65,15 +65,112 @@ export default function ChannelSettings() {
   )
 }
 
+// A-71: チャンネル名・説明（トピック）の編集。設計書には以前無かった機能のため今回追加した
+// （基本設計書・詳細設計書API設計・画面モックアップを同じコミットで改訂）。channelを非nullで
+// 受け取ってから一度だけマウントすることで、ロード完了前のuseStateへ初期値を渡す問題を避ける
+// （ProfileEditModal等と同じ考え方）
+function ChannelInfoForm({
+  channelId,
+  channel,
+  onSaved,
+}: {
+  channelId: string
+  channel: ChannelDetail
+  onSaved: () => Promise<unknown>
+}) {
+  const toast = useToast()
+  const [name, setName] = useState(channel.name)
+  const [topic, setTopic] = useState(channel.topic ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      toast('チャンネル名を入力してください', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: trimmed, topic: topic.trim() }),
+      })
+      await onSaved()
+      toast('チャンネル情報を更新しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '更新に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-5.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">チャンネル名</label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={256}
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+
+      <div className="mb-3">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">説明（任意）</label>
+        <input
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          placeholder="このチャンネルの目的を入力"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={save}
+        className="mb-5.5 rounded-lg bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40"
+      >
+        保存
+      </button>
+    </>
+  )
+}
+
 function AdminTab({ channelId }: { channelId: string }) {
   const toast = useToast()
   const confirm = useConfirm()
+  const navigate = useNavigate()
   const { channel, mutate: mutateChannel } = useChannel(channelId)
   const { members, mutate: mutateMembers } = useChannelMembers(channelId)
+  const { mutate: mutateChannelsList } = useChannels()
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   const admins = members.filter((m) => m.is_channel_admin)
   const others = members.filter((m) => !m.is_channel_admin)
   const adminCount = admins.length
+
+  const deleteChannel = async () => {
+    if (!channel || deleteConfirmText !== channel.name) return
+    const ok = await confirm({
+      title: 'チャンネルを削除',
+      message: `# ${channel.name} を削除しますか？\n会話ログ・スレッド・送信予約・AI設定を含め、このチャンネルのすべてのデータが完全に削除されます。この操作は取り消せません。`,
+      confirmLabel: '完全に削除する',
+      danger: true,
+    })
+    if (!ok) return
+    setDeleting(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}`, { method: 'DELETE' })
+      await mutateChannelsList()
+      toast('チャンネルを削除しました')
+      navigate('/', { replace: true })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '削除に失敗しました', 'error')
+      setDeleting(false)
+    }
+  }
 
   const addAdmin = async (userId: string) => {
     try {
@@ -128,6 +225,14 @@ function AdminTab({ channelId }: { channelId: string }) {
         このチャンネルの管理者（chadmin）を設定します。チャンネル管理者はチャンネル設定の編集と、
         対応できない依頼の引き継ぎ先になります。
       </p>
+
+      {channel && (
+        <ChannelInfoForm
+          channelId={channelId}
+          channel={channel}
+          onSaved={() => Promise.all([mutateChannel(), mutateChannelsList()])}
+        />
+      )}
 
       <div className="mb-5.5">
         <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">公開範囲</label>
@@ -214,6 +319,31 @@ function AdminTab({ channelId }: { channelId: string }) {
           追加できるのはこのチャンネルの参加者のみです。システム管理者は全チャンネルの設定を編集できるため、ここへの追加は不要です。
         </p>
       </div>
+
+      {channel && (
+        <div className="mt-8 rounded-[10px] border border-danger-border bg-danger-bg px-4 py-4">
+          <label className="mb-1.5 block text-[12.5px] font-bold text-danger-text">チャンネルを削除</label>
+          <p className="mb-3 text-[11.5px] leading-relaxed text-ink-muted">
+            会話ログ・スレッド・送信予約・AI設定を含め、このチャンネルのすべてのデータが完全に削除されます。この操作は取り消せません。削除するには、チャンネル名「{channel.name}」を下に入力してください。
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={channel.name}
+              className="w-full max-w-[280px] rounded-lg border border-line-strong px-3 py-1.5 text-[13px] text-ink outline-none focus:border-danger-text focus:ring-4 focus:ring-danger-bg"
+            />
+            <button
+              type="button"
+              disabled={deleteConfirmText !== channel.name || deleting}
+              onClick={deleteChannel}
+              className="flex-none rounded-lg bg-danger-text px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-30"
+            >
+              削除する
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
