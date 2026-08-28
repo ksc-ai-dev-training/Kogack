@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { apiFetch } from '../lib/api'
@@ -79,7 +79,13 @@ export function renderMessageBody(body: string, blocks: Message['blocks'], membe
   return nodes
 }
 
-export function Avatar({ message, onClick }: { message: Message; onClick?: () => void }) {
+export function Avatar({
+  message,
+  onClick,
+}: {
+  message: Message
+  onClick?: (e: MouseEvent<HTMLElement>) => void
+}) {
   // アイコン画像を設定済みならそれを表示し、無ければ種別ごとのフォールバックにする
   // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）。
   // AI発言はペルソナアイコン（未設定なら後段の「AI」表示にフォールバック）、人間の発言は
@@ -152,9 +158,12 @@ export default function MessageList({
   const { me } = useMe()
   const confirm = useConfirm()
   const toast = useToast()
-  // F-40 プロフィールカード。開いている対象はメッセージid単位で持つ（カードは各メッセージ行に
-  // 相対配置するため。表示するのはsender_user_idのプロフィール）
-  const [profileFor, setProfileFor] = useState<string | null>(null)
+  // F-40 プロフィールカード。開いている対象はメッセージid単位で持つ（表示するのはsender_user_idの
+  // プロフィール）。anchorはクリックした要素の座標で、画面下寄りの発言（一番下の投稿欄近く）で
+  // カードが投稿欄の裏に隠れないよう、ProfileCard側でdocument.bodyへポータル配置する際の基準にする
+  const [profileFor, setProfileFor] = useState<{ id: string; anchor: DOMRect } | null>(null)
+  const openProfile = (id: string, e: MouseEvent<HTMLElement>) =>
+    setProfileFor({ id, anchor: e.currentTarget.getBoundingClientRect() })
 
   const deleteMessage = async (messageId: string) => {
     const ok = await confirm({
@@ -200,7 +209,7 @@ export default function MessageList({
                 message={m}
                 onClick={
                   m.sender_type === 'human' && m.sender_user_id
-                    ? () => setProfileFor(m.id)
+                    ? (e) => openProfile(m.id, e)
                     : undefined
                 }
               />
@@ -208,7 +217,7 @@ export default function MessageList({
                 <div className="flex flex-wrap items-baseline gap-[7px]">
                   <span
                     onClick={
-                      m.sender_type === 'human' && m.sender_user_id ? () => setProfileFor(m.id) : undefined
+                      m.sender_type === 'human' && m.sender_user_id ? (e) => openProfile(m.id, e) : undefined
                     }
                     className={`text-[13px] font-bold text-ink ${
                       m.sender_type === 'human' && m.sender_user_id ? 'cursor-pointer hover:underline' : ''
@@ -273,8 +282,12 @@ export default function MessageList({
                   )}
                 </div>
               )}
-              {profileFor === m.id && m.sender_user_id && (
-                <ProfileCard userId={m.sender_user_id} onClose={() => setProfileFor(null)} />
+              {profileFor?.id === m.id && m.sender_user_id && (
+                <ProfileCard
+                  userId={m.sender_user_id}
+                  onClose={() => setProfileFor(null)}
+                  anchor={profileFor.anchor}
+                />
               )}
             </div>
           </div>
