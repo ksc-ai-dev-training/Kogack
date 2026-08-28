@@ -17,7 +17,7 @@
     <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
     <div class="meta">
       <span>作成日: 2026-08-19</span>
-      <span>版数: 1.20</span>
+      <span>版数: 1.21</span>
       <span>作成: コガソフトウェア株式会社</span>
     </div>
     <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
@@ -49,6 +49,7 @@
       <tr class="diff-new"><td>1.18</td><td>2026-08-28</td><td>F-02にチャンネル情報の確認とチャンネルからの退出を追加し、新規API A-72を5.2節・API一覧に追記した。自分が最後のチャンネル管理者の場合は退出を拒否する（A-48と同じ考え方）。補足03「メンバー一覧」を「チャンネル情報」「メンバー」の2タブ構成にした。要件定義書v1.20・画面モックアップ（補足03）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.19</td><td>2026-08-28</td><td>F-02にメンバーの強制退出を追加し、新規API A-73を5.2節・API一覧に追記した。当該chadmin/adminのみ実行でき、対象が最後のチャンネル管理者の場合はA-48/A-72と同じ理由で拒否する。要件定義書v1.21・画面モックアップ（補足03）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.20</td><td>2026-08-28</td><td>F-43を「チャンネル参加の通知」から「チャンネル参加・退出の通知」に改称し、A-72（自己退出）・A-73（強制退出）のいずれでも参加通知と対になる退出通知「（氏名）さんが退出しました。」をT-05へ作成するようにした。強制退出であっても本文に退出させた側の氏名は含めない設計判断を6.2節に追記した。5.2節・API一覧（A-72/A-73）を更新。要件定義書v1.22を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.21</td><td>2026-08-28</td><td>F-34に公開チャンネルへの招待を追加した。従来A-08は公開チャンネルを本人自己参加のみに限定していたが、既存の参加者が対象user_idを指定して他の利用者を追加する経路（非公開チャンネルと同じ仕組み）にも対応し、公開チャンネルでも「自分で検索して参加する」「招待される」の両方の入り方ができるようにした。5.14節・API一覧（A-08）を更新。要件定義書v1.23・画面モックアップ（補足03）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -599,7 +600,7 @@
   </table>
 
   <h3 class="diff-new">5.14 F-34 チャンネルの公開範囲</h3>
-  <p class="diff-new"><strong>処理概要:</strong> チャンネルは公開・非公開のいずれかで運用する（T-02.is_public）。公開チャンネルは <code>GET /api/channels</code> の一覧・検索に含まれ、誰でも即時参加できる（A-08）。非公開チャンネルは参加者以外には一覧・検索に出さず、参加には既存の参加者による追加操作が必要（chadminに限らずメンバーなら誰でも追加できる。補足03「メンバー一覧」から実行）。公開・非公開の別は作成時（補足01）に選択し、作成後もチャンネル管理者がS-06から変更できる（A-49）。MVPスコープ決定では一度見送った機能だが、本改訂（要件定義書v1.8）で対象に追加した（6.2節「設計判断」参照）。</p>
+  <p class="diff-new"><strong>処理概要:</strong> チャンネルは公開・非公開のいずれかで運用する（T-02.is_public）。公開チャンネルは <code>GET /api/channels</code> の一覧・検索に含まれ、誰でも即時参加できる（A-08）。<span class="diff-new">加えて、既存の参加者が対象user_idを指定して他の利用者を追加することもできる（本人が検索して自分で参加する経路と、招待される経路の両方に対応。招待する側は当該チャンネルの参加者であればchadminに限らず誰でもよい）。</span>非公開チャンネルは参加者以外には一覧・検索に出さず、参加には既存の参加者による追加操作が必要（chadminに限らずメンバーなら誰でも追加できる。補足03「メンバー一覧」から実行）。公開・非公開の別は作成時（補足01）に選択し、作成後もチャンネル管理者がS-06から変更できる（A-49）。MVPスコープ決定では一度見送った機能だが、本改訂（要件定義書v1.8）で対象に追加した（6.2節「設計判断」参照）。</p>
   <table class="diff-new">
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
     <tbody><tr><td>補足01, 補足03, S-06</td><td>A-05, A-07, A-08, A-49</td><td>T-02, T-03</td></tr></tbody>
@@ -940,7 +941,7 @@
       <tr><td>A-05</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels</code></td><td>認証済</td><td>参加中チャンネル一覧＋参加可能な<span class="diff-new">公開</span>チャンネル一覧（補足01の「参加する」タブ用。<span class="diff-new">非公開チャンネルは自分が参加しているものだけが参加中一覧に含まれ、未参加の非公開チャンネルはどちらの一覧にも出さない。F-34</span>）</td></tr>
       <tr><td>A-06</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}</code></td><td>チャンネル参加者</td><td>チャンネル詳細（名前・トピック・参加人数・AI有効状態）</td></tr>
       <tr><td>A-07</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels</code></td><td>認証済</td><td>チャンネル作成。<span class="diff-new">is_public（公開/非公開。既定true）を指定。</span>作成者を自動的にchadminとして登録（補足01の「作成する」タブ）</td></tr>
-      <tr><td>A-08</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/members</code></td><td><span class="diff-new">公開チャンネル: 認証済（本人を追加）／非公開チャンネル: 当該チャンネルの参加者（対象user_idを指定してメンバーを追加。F-34）</span></td><td>公開チャンネルへの参加（承認不要・即時参加）<span class="diff-new">。非公開チャンネルは、参加者が他の利用者をuser_id指定で追加する（本人による自己参加は不可）</span></td></tr>
+      <tr><td>A-08</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/members</code></td><td><span class="diff-new">公開チャンネル: 認証済（本人を追加、または当該チャンネルの参加者が対象user_idを指定して追加）／非公開チャンネル: 当該チャンネルの参加者（対象user_idを指定してメンバーを追加。F-34）</span></td><td>公開チャンネルへの参加（承認不要・即時参加）、または既存の参加者による招待<span class="diff-new">。非公開チャンネルは、参加者が他の利用者をuser_id指定で追加する（本人による自己参加は不可）</span></td></tr>
       <tr class="diff-new"><td>A-72</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/members/me</code></td><td>チャンネル参加者</td><td>チャンネルからの退出。自分が最後のチャンネル管理者の場合は400で拒否する（A-48と同じ管理者不在防止の考え方。最後の1人は必ずchadminであるため、参加者ゼロになる事態も同時に防げる）。退出通知（F-43）をT-05へ作成する</td></tr>
       <tr class="diff-new"><td>A-73</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/members/{userId}</code></td><td>当該chadmin or admin</td><td>メンバーをチャンネルから退出させる（強制退出）。対象が最後のチャンネル管理者の場合はA-48/A-72と同じ理由で400拒否する。A-72と同じ退出通知（F-43）をT-05へ作成する（誰が退出させたかは本文に含めない）</td></tr>
       <tr class="diff-new"><td>A-71</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}</code></td><td>当該chadmin or admin</td><td>チャンネル名・説明文（トピック）の編集。name/topicいずれも省略可（指定したフィールドのみ更新）。nameはA-07作成時と同じく全チャンネルで一意</td></tr>

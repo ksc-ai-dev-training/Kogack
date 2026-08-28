@@ -290,7 +290,7 @@ export default function MembersModal({
               />
             </div>
 
-            {channel && !channel.is_public && (
+            {channel && (
               <button
                 type="button"
                 onClick={() => setAdding(true)}
@@ -357,12 +357,11 @@ export default function MembersModal({
 
             <div className="border-t border-line px-[22px] py-3 text-[11px] leading-relaxed text-ink-subtle">
               チャンネル管理者（chadmin）の変更はチャンネル設定から行います。
-              {channel && !channel.is_public && (
-                <>
-                  <br />
-                  「＋メンバーを追加」は非公開チャンネルのみ表示され、参加者なら誰でも他の利用者を追加できます。
-                </>
-              )}
+              <br />
+              「＋メンバーを追加」は参加者なら誰でも使え、他の利用者をこのチャンネルに追加できます
+              {channel?.is_public
+                ? '（公開チャンネルのため、追加を待たず利用者本人がサイドバーから検索して自分で参加することもできます）。'
+                : '。'}
               {canRemoveMembers && (
                 <>
                   <br />

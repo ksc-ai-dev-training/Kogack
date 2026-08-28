@@ -155,9 +155,11 @@ class JoinChannelRequest(BaseModel):
 async def join_channel(
     channel_id: int, body: JoinChannelRequest | None = None, user: CurrentUser = Depends(require_auth),
 ):
-    """A-08: 参加・招待（F-34）。公開チャンネルは本人のみ自己参加（本文省略）、非公開チャンネルは
-    既存の参加者が他の利用者をuser_id指定で追加する（chadmin限定にせず参加者全員に開放。
-    基本設計書6.2節「設計判断」）。"""
+    """A-08: 参加・招待（F-34）。公開チャンネルは、本人が自分で検索して参加する経路（本文省略、
+    または自分自身のuser_id指定）と、既存の参加者が他の利用者をuser_id指定で追加する経路の
+    両方に対応する。非公開チャンネルは既存の参加者が他の利用者をuser_id指定で追加する経路のみ
+    （本人による自己参加は不可）。招待はいずれもchadmin限定にせず参加者全員に開放
+    （基本設計書6.2節「設計判断」）。"""
     pool = get_pool()
     channel = await pool.fetchrow("SELECT is_public FROM channels WHERE id = $1", channel_id)
     if channel is None:
@@ -165,9 +167,27 @@ async def join_channel(
     target_user_id = body.user_id if body else None
 
     if channel["is_public"]:
-        if target_user_id is not None and target_user_id != str(user.id):
-            raise HTTPException(403, detail="本人のみ自己参加できます")
-        target_id = user.id
+        if target_user_id is None or target_user_id == str(user.id):
+            target_id = user.id
+        else:
+            # 他の利用者を公開チャンネルへ追加する場合は、呼び出し元が既に参加者である必要がある
+            # （非公開チャンネルの招待と同じ考え方。誰でも自己参加できる公開チャンネルでも、
+            # 第三者を勝手に追加できてしまうのは望ましくないため）
+            is_member = await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+                channel_id, user.id,
+            )
+            if not is_member:
+                raise HTTPException(403, detail="他の利用者を追加するには、先に自分がこのチャンネルに参加している必要があります")
+            try:
+                target_id = int(target_user_id)
+            except ValueError:
+                raise HTTPException(422, detail="不正なuser_idです")
+            target_exists = await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND is_active)", target_id
+            )
+            if not target_exists:
+                raise HTTPException(404, detail="見つかりません")
     else:
         is_member = await pool.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
