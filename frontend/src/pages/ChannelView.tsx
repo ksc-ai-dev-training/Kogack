@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useMessages } from '../hooks/useMessages'
+import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError } from '../lib/api'
 import MessageList from '../components/MessageList'
@@ -18,11 +19,17 @@ export default function ChannelView() {
   const threadId = searchParams.get('thread')
   const { me } = useMe()
   const { channel, error: channelError } = useChannel(channelId)
-  const { mutate: mutateChannelsList } = useChannels()
+  const { joined, mutate: mutateChannelsList } = useChannels()
   const { members } = useChannelMembers(channelId)
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined)
+  const unreadDividerMessageId = useUnreadDivider(
+    channelId,
+    joined.find((c) => c.id === channelId)?.unread_count,
+    messages,
+    me?.id,
+  )
   const listRef = useRef<HTMLDivElement>(null)
   const [membersModalTab, setMembersModalTab] = useState<'info' | 'members' | null>(null)
 
@@ -98,6 +105,7 @@ export default function ChannelView() {
             openThreadId={threadId}
             onDeleted={removeMessage}
             members={members}
+            unreadDividerMessageId={unreadDividerMessageId}
           />
         </div>
 

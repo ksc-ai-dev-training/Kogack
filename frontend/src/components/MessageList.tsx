@@ -32,6 +32,16 @@ function DaySeparator({ label }: { label: string }) {
   )
 }
 
+function UnreadDivider() {
+  return (
+    <div className="mx-5 my-2.5 flex items-center gap-2.5 text-[11px] font-semibold text-accent-700">
+      <span className="h-px flex-1 bg-accent-600" />
+      ここから未読メッセージ
+      <span className="h-px flex-1 bg-accent-600" />
+    </div>
+  )
+}
+
 // F-41 @メンションの描画。本文中の「@display_name_snapshot」を検出し、target_user_idを
 // 現在のチャンネル参加者一覧で解決した最新の表示名でハイライト表示する（05-1_詳細設計書_DB設計.html
 // 3.7節「表示時はtarget_user_idを解決して現在の表示名・アイコンを描画」）。A-62プロフィール編集の
@@ -123,6 +133,7 @@ export default function MessageList({
   onDeleted,
   showDaySeparators = true,
   members,
+  unreadDividerMessageId,
 }: {
   messages: Message[]
   emptyMessage?: string
@@ -133,6 +144,8 @@ export default function MessageList({
   showDaySeparators?: boolean
   /** F-41 @メンションの表示名解決に使う（チャンネル参加者一覧。DM会話では渡さない） */
   members?: ChannelMember[]
+  /** このメッセージの直前に「ここから未読メッセージ」区切り線を表示する（useUnreadDivider） */
+  unreadDividerMessageId?: string | null
 }) {
   const { me } = useMe()
   const confirm = useConfirm()
@@ -172,6 +185,7 @@ export default function MessageList({
         return (
           <div key={m.id}>
             {isNewDay && <DaySeparator label={formatDaySeparator(m.created_at)} />}
+            {unreadDividerMessageId === m.id && <UnreadDivider />}
             <div
               className={`group relative flex gap-2.5 px-5 py-[7px] ${
                 openThreadId === m.id ? 'bg-accent-50' : 'hover:bg-surface-subtle'

@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { useDms } from '../hooks/useDms'
 import { useMessages } from '../hooks/useMessages'
+import { useUnreadDivider } from '../hooks/useUnreadDivider'
+import { useMe } from '../hooks/useMe'
 import { apiFetch } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
@@ -13,11 +15,13 @@ export default function DmView() {
   const { dmId } = useParams<{ dmId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const threadId = searchParams.get('thread')
+  const { me } = useMe()
   const { dms, isLoading: dmsLoading, mutate: mutateDms } = useDms()
   const dm = dms.find((d) => d.id === dmId)
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
   } = useMessages(dmId ? `/api/dms/${dmId}` : undefined)
+  const unreadDividerMessageId = useUnreadDivider(dmId, dm?.unread_count, messages, me?.id)
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -68,6 +72,7 @@ export default function DmView() {
             onOpenThread={openThread}
             openThreadId={threadId}
             onDeleted={removeMessage}
+            unreadDividerMessageId={unreadDividerMessageId}
           />
         </div>
 
