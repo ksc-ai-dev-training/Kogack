@@ -1,4 +1,12 @@
 @echo off
+chcp 65001 >nul
+rem NOTE: the chcp line above must stay ASCII-only and come before any non-ASCII byte in this
+rem file (including in rem-comments). This script and .env are UTF-8; a console launched via
+rem Explorer double-click can default to codepage 932 (Shift-JIS) on Japanese Windows, and cmd.exe
+rem reads/interprets each line under whichever codepage is active at that point - so any non-ASCII
+rem line encountered before chcp switches to UTF-8 gets misread, corrupting parsing of both this
+rem script and, further down, the .env for/f load (BACKEND_PORT/FRONTEND_PORT silently falling
+rem back to their hardcoded defaults). Switching to UTF-8 as the very first action avoids this.
 setlocal
 cd /d %~dp0
 
