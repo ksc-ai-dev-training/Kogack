@@ -3,6 +3,7 @@
 # 記載のない開発者向けの利便機能で、本番では常に無効）
 import os
 import secrets
+import traceback
 
 import google_auth
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -61,6 +62,10 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     # 1. state をCookie保存値と照合（不一致は不正リクエストとして拒否）
     expected = request.cookies.get(google_auth.STATE_COOKIE)
     if not code or not state or not expected or not secrets.compare_digest(state, expected):
+        # CSRF・cookieの取りこぼし・二重送信等の切り分けに使うログ（元は原因調査用の一時追加だったが、
+        # oauth_failedは詳細をフロントに返さない設計のため恒久的に残すことにした）
+        print(f"[auth] state mismatch: code={bool(code)} state={bool(state)} "
+              f"expected_cookie={bool(expected)} cookies={list(request.cookies.keys())}")
         return _login_error_redirect("oauth_failed")
 
     # 2. code をIDトークンに交換し、署名・発行者・audience を検証
@@ -68,6 +73,11 @@ async def callback(request: Request, code: str | None = None, state: str | None 
         token = await google_auth.exchange_code(code, google_auth.redirect_uri_for(request))
         claims = google_auth.verify_id_token(token["id_token"])
     except Exception:
+        # oauth_failedはフロントに詳細を返さないため、原因（トークン交換失敗・署名検証失敗・
+        # clock skewによるIDトークン検証エラー等）を追えるよう恒久的にtracebackを出力する
+        # （元は原因調査用の一時追加。実際にPyJWTのleeway不足によるImmatureSignatureErrorの
+        # 特定に使い、google_auth.pyのverify_id_tokenにleeway=60を追加して解消した）
+        traceback.print_exc()
         return _login_error_redirect("oauth_failed")
 
     email = (claims.get("email") or "").lower()

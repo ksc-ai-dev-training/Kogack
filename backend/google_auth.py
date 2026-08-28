@@ -98,6 +98,9 @@ def verify_id_token(id_token: str) -> dict:
 
     署名検証には Google の公開鍵（JWKS）を使う。検証を省くと任意のトークンを
     受け入れてしまうため、必ず署名・iss・aud をすべて検証する。
+    leeway=60はexp/iatの検証にのみ効き、ローカルマシンとGoogle側のわずかな時刻のずれ
+    （NTP同期済みでも数秒程度は生じうる）でImmatureSignatureError等が誤発生するのを防ぐ
+    （実際にローカル環境で発生を確認済み。署名・iss・audの検証は厳密なまま緩めない）。
     """
     signing_key = _jwk_client.get_signing_key_from_jwt(id_token)
     claims = jwt.decode(
@@ -105,6 +108,7 @@ def verify_id_token(id_token: str) -> dict:
         signing_key.key,
         algorithms=["RS256"],
         audience=GOOGLE_CLIENT_ID,
+        leeway=60,
         options={"require": ["exp", "iat", "aud", "iss", "sub"]},
     )
     if claims.get("iss") not in VALID_ISSUERS:
