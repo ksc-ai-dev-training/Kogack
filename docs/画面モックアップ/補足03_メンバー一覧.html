@@ -120,6 +120,10 @@
   .m-row.disabled { opacity: 0.55; }
   .m-row.disabled .mname { text-decoration: line-through; }
   .more-note { text-align: center; font-size: 11.5px; color: var(--text-subtle); padding: 10px 0 4px; }
+  .remove-btn {
+    flex: none; background: none; border: 1px solid var(--border-strong); color: var(--text-muted);
+    border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+  }
 
   .modal-foot { padding: 12px 22px 18px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-subtle); line-height: 1.7; }
   .modal-foot a { color: var(--accent-700); }
@@ -230,6 +234,7 @@
           <div class="m-row">
             <div class="av" style="background:#99f6e4;color:#0f766e;">田</div>
             <div class="info"><div class="mname">田中 智子 <span class="badge badge-chadmin">chadmin</span></div></div>
+            <button class="remove-btn" type="button">退出させる</button>
           </div>
           <div class="m-row">
             <div class="av" style="background:#cbd5f5;color:#1e3a8a;">山</div>
@@ -238,22 +243,27 @@
           <div class="m-row">
             <div class="av" style="background:#f97316;">佐</div>
             <div class="info"><div class="mname">佐藤 花子</div></div>
+            <button class="remove-btn" type="button">退出させる</button>
           </div>
           <div class="m-row">
             <div class="av" style="background:#0ea5e9;">鈴</div>
             <div class="info"><div class="mname">鈴木 一郎</div></div>
+            <button class="remove-btn" type="button">退出させる</button>
           </div>
           <div class="m-row">
             <div class="av" style="background:#a855f7;">高</div>
             <div class="info"><div class="mname">高橋 美咲</div></div>
+            <button class="remove-btn" type="button">退出させる</button>
           </div>
           <div class="m-row">
             <div class="av" style="background:#ddd6fe;color:#6d28d9;">石</div>
             <div class="info"><div class="mname">石井 直樹 <span class="badge badge-admin">admin</span></div></div>
+            <button class="remove-btn" type="button">退出させる</button>
           </div>
           <div class="m-row disabled">
             <div class="av" style="background:#e2e8f0;color:#94a3b8;">渡</div>
             <div class="info"><div class="mname">渡辺 健 <span class="badge badge-off">無効</span></div></div>
+            <button class="remove-btn" type="button">退出させる</button>
           </div>
         </div>
         <div class="modal-foot">
@@ -281,7 +291,8 @@
     <strong>補足モックアップ</strong>（要件定義書4.1節の画面一覧S-01〜S-08には含まれない）<br>
     S-03ヘッダーの参加人数から開くメンバー一覧。チャンネル管理者（chadmin）バッジと、無効化されたアカウント（要件定義書5.2節、退職者等）が引き続き一覧に残る例を表示。管理者の変更はS-06から行う設計とし、この一覧からは行わない（編集操作の窓口を一本化するため）。<br>
     <span style="color:#fbbf24;">1.8版で追加:</span> 非公開チャンネル（<code>F-34</code>）の例として「経営会議」🔒を表示。「＋ メンバーを追加」を押すと、<a href="補足02_DM相手を選ぶ.html">補足02のDM相手選択</a>と同様の氏名・メールアドレス検索UIが開き、選んだ利用者をこのチャンネルに追加する想定（無効化されたアカウントは選択不可）。公開チャンネルではこのボタン自体を表示しない。<a href="../02_要件定義書.html#sec3">要件定義書F-34</a>参照。<br>
-    <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル情報」「メンバー」の2タブ構成にした（タブ切替はこの画面内で実際に動作します）。「チャンネル情報」タブは説明・公開範囲・作成者・作成日時の確認と、このチャンネルから退出する操作を提供する。S-03ヘッダーのチャンネル名クリックでこの画面を「チャンネル情報」タブが選択された状態で開き、参加人数クリックでは従来どおり「メンバー」タブで開く。退出時、自分が最後のチャンネル管理者の場合は拒否し、先に他の参加者をチャンネル管理者にするよう促す（S-06のchadmin解除と同じ管理者不在防止の考え方）。<a href="../02_要件定義書.html#sec3">要件定義書F-02</a>参照。
+    <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル情報」「メンバー」の2タブ構成にした（タブ切替はこの画面内で実際に動作します）。「チャンネル情報」タブは説明・公開範囲・作成者・作成日時の確認と、このチャンネルから退出する操作を提供する。S-03ヘッダーのチャンネル名クリックでこの画面を「チャンネル情報」タブが選択された状態で開き、参加人数クリックでは従来どおり「メンバー」タブで開く。退出時、自分が最後のチャンネル管理者の場合は拒否し、先に他の参加者をチャンネル管理者にするよう促す（S-06のchadmin解除と同じ管理者不在防止の考え方）。<a href="../02_要件定義書.html#sec3">要件定義書F-02</a>参照。<br>
+    <span style="color:#fbbf24;">1.21版で追加:</span> 「メンバー」タブの各行に「退出させる」ボタンを追加した。本来はチャンネル管理者・システム管理者のみに表示されるが、本モックアップでは説明のため常時表示している（トップバーの山田太郎は実際にはmemberのためこのボタンは見えない想定。S-03ヘッダーの「チャンネル設定」ボタンと同じ扱い）。自分自身の行（本人タグ）には表示せず、自己退出は「チャンネル情報」タブから行う。対象が最後のチャンネル管理者の場合は退出させられない。<a href="../02_要件定義書.html#sec3">要件定義書F-02</a>参照。
   </div>
 
 </body>

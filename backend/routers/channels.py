@@ -240,6 +240,35 @@ async def leave_channel(channel_id: int, user: CurrentUser = Depends(require_cha
     )
 
 
+@router.delete("/{channel_id}/members/{target_user_id}", status_code=204)
+async def remove_channel_member(
+    channel_id: int, target_user_id: int, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-73: メンバーをチャンネルから退出させる。当該chadmin/adminのみ実行できる。対象が最後の
+    チャンネル管理者の場合はA-48/A-72と同じ理由で400拒否する（chadmin同士でも実行できる）。
+    この経路より前に`/{channel_id}/members/me`（A-72）を定義しておく必要がある。FastAPIは
+    パスの文字列としては"me"も{target_user_id}にマッチしうるため、後で定義するとA-72に
+    「me」という文字列でリクエストが来てもこちらが先に一致し、int変換に失敗して422になってしまう"""
+    pool = get_pool()
+    is_target_admin = await pool.fetchval(
+        "SELECT is_channel_admin FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+        channel_id, target_user_id,
+    )
+    if is_target_admin is None:
+        raise HTTPException(404, detail="このチャンネルの参加者ではありません")
+    if is_target_admin:
+        admin_count = await pool.fetchval(
+            "SELECT count(*) FROM channel_members WHERE channel_id = $1 AND is_channel_admin", channel_id
+        )
+        if admin_count <= 1:
+            raise HTTPException(
+                400, detail="最後のチャンネル管理者は退出させられません。先に他の参加者をチャンネル管理者にしてください"
+            )
+    await pool.execute(
+        "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, target_user_id
+    )
+
+
 @router.get("/{channel_id}/members")
 async def list_channel_members(channel_id: int, user: CurrentUser = Depends(require_channel_member)):
     """A-46: 参加者一覧（chadmin/adminバッジ表示・補足03メンバー一覧、S-06チャンネル管理者タブでの

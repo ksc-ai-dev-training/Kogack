@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useUserProfile } from '../hooks/useUserProfile'
+import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from './Toast'
@@ -24,6 +25,7 @@ export default function MembersModal({
   onClose: () => void
 }) {
   const navigate = useNavigate()
+  const { me } = useMe()
   const { channel } = useChannel(channelId)
   const { members, mutate: mutateMembers } = useChannelMembers(channelId)
   const { mutate: mutateChannelsList } = useChannels()
@@ -31,8 +33,10 @@ export default function MembersModal({
   const toast = useToast()
   const confirm = useConfirm()
 
+  const canRemoveMembers = !!channel && (channel.is_channel_admin || me?.role === 'admin')
   const [tab, setTab] = useState<'info' | 'members'>(initialTab)
   const [leaving, setLeaving] = useState(false)
+  const [removingId, setRemovingId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
   const [addQuery, setAddQuery] = useState('')
@@ -99,6 +103,26 @@ export default function MembersModal({
     } catch (e) {
       toast(e instanceof Error ? e.message : '退出に失敗しました', 'error')
       setLeaving(false)
+    }
+  }
+
+  const removeMember = async (userId: string, name: string) => {
+    const ok = await confirm({
+      title: 'メンバーを退出させる',
+      message: `${name} さんをこのチャンネルから退出させますか？`,
+      confirmLabel: '退出させる',
+      danger: true,
+    })
+    if (!ok) return
+    setRemovingId(userId)
+    try {
+      await apiFetch(`/api/channels/${channelId}/members/${userId}`, { method: 'DELETE' })
+      await mutateMembers()
+      toast('メンバーを退出させました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '退出させるのに失敗しました', 'error')
+    } finally {
+      setRemovingId(null)
     }
   }
 
@@ -314,6 +338,16 @@ export default function MembersModal({
                       )}
                     </div>
                   </div>
+                  {canRemoveMembers && m.id !== me?.id && (
+                    <button
+                      type="button"
+                      disabled={removingId === m.id}
+                      onClick={() => removeMember(m.id, m.name)}
+                      className="flex-none rounded-md border border-line-strong px-2.5 py-1 text-[11px] font-semibold text-ink-muted hover:border-danger-border hover:text-danger-text disabled:opacity-40"
+                    >
+                      退出させる
+                    </button>
+                  )}
                 </div>
               ))}
               {filtered.length === 0 && (
@@ -327,6 +361,12 @@ export default function MembersModal({
                 <>
                   <br />
                   「＋メンバーを追加」は非公開チャンネルのみ表示され、参加者なら誰でも他の利用者を追加できます。
+                </>
+              )}
+              {canRemoveMembers && (
+                <>
+                  <br />
+                  「退出させる」はチャンネル管理者・システム管理者のみ表示されます。最後のチャンネル管理者は退出させられません。
                 </>
               )}
             </div>
