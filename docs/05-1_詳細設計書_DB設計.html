@@ -33,6 +33,7 @@
       <tr><td>1.2</td><td>2026-08-27</td><td>新規T-22 read_states（既読状態）を追加した（基本設計書v1.16「未読管理をメッセージ単位ではなく最終既読時刻1本にした」設計判断）。サイドバーの未読バッジは基本設計書4.2節に記載済みだったが、本書は未反映だった。</td></tr>
       <tr class="diff-new"><td>1.3</td><td>2026-08-28</td><td>T-18 scheduled_messagesにmentions列（JSONB）を追加し、送信予約でも@メンションの構造化（T-07 message_blocks）に対応できるようにした（基本設計書v1.24「設計判断」）。</td></tr>
       <tr class="diff-new"><td>1.4</td><td>2026-08-28</td><td>T-19 recurring_posts・T-21 trigger_rules（F-36・F-38）を実装した。あわせてT-05.recurring_post_id/trigger_rule_idにON DELETE SET NULLのFKを付与し、両者が排他であることを示すCHECK制約を明記した（基本設計書v1.25「設計判断」）。</td></tr>
+      <tr class="diff-new"><td>1.5</td><td>2026-08-28</td><td>T-06 message_attachments（F-07 ファイル共有）を実装した。message_idがNOT NULLのため、アップロード時点ではDB行を作らずファイル実体のみを保存し、発言確定後の同一トランザクション内で紐づけることを明記した。</td></tr>
     </tbody>
   </table>
 
@@ -146,6 +147,7 @@
       <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
   </table>
+  <p class="muted diff-new">message_idがNOT NULLのため、アップロード（A-21）の時点ではこの行を作らずファイル実体のみをディスクへ保存し、実際にA-11/A-14/A-19が発言を作成する同一トランザクション内で確定したmessage_idを添えてこの行を作成する（T-07 message_blocksのF-41メンションと同じ「発言確定後に紐づける」考え方。backend/attachments.py）。本番はSupabase Storageを想定するが、このスライスはA-61アイコンアップロードと同じ考え方でbackend/uploads/attachmentsへのディスク保存で代替する。</p>
 
   <h3>3.7 T-07 message_blocks（発言内の構造化ブロック）</h3>
   <table>

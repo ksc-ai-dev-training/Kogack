@@ -10,7 +10,7 @@ import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
-import type { MentionPayload } from '../types'
+import type { AttachmentPayload, MentionPayload } from '../types'
 
 // S-03 チャンネル会話＋S-04 スレッド表示（このスライスは添付・送信予約・要約は未実装）
 export default function ChannelView() {
@@ -114,11 +114,11 @@ export default function ChannelView() {
             placeholder={`# ${channel?.name ?? ''} にメッセージを送る（@でメンション）`}
             mentionCandidates={members.filter((m) => m.is_active)}
             scheduleTarget={{ channel_id: channelId }}
-            onSend={async (body, mentions: MentionPayload[]) => {
+            onSend={async (body, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
               if (!channelId) return
               await apiFetch(`/api/channels/${channelId}/messages`, {
                 method: 'POST',
-                body: JSON.stringify({ body, mentions }),
+                body: JSON.stringify({ body, mentions, attachments }),
               })
               await mutateMessages()
             }}

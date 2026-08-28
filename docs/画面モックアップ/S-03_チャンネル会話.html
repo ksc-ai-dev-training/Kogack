@@ -257,6 +257,14 @@
   .thread-link:hover { background: var(--bg-subtle); border-color: var(--border-strong); }
   .thread-link .todo { color: #0369a1; font-weight: 700; }
 
+  .file-attach {
+    margin-top: 6px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px;
+    color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+    text-decoration: none;
+  }
+  .file-attach:hover { background: var(--bg-subtle); border-color: var(--border-strong); }
+  .file-attach .fsize { color: var(--text-subtle); }
+
   /* ---- composer ---- */
   .composer { border-top: 1px solid var(--border); padding: 10px 20px 14px; flex: none; position: relative; }
   .composer-box { border: 1px solid var(--border-strong); border-radius: 10px; padding: 9px 12px; }
@@ -496,6 +504,18 @@
         </div>
 
         <div class="msg">
+          <div class="av" style="background:#99f6e4;color:#0f766e;">田</div>
+          <div class="msg-body">
+            <div class="msg-head"><span class="name">田中 智子</span><span class="time">10:03</span></div>
+            <div class="msg-text">こちらが手順書です。ご確認ください。</div>
+            <a class="file-attach" href="#">
+              <span>📎 デプロイ手順書.pdf</span>
+              <span class="fsize">(200 KB)</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="msg">
           <div class="av clickable" style="background:#0ea5e9;" onclick="document.getElementById('profileCard1').classList.toggle('show')">鈴</div>
           <div class="msg-body">
             <div class="msg-head"><span class="name clickable" onclick="document.getElementById('profileCard1').classList.toggle('show')">鈴木 一郎</span><span class="time">10:05</span></div>
@@ -715,7 +735,8 @@
     <span style="color:#fbbf24;">基本設計書1.14版で追加:</span> 画面右上のトースト通知は、chadminでない参加者が<a href="S-06_チャンネル設定.html">S-06（チャンネル設定）</a>のURLを直接開いた場合の例（本来は表示されない状態だが、本モックアップでは説明のため常時表示。✕で閉じられる）。この場合、S-06は表示されず自動的に当該チャンネルのS-03（この画面）へリダイレクトされ、権限がない旨がトーストで明示される。一方、参加していない非公開チャンネルのURLを直接開いた場合や、非adminが<a href="S-08_管理コンソール.html">S-08</a>のURLを直接開いた場合は、トーストなしでワークスペース（サイドバー）へ静かにリダイレクトされる（存在を伏せるべき対象か、権限不足を明示してよい対象かで挙動を使い分ける。基本設計書4.2節「設計判断」）。<br>
     <span style="color:#fbbf24;">1.18版で追加:</span> 新規F-43「チャンネル参加の通知」。誰かがチャンネルに参加すると「（氏名）さんが参加しました。」という発言が自動的にタイムラインへ追加される（冒頭の「システム通知」の例）。既存のBOT投稿（F-36定期投稿・F-38自動応答トリガー）と同じ<code>sender_type='bot'</code>の仕組みをそのまま流用し、新しいDBカラムは追加していない（表示名は固定で「システム通知」、送り主を選ぶ設定項目は無い）。チャンネル作成時に作成者が自動参加する場合は対象外（そのチャンネルに他の参加者がまだいないため通知の意味がない）。<a href="../02_要件定義書.html#sec3">要件定義書F-43</a>参照。<br>
     <span style="color:#fbbf24;">1.22版で改称:</span> F-43を「チャンネル参加・退出の通知」に改称し、誰かがチャンネルから退出した場合（自分自身の退出・チャンネル管理者による強制退出のいずれも）にも「（氏名）さんが退出しました。」という発言が同様に自動追加されるようにした（参加通知の直後に表示例を追加）。強制退出であっても、誰が退出させたかは本文に含めない。<a href="../02_要件定義書.html#sec3">要件定義書F-43</a>参照。<br>
-    <span style="color:#fbbf24;">基本設計書1.22版で追加:</span> 会話画面を開いた際、未読メッセージの先頭に「ここから未読メッセージ」区切り線を表示するようにした（佐藤花子の発言の直前の例）。開いた瞬間の未読件数（既存のunread_count）をフロントエンドだけで区切り線の位置に変換する方式で、新規API・DB列は追加していない。表示中に既読化されても、その画面を開いている間は区切り線の位置を保つ（Slack等の「新着メッセージ」区切り線と同じ考え方）。<a href="../04_基本設計書.html#sec6">基本設計書6.2節</a>参照。
+    <span style="color:#fbbf24;">基本設計書1.22版で追加:</span> 会話画面を開いた際、未読メッセージの先頭に「ここから未読メッセージ」区切り線を表示するようにした（佐藤花子の発言の直前の例）。開いた瞬間の未読件数（既存のunread_count）をフロントエンドだけで区切り線の位置に変換する方式で、新規API・DB列は追加していない。表示中に既読化されても、その画面を開いている間は区切り線の位置を保つ（Slack等の「新着メッセージ」区切り線と同じ考え方）。<a href="../04_基本設計書.html#sec6">基本設計書6.2節</a>参照。<br>
+    <span style="color:#fbbf24;">基本設計書1.26版で追加:</span> ファイル共有（F-07）を実装した。投稿欄の📎ボタンからファイルを添付でき（田中智子の発言例）、1件20MBまで・複数可・送信予約では利用できない。アップロードは即座に行い、発言送信時に確定した発言へ紐づける2段階方式（<a href="../04_基本設計書.html#sec6">基本設計書6.2節「設計判断」</a>）。ダウンロードは会話添付ファイルとして参加者限定で提供する。<a href="../02_要件定義書.html#sec3">要件定義書F-07</a>参照。
   </div>
 
 </body>

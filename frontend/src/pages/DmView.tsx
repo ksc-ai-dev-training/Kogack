@@ -80,11 +80,11 @@ export default function DmView() {
           <Composer
             placeholder={`${title} にメッセージを送る`}
             scheduleTarget={{ dm_id: dmId }}
-            onSend={async (body) => {
+            onSend={async (body, _mentions, attachments) => {
               if (!dmId) return
               await apiFetch(`/api/dms/${dmId}/messages`, {
                 method: 'POST',
-                body: JSON.stringify({ body }),
+                body: JSON.stringify({ body, attachments }),
               })
               await mutateMessages()
             }}

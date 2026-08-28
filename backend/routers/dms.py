@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
 from auth_helpers import CurrentUser, require_auth, require_dm_member
 from database import get_pool
 
@@ -110,7 +111,7 @@ async def mark_dm_read(dm_id: int, user: CurrentUser = Depends(require_dm_member
     return {"dm_id": str(dm_id), "read": True}
 
 
-def _message_out(row) -> dict:
+def _message_out(row, attachments: list[dict] | None = None) -> dict:
     return {
         "id": str(row["id"]),
         "dm_id": str(row["dm_id"]),
@@ -127,8 +128,10 @@ def _message_out(row) -> dict:
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],
         # F-41 @メンションはチャンネルのみ対応（候補元のA-46がチャンネル参加者一覧のため）。
-        # DM発言は常に空配列とし、フロント側でMessage型の形を揃える。
+        # DM発言は常に空配列とし、フロント側でMessage型の形を揃える。添付ファイル（F-07）は
+        # メンションと異なり候補元に依存しないためDMでも対応する。
         "blocks": [],
+        "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -156,29 +159,40 @@ async def list_messages(
                ORDER BY m.created_at ASC""",
             dm_id, since_dt,
         )
-        return {"items": [_message_out(r) for r in rows], "has_more": False}
+        attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+        return {
+            "items": [_message_out(r, attachments_by_message.get(r["id"])) for r in rows], "has_more": False,
+        }
     rows = await pool.fetch(
         f"""{_MESSAGES_SELECT}
            WHERE m.dm_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
            ORDER BY m.created_at DESC LIMIT $2""",
         dm_id, limit,
     )
-    return {"items": [_message_out(r) for r in reversed(rows)], "has_more": len(rows) == limit}
+    attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+    return {
+        "items": [_message_out(r, attachments_by_message.get(r["id"])) for r in reversed(rows)],
+        "has_more": len(rows) == limit,
+    }
 
 
 class PostMessageRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
+    attachments: list[AttachmentInput] = []
 
 
 @router.post("/{dm_id}/messages", status_code=201)
 async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser = Depends(require_dm_member)):
-    """A-19: メッセージ投稿"""
+    """A-19: メッセージ投稿。添付ファイル（F-07）はチャンネルと同じくA-21で保存済みの実体をT-06へ紐づける"""
     pool = get_pool()
-    row = await pool.fetchrow(
-        """INSERT INTO messages (dm_id, sender_type, sender_user_id, body)
-           VALUES ($1, 'human', $2, $3) RETURNING *""",
-        dm_id, user.id, body.body,
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            """INSERT INTO messages (dm_id, sender_type, sender_user_id, body)
+               VALUES ($1, 'human', $2, $3) RETURNING *""",
+            dm_id, user.id, body.body,
+        )
+        attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     return _message_out(
-        {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0}
+        {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
+        attachments,
     )

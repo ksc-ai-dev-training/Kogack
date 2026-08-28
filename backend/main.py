@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 import database
 from routers import (
-    admin, ai_settings, auth, channels, dms, icons, messages, recurring_posts,
+    admin, ai_settings, attachments, auth, channels, dms, icons, messages, recurring_posts,
     scheduled_messages, search, trigger_rules, users,
 )
 from services import scheduled_dispatcher
@@ -27,6 +27,7 @@ app = FastAPI(title="Kogack API", lifespan=lifespan)
 
 app.include_router(admin.router)
 app.include_router(ai_settings.router)
+app.include_router(attachments.router)
 app.include_router(auth.router)
 app.include_router(channels.router)
 app.include_router(dms.router)

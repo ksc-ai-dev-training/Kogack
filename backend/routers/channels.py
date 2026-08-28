@@ -1,7 +1,8 @@
 # A-05〜A-08, A-10〜A-11, A-46〜A-49（詳細設計書 API設計4.3節・4.6節、総論5.1節・5.3節）
-# 添付ファイルは未実装。送信予約はrouters/scheduled_messages.py、チャンネルAI設定は
-# routers/ai_settings.py、定期投稿はrouters/recurring_posts.py、自動応答トリガーは
-# routers/trigger_rules.pyに分離。
+# 添付ファイル（F-07）のアップロード/ダウンロード自体はrouters/attachments.py（A-21/A-22）に分離し、
+# このルーターはA-11投稿時に確定したmessage_idへの紐づけのみをattachments.pyの共通処理経由で行う。
+# 送信予約はrouters/scheduled_messages.py、チャンネルAI設定はrouters/ai_settings.py、定期投稿は
+# routers/recurring_posts.py、自動応答トリガーはrouters/trigger_rules.pyに分離。
 # S-06チャンネル設定は「チャンネル管理者」「基本設定」「キャラクタ」「振る舞い定義」「定期投稿」
 # 「自動応答トリガー」の6タブを実装し、「参照ドキュメント範囲」「スキル」「反応モード」「自動対応範囲」の
 # 4タブは対応する基盤（ドキュメント索引・自動対応分類）が未実装のため対象外（CLAUDE.md 実装状況節）。
@@ -10,6 +11,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
 from auth_helpers import CurrentUser, require_auth, require_channel_admin, require_channel_member
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
@@ -411,7 +413,7 @@ async def mark_channel_read(channel_id: int, user: CurrentUser = Depends(require
     return {"channel_id": str(channel_id), "read": True}
 
 
-def _message_out(row, blocks: list[dict] | None = None) -> dict:
+def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] | None = None) -> dict:
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]),
@@ -429,6 +431,7 @@ def _message_out(row, blocks: list[dict] | None = None) -> dict:
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],
         "blocks": blocks or [],
+        "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -465,7 +468,10 @@ async def list_messages(
             channel_id, limit,
         )))
     blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
-    items = [_message_out(r, blocks_by_message.get(r["id"])) for r in rows]
+    attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+    items = [
+        _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+    ]
     if since:
         return {"items": items, "has_more": False}
     return {"items": items, "has_more": len(rows) == limit}
@@ -474,13 +480,15 @@ async def list_messages(
 class PostMessageRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
     mentions: list[MentionInput] = []
+    attachments: list[AttachmentInput] = []
 
 
 @router.post("/{channel_id}/messages", status_code=201)
 async def post_message(
     channel_id: int, body: PostMessageRequest, user: CurrentUser = Depends(require_channel_member),
 ):
-    """A-11: メッセージ投稿。人間へのメンション（F-41）はT-07へ保存する。チャンネルAIへの
+    """A-11: メッセージ投稿。人間へのメンション（F-41）はT-07へ保存する。添付ファイル（F-07）は
+    A-21で保存済みの実体をT-06へ紐づける（attachments.py参照）。チャンネルAIへの
     メンション（本文中の「@ペルソナ名」文字列一致、基本設計書5.22節）を検知した場合は
     services/ai_agent.pyの応答生成を非同期タスクとして起動する（8.1節・8.7節、REQ-N-05。
     このAPI自体はAI応答を待たずに投稿完了を返す）。自動応答トリガー（F-38）は
@@ -494,9 +502,11 @@ async def post_message(
             channel_id, user.id, body.body,
         )
         blocks = await insert_mention_blocks(conn, row["id"], channel_id, body.mentions)
+        attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     await trigger_matcher.maybe_trigger(channel_id, body.body)
     await ai_agent.maybe_trigger(channel_id, body.body, user.id)
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
         blocks,
+        attachments,
     )

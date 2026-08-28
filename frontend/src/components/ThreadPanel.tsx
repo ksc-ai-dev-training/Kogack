@@ -4,7 +4,7 @@ import { apiFetch } from '../lib/api'
 import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageList'
 import Composer from './Composer'
 import ProfileCard from './ProfileCard'
-import type { ChannelMember, MentionPayload, Message } from '../types'
+import type { AttachmentPayload, ChannelMember, MentionPayload, Message } from '../types'
 
 // S-04 スレッド表示（画面モックアップ S-04）。S-03/DmViewの右側に重ねて表示するパネル。
 // 元発言はChannelView/DmView側で既に読み込み済みのmessages一覧から渡してもらう
@@ -37,10 +37,10 @@ export default function ThreadPanel({
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
   }, [replies.length])
 
-  const send = async (body: string, mentions: MentionPayload[]) => {
+  const send = async (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
     await apiFetch(`/api/messages/${messageId}/thread`, {
       method: 'POST',
-      body: JSON.stringify({ body, mentions }),
+      body: JSON.stringify({ body, mentions, attachments }),
     })
     await mutateReplies()
     onReplyPosted?.()

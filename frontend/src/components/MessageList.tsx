@@ -12,6 +12,12 @@ export function formatTime(iso: string) {
   return d.toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function dayKey(iso: string) {
   const d = new Date(iso)
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
@@ -125,6 +131,26 @@ export function Avatar({
       style={{ background: avatarColorFor(seed) }}
     >
       {(message.sender_name ?? '?').slice(0, 1)}
+    </div>
+  )
+}
+
+// F-07 ファイル共有。ダウンロードはA-22（/api/attachments/{id}）を通常のリンク遷移で叩く
+// （同一オリジンのためCookieが自動的に付き、A-22側の参加者チェックを経てFileResponseが返る）
+function AttachmentList({ attachments }: { attachments: Message['attachments'] }) {
+  if (!attachments || attachments.length === 0) return null
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {attachments.map((a) => (
+        <a
+          key={a.id}
+          href={`/api/attachments/${a.id}`}
+          className="flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] text-ink hover:border-line-strong hover:bg-surface-subtle"
+        >
+          📎 <span className="max-w-[220px] truncate">{a.file_name}</span>
+          <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
+        </a>
+      ))}
     </div>
   )
 }
@@ -249,6 +275,7 @@ export default function MessageList({
                     {renderMessageBody(m.body, m.blocks, members)}
                   </div>
                 )}
+                <AttachmentList attachments={m.attachments} />
                 {onOpenThread && (m.thread_reply_count ?? 0) > 0 && (
                   <button
                     type="button"

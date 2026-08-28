@@ -149,6 +149,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_read_states_channel ON read_states (user_i
 CREATE UNIQUE INDEX IF NOT EXISTS idx_read_states_dm ON read_states (user_id, dm_id) WHERE dm_id IS NOT NULL;
 ALTER TABLE read_states ENABLE ROW LEVEL SECURITY;
 
+-- T-06 message_attachments: 添付ファイル（F-07、05-1_詳細設計書_DB設計.html 3.6節）。message_idは
+-- NOT NULLのため、A-21（アップロード）の時点ではこの行を作らず、ファイル実体だけをディスクへ保存する。
+-- 実際にA-11/A-14/A-19が発言を作成する同一トランザクション内で、確定したmessage_idを添えてこの行を
+-- 作成する（T-07 message_blocksのF-41メンションと同じ「発言確定後に紐づける」考え方。
+-- attachments.pyのinsert_attachments/fetch_attachments_grouped参照）。
+CREATE TABLE IF NOT EXISTS message_attachments (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    message_id    BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    file_name     TEXT NOT NULL,
+    byte_size     BIGINT NOT NULL,
+    storage_path  TEXT NOT NULL,
+    uploaded_by   BIGINT NOT NULL REFERENCES users(id),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_message_attachments_message ON message_attachments (message_id);
+ALTER TABLE message_attachments ENABLE ROW LEVEL SECURITY;
+
 -- T-07 message_blocks: 発言内の構造化ブロック（05-1_詳細設計書_DB設計.html 3.7節）。
 -- 種類ごとにテーブルを分けずblock_type＋JSONB payloadに集約する設計（基本設計書6.2節「設計判断」）。
 -- このスライスではblock_type='mention'（F-41 @メンション）のみ実際に作成する。

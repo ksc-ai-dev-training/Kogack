@@ -17,7 +17,7 @@
     <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
     <div class="meta">
       <span>作成日: 2026-08-19</span>
-      <span>版数: 1.25</span>
+      <span>版数: 1.26</span>
       <span>作成: コガソフトウェア株式会社</span>
     </div>
     <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
@@ -54,6 +54,7 @@
       <tr class="diff-new"><td>1.23</td><td>2026-08-28</td><td>F-43のシステム通知（bot_display_name='システム通知'）を返信（A-14）・削除（A-12）の対象外とした（6.2節に設計判断を追記）。参加・退出の記録として信頼できる状態を保つための制約で、F-36/F-38のBOT発言は対象外にしない。詳細設計書API設計（A-12・A-14の説明を更新、v1.15）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.24</td><td>2026-08-28</td><td>F-35（送信予約）に@メンション（F-41）を対応させた。新規T-18.mentions列（JSONB）に予約時点の指定を保持し、実際の発言化タイミング（services/scheduled_dispatcher.py）でinsert_mention_blocksへ渡してT-07 message_blocksへ反映する（6.2節に設計判断を追記。予約から送信までの間に対象者がチャンネルを抜ける可能性があるため、参加者検証を送信時点に揃えた）。5.15節・A-50を更新した。DM宛ての予約はA-11/A-14と同じくメンションを無視する。詳細設計書DB設計（T-18、v1.3）・API設計（A-50、v1.16）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.25</td><td>2026-08-28</td><td>F-36（定期投稿）・F-38（自動応答トリガー）を実装した。新規T-19 recurring_posts・T-21 trigger_rulesを作成し、A-53〜A-56・A-63〜A-66を追加した。messages.recurring_post_id/trigger_rule_id（既存列）にON DELETE SET NULLのFK制約を新たに付与し、F-38の判定対象をA-11のみに絞った設計判断を6.2節に追記した。あわせて、BOT発言（F-36/F-38/F-43）のアイコン（bot_icon_url優先、次点でbot_icon絵文字）がメッセージ一覧のレスポンスに含まれていなかった抜け（5.16/5.19節に「アイコン未実装」と記載していた既知の制約）をbackfillした。S-06に「定期投稿」「自動応答トリガー」の2タブを追加した。詳細設計書DB設計（T-19・T-21、v1.4）・API設計（A-53〜A-56・A-63〜A-66、v1.17）を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.26</td><td>2026-08-28</td><td>F-07（ファイル共有）を実装した。新規T-06 message_attachments、新規A-21（アップロード）・A-22（ダウンロード）を追加した。message_idがNOT NULLのため、アップロード時点ではDB行を作らずファイル実体のみ保存し、発言作成時（A-11/A-14/A-19）に紐づける2段階方式とした設計判断を6.2節に追記した（A-61アイコンアップロードと同じ「先に確定させ、参照だけ後から渡す」パターン。F-41メンションのT-07反映と同じ考え方）。あわせてA-20にファイル検索（type=file）を実装し、F-06「横断検索」が実質的にメッセージ・ファイルの両方に対応した。ダウンロード（A-22）は添付先発言の参加者限定（アイコンとは異なる公開範囲）とした。5.4節・A-21/A-22・ルーター構成表を更新した。詳細設計書DB設計（T-06、v1.5）・API設計（A-21・A-22・A-20ファイル検索、v1.18）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -534,7 +535,7 @@
   </table>
 
   <h3>5.4 F-06 横断検索・F-07 ファイル共有</h3>
-  <p><strong>処理概要:</strong> 過去の発言・ファイル・ドキュメント根拠の横断検索（F-06。<span class="diff-new">検索条件モディファイアはF-42、5.23節を参照</span>）。検索対象は利用者の参照権限（参加チャンネル・DM、文書の閲覧権限）の範囲に限定する（REQ-N-02）。ファイル共有（F-07）は1ファイル20MBまでとし、Supabase Storageに保存する。AIによる添付ファイルの内容参照（テキスト抽出等）は対象外。</p>
+  <p><strong>処理概要:</strong> 過去の発言・ファイル・ドキュメント根拠の横断検索（F-06。<span class="diff-new">検索条件モディファイアはF-42、5.23節を参照</span>）。検索対象は利用者の参照権限（参加チャンネル・DM、文書の閲覧権限）の範囲に限定する（REQ-N-02）。ファイル共有（F-07）は1ファイル20MBまでとし、Supabase Storageに保存する。<span class="diff-new">このスライスはA-61アイコンアップロードと同じ考え方でbackend/uploads/attachmentsへのディスク保存で代替する（Koyeb実配備時はSupabase Storageへの置き換えが必要）。投稿欄でアップロードしたファイルはA-21が即座に実体を保存して参照情報を返し、実際の投稿（A-11/A-14/A-19）でT-06 message_attachmentsへ紐づける（6.2節「設計判断」）。ダウンロード（A-22）は添付先の発言の参加者に限定する（アイコンと異なり公開しない）。</span>AIによる添付ファイルの内容参照（テキスト抽出等）は対象外。</p>
   <table>
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
     <tbody><tr><td>S-05, S-03</td><td>A-20〜A-22</td><td>T-05〜T-07, T-09, T-10</td></tr></tbody>
@@ -934,6 +935,10 @@
     <strong>設計判断（F-38自動応答トリガーの判定対象をA-11（チャンネル本体投稿）のみに絞った理由）:</strong> F-41のAIメンショントリガーと同じ考え方で、スレッド返信（A-14）は判定対象に含めない。A-11はthread_parent_idを持たない投稿のみを扱うため、生成されるBOT発言は常にチャンネル本体への新規投稿になる（画面モックアップの「トリガーとなった発言がスレッド内であれば同じスレッドへ」という記述は、A-14を判定対象に含める場合の将来拡張を見込んだ表現であり、このスライスのスコープでは発生しない分岐）。判定処理はservices/trigger_matcher.pyに集約し、A-11から同期的に呼び出す（レイテンシを気にする必要が無い軽量処理のため、F-38のトリガー同様AI応答のような非同期化は行わない）。
   </div>
 
+  <div class="callout diff-new">
+    <strong>設計判断（F-07ファイル共有で、アップロード（A-21）と発言への紐づけ（T-06作成）を2段階に分けた理由）:</strong> T-06 message_attachments.message_idはNOT NULLであり、投稿欄でファイルを選んだ時点ではまだ発言（T-05）が存在しない。この制約の中でA-61アイコンアップロードと同じ「先にアップロードし、参照情報だけを後から確定させる」パターンを踏襲した。A-21はアップロードされたファイルを即座にディスク（本番はSupabase Storage）へ保存し、DB行は作らずにfile_name/byte_size/storage_pathを返すだけにとどめる。クライアント（Composer）はこれを保持しておき、実際の送信時（A-11/A-14/A-19）にattachmentsとして渡すことで、発言作成と同一トランザクション内でT-06行が作られる。F-41のメンション（T-07 message_blocksへの書き込みを発言確定後に行う）と全く同じ考え方であり、この設計を初めて採用したのはF-41だが、以降F-07・（送信予約でのメンション対応時）と繰り返し使われている「確定前のデータは参照情報だけ保持し、確定後にDBへ反映する」という一貫パターンである。ダウンロード（A-22）の公開範囲をアイコン（全認証済み利用者に公開）と分け、添付先の発言の参加者限定としたのは、5.4節の会話添付ファイルの既存方針（message_attachmentsは参加者限定）をそのまま踏襲したもの。
+  </div>
+
   <h3>6.3 共通設計方針</h3>
   <ul>
     <li>主キー: <code>id</code> は BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY で統一する（channel_members・channel_doc_folders等の中間テーブルは複合主キー）。</li>
@@ -978,8 +983,8 @@
       <tr><td>A-18</td><td><span class="badge badge-get">GET</span></td><td><code>/api/dms/{id}/messages</code></td><td><span class="diff-new">参加者</span></td><td>DMメッセージ履歴</td></tr>
       <tr><td>A-19</td><td><span class="badge badge-post">POST</span></td><td><code>/api/dms/{id}/messages</code></td><td><span class="diff-new">参加者</span></td><td>DMメッセージ投稿</td></tr>
       <tr><td>A-20</td><td><span class="badge badge-get">GET</span></td><td><code>/api/search</code></td><td>認証済</td><td>横断検索。クエリ: q, type（message/file/document）, page<span class="diff-new">, in（channel_id）, from（user_id）, with（user_id）, before/after/on（YYYY-MM-DD）, during（YYYY-MM）。モディファイア（in/from/with/before/after/on/during）を1つ以上含む場合、type=documentの結果は返さない（F-42、5.23節）</span>。結果は参照権限で絞り込む</td></tr>
-      <tr><td>A-21</td><td><span class="badge badge-post">POST</span></td><td><code>/api/attachments</code></td><td>チャンネル/DM参加者</td><td>ファイルアップロード（20MB上限、Supabase Storage）</td></tr>
-      <tr><td>A-22</td><td><span class="badge badge-get">GET</span></td><td><code>/api/attachments/{id}</code></td><td>参加者</td><td>ファイルダウンロード</td></tr>
+      <tr><td>A-21</td><td><span class="badge badge-post">POST</span></td><td><code>/api/attachments</code></td><td>認証済</td><td>ファイルアップロード（20MB上限。<span class="diff-new">A-61と同じくアップロード自体は無害なため誰でも呼べる。まだ発言に紐づいていないためDB行は作らず実体のみ保存する</span>）</td></tr>
+      <tr><td>A-22</td><td><span class="badge badge-get">GET</span></td><td><code>/api/attachments/{id}</code></td><td>添付先発言の参加者</td><td>ファイルダウンロード<span class="diff-new">（require_thread_accessと同じ権限判定。総論5.3節）</span></td></tr>
       <tr><td>A-23</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/ai-settings</code></td><td>当該chadmin/admin</td><td>AI設定一括取得（S-06）</td></tr>
       <tr><td>A-24</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/general</code></td><td>当該chadmin/admin</td><td>AI有効/無効・反応モード更新</td></tr>
       <tr><td>A-25</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/character</code></td><td>当該chadmin/admin</td><td>キャラクタ（名前・アイコン・口調）更新。<span class="diff-new">アイコンはA-61で画像をアップロードしてから、返却されたURLをpersona_icon_urlとして指定する（F-10）</span></td></tr>
@@ -1026,7 +1031,7 @@
     </tbody>
   </table>
 
-  <p>ルーターは <code>routers/auth.py</code>（A-01〜A-04）, <code>routers/channels.py</code>（A-05〜A-15<span class="diff-new">, A-46〜A-49, A-69</span>）, <code>routers/dms.py</code>（A-16〜A-19<span class="diff-new">, A-70</span>）, <code>routers/search.py</code>（A-20）, <code>routers/attachments.py</code>（A-21, A-22<span class="diff-new">, A-61</span>）, <code>routers/ai_settings.py</code>（A-23〜A-31<span class="diff-new">, A-45</span>）, <code>routers/pending_actions.py</code>（A-33〜A-35）, <code>routers/admin.py</code>（A-36〜A-44）<span class="diff-new">, <code>routers/scheduled_messages.py</code>（A-50〜A-52）, <code>routers/recurring_posts.py</code>（A-53〜A-56）, <code>routers/users.py</code>（A-62<span class="diff-new">, A-67, A-68</span>）, <code>routers/trigger_rules.py</code>（A-63〜A-66）</span>に分割する。権限判定は <code>auth_helpers.py</code> の権限デコレーターで共通化する。</p>
+  <p>ルーターは <code>routers/auth.py</code>（A-01〜A-04）, <code>routers/channels.py</code>（A-05〜A-15<span class="diff-new">, A-46〜A-49, A-69</span>）, <code>routers/dms.py</code>（A-16〜A-19<span class="diff-new">, A-70</span>）, <code>routers/search.py</code>（A-20）, <code>routers/attachments.py</code>（A-21, A-22<span class="diff-new">。A-61（アイコン）は汎用アップロードとして<code>routers/icons.py</code>に分離し、こちらには含めない</span>）, <code>routers/ai_settings.py</code>（A-23〜A-31<span class="diff-new">, A-45</span>）, <code>routers/pending_actions.py</code>（A-33〜A-35）, <code>routers/admin.py</code>（A-36〜A-44）<span class="diff-new">, <code>routers/scheduled_messages.py</code>（A-50〜A-52）, <code>routers/recurring_posts.py</code>（A-53〜A-56）, <code>routers/users.py</code>（A-62<span class="diff-new">, A-67, A-68</span>）, <code>routers/trigger_rules.py</code>（A-63〜A-66）</span>に分割する。権限判定は <code>auth_helpers.py</code> の権限デコレーターで共通化する。</p>
 
   <!-- ============ 8. AIエージェント設計 ============ -->
   <h2 id="sec8">8. AIエージェント設計</h2>

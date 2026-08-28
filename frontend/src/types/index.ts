@@ -79,6 +79,21 @@ export interface MessageBlock {
   sort_order: number
 }
 
+/** F-07 ファイル共有（T-06 message_attachments） */
+export interface MessageAttachment {
+  id: string
+  file_name: string
+  byte_size: number
+}
+
+/** ComposerがA-21アップロード後に保持し、A-11/A-14/A-19の送信時にattachmentsとして渡す形
+ * （MentionPayloadと同じ「先にアップロード→参照だけ投稿時に渡す」パターン） */
+export interface AttachmentPayload {
+  file_name: string
+  byte_size: number
+  storage_path: string
+}
+
 export interface Message {
   id: string
   channel_id?: string | null
@@ -99,6 +114,8 @@ export interface Message {
   thread_reply_count?: number
   /** F-41 @メンション。DM発言は常に空配列（候補元のA-46がチャンネル専用のため） */
   blocks?: MessageBlock[]
+  /** F-07 ファイル共有。チャンネル・DMどちらの発言にも付く */
+  attachments?: MessageAttachment[]
   created_at: string
 }
 
@@ -196,16 +213,21 @@ export interface UserSearchResult {
   is_active: boolean
 }
 
-/** このスライスはtype='message'のみ実装（ファイル・ドキュメント根拠は未実装のため常に0件） */
+/** type='message'|'file'はF-06/F-07で実装済み。type='document'はドキュメント根拠検索（層2）が
+ * 未実装のため常に0件（documentのitemsが返ることは無い）。message_id/excerptはtype='message'限定、
+ * attachment_id/file_name/byte_sizeはtype='file'限定で、それ以外は両方に共通のフィールド */
 export interface SearchResultItem {
   type: 'message' | 'file' | 'document'
-  message_id: string
+  message_id?: string
+  attachment_id?: string
+  file_name?: string
+  byte_size?: number
   channel_id: string | null
   channel_name: string | null
   dm_id: string | null
   dm_label: string | null
   sender_display_name: string | null
-  excerpt: string
+  excerpt?: string
   posted_at: string
 }
 

@@ -5,6 +5,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
 from auth_helpers import CurrentUser, require_auth, require_thread_access
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
@@ -12,7 +13,7 @@ from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 
-def _message_out(row, blocks: list[dict] | None = None) -> dict:
+def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] | None = None) -> dict:
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]) if row["channel_id"] is not None else None,
@@ -31,6 +32,7 @@ def _message_out(row, blocks: list[dict] | None = None) -> dict:
         "body": row["body"],
         "generation_status": row["generation_status"],
         "blocks": blocks or [],
+        "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -86,12 +88,18 @@ async def list_thread(message_id: int, user: CurrentUser = Depends(require_threa
         message_id,
     )
     blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
-    return {"items": [_message_out(r, blocks_by_message.get(r["id"])) for r in rows]}
+    attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+    return {
+        "items": [
+            _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+        ]
+    }
 
 
 class PostReplyRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
     mentions: list[MentionInput] = []
+    attachments: list[AttachmentInput] = []
 
 
 @router.post("/{message_id}/thread", status_code=201)
@@ -99,7 +107,8 @@ async def post_reply(
     message_id: int, body: PostReplyRequest, user: CurrentUser = Depends(require_thread_access),
 ):
     """A-14: スレッドへの返信投稿。channel_id/dm_idは元発言から引き継ぐ。@メンション（F-41）は
-    元発言がチャンネルの場合のみT-07へ保存する（DMは候補元のA-46が無いため対象外）"""
+    元発言がチャンネルの場合のみT-07へ保存する（DMは候補元のA-46が無いため対象外）。添付ファイル（F-07）は
+    チャンネル・DMどちらの返信でも対象（メンションと異なり候補元に依存しないため）"""
     pool = get_pool()
     parent = await pool.fetchrow(
         "SELECT channel_id, dm_id, sender_type, bot_display_name FROM messages WHERE id = $1", message_id
@@ -119,4 +128,7 @@ async def post_reply(
             await insert_mention_blocks(conn, row["id"], parent["channel_id"], body.mentions)
             if parent["channel_id"] is not None else []
         )
-    return _message_out({**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url}, blocks)
+        attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
+    return _message_out(
+        {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url}, blocks, attachments,
+    )

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
-import { apiFetch } from '../lib/api'
+import { apiFetch, uploadAttachment } from '../lib/api'
 import { useToast } from './Toast'
-import type { MentionPayload, ScheduleTarget } from '../types'
+import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
 const MIN_ROWS = 2
 const MAX_ROWS = 10
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024 // 20MB（F-07、05-1_詳細設計書_DB設計.html 3.6節）
 
 export interface MentionCandidate {
   id: string
@@ -14,6 +15,12 @@ export interface MentionCandidate {
 
 function pad2(n: number) {
   return String(n).padStart(2, '0')
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // 送信予約ポップオーバーを開いたときの日時欄の既定値（F-35）。5分後を初期値にし、
@@ -48,6 +55,9 @@ function detectMentionQuery(text: string, cursor: number): { atIndex: number; qu
 // 対応。送信予約自体はComposerがA-50を直接呼ぶ。設計書のComposerがchannelId/threadParentIdを
 // 直接受け取る想定とは異なり、このアプリの実装はonSendコールバック方式のため、送信予約専用に
 // 送信先だけを渡す形にしている）。
+// ファイル添付（F-07）はメンション候補の有無・送信予約対応の有無に関わらず常に使える（チャンネル・
+// DM・スレッド返信いずれもA-21/A-22は候補元に依存しないため）。ただし送信予約では利用できない
+// （confirmScheduleでattachmentsが1件以上あれば拒否する。基本設計書6.2節「設計判断」）。
 export default function Composer({
   placeholder,
   onSend,
@@ -55,13 +65,15 @@ export default function Composer({
   scheduleTarget,
 }: {
   placeholder: string
-  onSend: (body: string, mentions: MentionPayload[]) => Promise<void>
+  onSend: (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => Promise<void>
   mentionCandidates?: MentionCandidate[]
   scheduleTarget?: ScheduleTarget
 }) {
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [mentions, setMentions] = useState<MentionPayload[]>([])
+  const [attachments, setAttachments] = useState<AttachmentPayload[]>([])
+  const [uploading, setUploading] = useState(false)
   const [pickerQuery, setPickerQuery] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const [scheduleOpen, setScheduleOpen] = useState(false)
@@ -70,6 +82,7 @@ export default function Composer({
   const [scheduling, setScheduling] = useState(false)
   const toast = useToast()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
@@ -117,10 +130,36 @@ export default function Composer({
   // 即時送信・送信予約のいずれも同じ基準で絞り込む）
   const activeMentionsIn = (text: string) => mentions.filter((m) => text.includes(`@${m.display_name_snapshot}`))
 
+  // F-07 ファイル添付（A-21）。アップロード自体はここで即座に行い、返ってきたfile_name/byte_size/
+  // storage_pathを保持しておいて、実際の送信（A-11/A-14/A-19）でattachmentsとして渡す
+  // （F-41のメンションと同じ「先に確定させ、参照だけ送信時に渡す」パターン）
+  const pickFile = async (file: File | null) => {
+    if (!file) return
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast('ファイルサイズは20MBまでです', 'error')
+      return
+    }
+    setUploading(true)
+    try {
+      const uploaded = await uploadAttachment(file)
+      setAttachments((prev) => [...prev, uploaded])
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'アップロードに失敗しました', 'error')
+    } finally {
+      setUploading(false)
+    }
+  }
+  const removeAttachment = (index: number) => setAttachments((prev) => prev.filter((_, i) => i !== index))
+
   const confirmSchedule = async () => {
     const text = body.trim()
     if (!text) {
       toast('本文を入力してください', 'error')
+      return
+    }
+    if (attachments.length > 0) {
+      // F-35: 予約送信ではファイル添付は利用できない（基本設計書6.2節「設計判断」）
+      toast('送信予約ではファイルを添付できません。添付を外してください', 'error')
       return
     }
     if (!scheduleDate || !scheduleTime) {
@@ -195,9 +234,10 @@ export default function Composer({
     if (!text) return
     setSending(true)
     try {
-      await onSend(text, activeMentionsIn(text))
+      await onSend(text, activeMentionsIn(text), attachments)
       setBody('')
       setMentions([])
+      setAttachments([])
     } catch (e) {
       toast(e instanceof Error ? e.message : '送信に失敗しました', 'error')
     } finally {
@@ -309,7 +349,56 @@ export default function Composer({
         maxLength={4000}
         className="w-full resize-none border-none text-[13px] text-ink outline-none placeholder:text-ink-subtle"
       />
+      {(attachments.length > 0 || uploading) && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {attachments.map((a, i) => (
+            <span
+              key={`${a.storage_path}-${i}`}
+              className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-subtle px-2 py-1 text-[11.5px] text-ink-muted"
+            >
+              📎 {a.file_name}
+              <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
+              <button
+                type="button"
+                onClick={() => removeAttachment(i)}
+                title="添付を外す"
+                className="text-ink-subtle hover:text-danger-text"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          {uploading && (
+            <span className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-subtle px-2 py-1 text-[11.5px] text-ink-subtle">
+              アップロード中...
+            </span>
+          )}
+        </div>
+      )}
       <div className="mt-2 flex items-center gap-0.5">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            pickFile(e.target.files?.[0] ?? null)
+            e.target.value = ''
+          }}
+        />
+        <button
+          type="button"
+          title="ファイルを添付（20MBまで）"
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted disabled:opacity-40"
+        >
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path
+              d="M13.5 7.5l-5 5a2.1 2.1 0 0 0 3 3l5.5-5.5a3.5 3.5 0 0 0-5-5L6.5 9.5a4.9 4.9 0 0 0 7 7"
+              stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
+            />
+          </svg>
+        </button>
         {mentionCandidates && (
           <button
             type="button"
@@ -340,7 +429,7 @@ export default function Composer({
         )}
         <button
           type="button"
-          disabled={sending || !body.trim()}
+          disabled={sending || uploading || !body.trim()}
           onClick={send}
           className={`rounded-[7px] bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40 ${
             canSchedule ? '' : 'ml-auto'

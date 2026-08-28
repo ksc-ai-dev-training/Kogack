@@ -51,3 +51,25 @@ export async function uploadIcon(file: File): Promise<{ url: string }> {
   }
   return res.json()
 }
+
+// A-21: 添付ファイルアップロード（F-07）。まだどの発言にも紐づいていないため、返ってきた
+// file_name/byte_size/storage_pathをそのままComposerが保持し、送信時にA-11/A-14/A-19の
+// attachmentsとして渡す（uploadIconと同じくFormDataのため専用実装）。
+export async function uploadAttachment(
+  file: File,
+): Promise<{ file_name: string; byte_size: number; storage_path: string }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch('/api/attachments', { method: 'POST', credentials: 'same-origin', body: formData })
+  if (!res.ok) {
+    let detail = 'アップロードに失敗しました'
+    try {
+      const body = await res.json()
+      if (body.detail) detail = body.detail
+    } catch {
+      // JSONでないレスポンスは汎用メッセージのまま
+    }
+    throw new ApiError(res.status, detail)
+  }
+  return res.json()
+}
