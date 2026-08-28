@@ -31,6 +31,7 @@
       <tr><td>1.0</td><td>2026-08-24</td><td>総論v1.4からの分冊化により新設。内容は総論v1.3時点の3章（テーブル定義）と同一。以降、本分冊のみで完結する変更はここに追記し、分冊をまたぐ変更は総論の改訂履歴に記載する。</td></tr>
       <tr><td>1.1</td><td>2026-08-26</td><td>T-01 usersにlast_login_at列を追加した（S-08利用者管理タブの「最終ログイン」列は05-3画面設計に記載済みだったが、本書・API設計側が未反映だった抜けをbackfill）。</td></tr>
       <tr><td>1.2</td><td>2026-08-27</td><td>新規T-22 read_states（既読状態）を追加した（基本設計書v1.16「未読管理をメッセージ単位ではなく最終既読時刻1本にした」設計判断）。サイドバーの未読バッジは基本設計書4.2節に記載済みだったが、本書は未反映だった。</td></tr>
+      <tr class="diff-new"><td>1.3</td><td>2026-08-28</td><td>T-18 scheduled_messagesにmentions列（JSONB）を追加し、送信予約でも@メンションの構造化（T-07 message_blocks）に対応できるようにした（基本設計書v1.24「設計判断」）。</td></tr>
     </tbody>
   </table>
 
@@ -282,12 +283,13 @@
       <tr><td>thread_parent_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→messages.id（スレッド返信の予約時）</td></tr>
       <tr><td>sender_user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
       <tr><td>body</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr class="diff-new"><td>mentions</td><td>JSONB</td><td>NOT NULL</td><td>'[]'</td><td>MentionInput相当の配列（F-41）。予約時点の指定をそのまま保持し、発言化のタイミングでinsert_mention_blocksへ渡す</td></tr>
       <tr><td>scheduled_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>-</td><td>API側で未来日時のみ許可</td></tr>
       <tr><td>status</td><td>TEXT</td><td>NOT NULL</td><td>'pending'</td><td>CHECK IN ('pending','sent','cancelled')</td></tr>
       <tr><td>created_at / sent_at</td><td>TIMESTAMPTZ</td><td>sent_atはNULL可</td><td>createdはnow()</td><td>-</td></tr>
     </tbody>
   </table>
-  <p class="muted">索引: <code>(status, scheduled_at)</code>（ディスパッチャの <code>WHERE status='pending' AND scheduled_at &lt;= now()</code> 検索用）。</p>
+  <p class="muted">索引: <code>(status, scheduled_at)</code>（ディスパッチャの <code>WHERE status='pending' AND scheduled_at &lt;= now()</code> 検索用）。<span class="diff-new">T-07 message_blocksへの反映はscheduled_messages自体には行わず、発言化（messagesへのINSERT）と同じトランザクション内でmentions列の内容から作成する（基本設計書6.2節「設計判断」）。</span></p>
 
   <h3>3.14 T-19 recurring_posts（定期投稿ルール）</h3>
   <table>

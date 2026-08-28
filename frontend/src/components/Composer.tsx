@@ -113,6 +113,10 @@ export default function Composer({
     setScheduleOpen((v) => !v)
   }
 
+  // 本文から削除されたメンションは除外する（選択後にテキストを手で消した場合の整合性維持。
+  // 即時送信・送信予約のいずれも同じ基準で絞り込む）
+  const activeMentionsIn = (text: string) => mentions.filter((m) => text.includes(`@${m.display_name_snapshot}`))
+
   const confirmSchedule = async () => {
     const text = body.trim()
     if (!text) {
@@ -132,7 +136,12 @@ export default function Composer({
     try {
       await apiFetch('/api/scheduled-messages', {
         method: 'POST',
-        body: JSON.stringify({ ...scheduleTarget, body: text, scheduled_at: scheduledAt.toISOString() }),
+        body: JSON.stringify({
+          ...scheduleTarget,
+          body: text,
+          mentions: activeMentionsIn(text),
+          scheduled_at: scheduledAt.toISOString(),
+        }),
       })
       setBody('')
       setMentions([])
@@ -186,9 +195,7 @@ export default function Composer({
     if (!text) return
     setSending(true)
     try {
-      // 本文から削除されたメンションは除外する（選択後にテキストを手で消した場合の整合性維持）
-      const activeMentions = mentions.filter((m) => text.includes(`@${m.display_name_snapshot}`))
-      await onSend(text, activeMentions)
+      await onSend(text, activeMentionsIn(text))
       setBody('')
       setMentions([])
     } catch (e) {

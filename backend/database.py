@@ -171,8 +171,10 @@ ALTER TABLE message_blocks ENABLE ROW LEVEL SECURITY;
 -- キュー（Celery等）は導入せずFastAPI内蔵のasyncioタスクとする。単一インスタンス運用が前提で、
 -- 複数インスタンスに水平スケールする場合はアトミックなUPDATE...RETURNINGへの変更が必要
 -- （基本設計書10章「設計判断」。F-36定期投稿と同じ制約）。
--- @メンションの構造化（T-07 message_blocks）・ファイル添付との併用はこのスライスでは対象外
--- （要件定義書3.2節。予約メッセージの本文はプレーンテキストのみ）。
+-- @メンションの構造化（T-07 message_blocks）はmentions列（JSONB、MentionInput相当の配列）に
+-- 予約時点の指定をそのまま保持し、発言化のタイミング（services/scheduled_dispatcher.py）で
+-- insert_mention_blocksへ渡してT-07へ反映する（基本設計書6.2節「設計判断」）。ファイル添付との
+-- 併用はこのスライスでは引き続き対象外（要件定義書3.2節）。
 CREATE TABLE IF NOT EXISTS scheduled_messages (
     id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     channel_id        BIGINT REFERENCES channels(id) ON DELETE CASCADE,
@@ -180,6 +182,7 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     thread_parent_id  BIGINT REFERENCES messages(id) ON DELETE CASCADE,
     sender_user_id    BIGINT NOT NULL REFERENCES users(id),
     body              TEXT NOT NULL,
+    mentions          JSONB NOT NULL DEFAULT '[]'::jsonb,
     scheduled_at      TIMESTAMPTZ NOT NULL,
     status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'cancelled')),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -188,6 +191,8 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_scheduled_messages_dispatch ON scheduled_messages (status, scheduled_at);
 ALTER TABLE scheduled_messages ENABLE ROW LEVEL SECURITY;
+-- 予約送信でのメンション対応（上記コメント参照）を追加した際のbackfill
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS mentions JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- T-08 channel_ai_settings（チャンネルAI設定、05-1_詳細設計書_DB設計.html 3.8節）。
 -- チャンネルAI応答生成（基本設計書8章、詳細設計書AIサポート10章）の初回スライス。

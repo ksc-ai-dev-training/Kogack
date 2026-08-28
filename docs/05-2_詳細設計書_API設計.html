@@ -44,6 +44,7 @@
       <tr><td>1.13</td><td>2026-08-28</td><td>A-72・A-73のいずれも、退出成功時に参加通知（F-43）と対になる退出通知「（氏名）さんが退出しました。」をT-05へ作成するようにした。強制退出（A-73）でも本文には誰が退出させたかを含めないことを明記した。要件定義書v1.22・基本設計書v1.20を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.14</td><td>2026-08-28</td><td>A-08を拡張し、公開チャンネルでも既存の参加者が他の利用者をuser_id指定で招待できるようにした（従来は非公開チャンネルのみ対応。公開チャンネルの本人自己参加は従来どおり誰でも可能）。呼び出し元が当該チャンネルの参加者でない場合の403を明記した。要件定義書v1.23・基本設計書v1.21を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.15</td><td>2026-08-28</td><td>F-43のシステム通知（bot_display_name='システム通知'）をA-12（削除）・A-14（返信）の対象外とし、いずれも400を返すことを明記した。F-36/F-38のBOT発言は対象外にしない（sender_type='bot'一律ではなくbot_display_nameで判定）。基本設計書v1.23を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.16</td><td>2026-08-28</td><td>A-50にmentions（F-41、MentionInput形式）を追加した。参加者検証はA-11/A-14と異なり作成時点では行わず、実際の発言化タイミング（scheduled_dispatcher.py）まで遅らせることを明記した。DM宛ての予約はmentionsを無視する。基本設計書v1.24・詳細設計書DB設計（T-18.mentions列、v1.3）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -316,7 +317,9 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 
   <h3>4.9 送信予約（A-50〜A-52）</h3>
   <pre><code>// A-50 POST /api/scheduled-messages（channel_id/dm_idはどちらか一方、thread_parent_idは任意）
-{ "channel_id": "42", "body": "明日13時から棚卸しです", "scheduled_at": "2026-08-22T04:00:00Z" }
+{ "channel_id": "42", "body": "@田中 智子 明日13時から棚卸しです",
+  "mentions": [ { "target_user_id": "7", "display_name_snapshot": "田中 智子" } ],
+  "scheduled_at": "2026-08-22T04:00:00Z" }
 // response 201: { "id": "701", "channel_id": "42", "dm_id": null, "thread_parent_id": null,
 //   "body": "...", "scheduled_at": "...", "status": "pending" }
 
@@ -324,7 +327,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 // → { "items": [ { "id":"701", "channel_id":"42", "dm_id": null, "thread_parent_id": null,
 //   "body":"...", "scheduled_at":"...", "status":"pending" } ] }
 // A-52 DELETE /api/scheduled-messages/701 → 204（既にsent/cancelled済み・他人の予約は404で存在を伏せる）</code></pre>
-  <p class="muted"><code>scheduled_at</code> が現在時刻以前の場合は400。投稿先の参加者であることをA-11/A-19と同じ基準で検証する（非公開チャンネルの非参加者は404、公開チャンネルの非参加者は403）。ファイル添付、および@メンションの構造化（T-07 message_blocks）は受け付けない（要件定義書3.2節、対象外。本文に「@氏名」と入力すること自体は可能だが、送信時にプレーンテキストのまま発言化されハイライト表示や参照解決はされない）。実際の発言化は<code>services/scheduled_dispatcher.py</code>が30秒間隔ポーリングで行う（基本設計書5.15節）。</p>
+  <p class="muted"><code>scheduled_at</code> が現在時刻以前の場合は400。投稿先の参加者であることをA-11/A-19と同じ基準で検証する（非公開チャンネルの非参加者は404、公開チャンネルの非参加者は403）。<span class="diff-new"><code>mentions</code>はA-11/A-14と同じ<code>MentionInput</code>形式（F-41）で、T-18.mentions（JSONB）へそのまま保持する。参加者であることの検証はA-11/A-14と異なりこの作成時点では行わず、実際に発言化するタイミング（<code>services/scheduled_dispatcher.py</code>）まで遅らせる（基本設計書6.2節「設計判断」。予約から送信までの間に対象者がチャンネルを抜ける可能性があるため、送信時点の参加者を基準に揃える）。元の宛先がDMの場合はA-11/A-14と同じくメンション候補元（A-46）が存在しないため、<code>mentions</code>を送っても無視される。</span>ファイル添付は引き続き受け付けない（要件定義書3.2節、対象外）。実際の発言化は<code>services/scheduled_dispatcher.py</code>が30秒間隔ポーリングで行い、<span class="diff-new">mentionsが空でなければ、messagesへのINSERTと同一トランザクション内でinsert_mention_blocksを呼び出しT-07 message_blocksへ反映する</span>（基本設計書5.15節）。</p>
 
   <h3>4.10 定期投稿・自動応答トリガー（A-53〜A-56, A-63〜A-66）</h3>
   <pre><code>// A-54 POST /api/channels/42/recurring-posts

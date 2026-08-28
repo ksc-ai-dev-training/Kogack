@@ -1,9 +1,13 @@
 # A-50〜A-52（詳細設計書 API設計4.9節、基本設計書5.15節 F-35 送信予約）
 # 実際の発言化はservices/scheduled_dispatcher.pyが30秒間隔ポーリングで行う。このルーターは
 # scheduled_messagesへのCRUDのみを担当する。@メンションの構造化（T-07 message_blocks）は
-# A-11/A-14と異なりこのスライスでは対象外（T-18にmentions列を追加していないため。本文中に
-# 「@氏名」と入力すること自体はできるが、送信時にハイライト表示や参照解決はされないプレーン
-# テキストのまま発言化される）。ファイル添付との併用も対象外（要件定義書3.2節）。
+# A-11/A-14と同じMentionInputを受け取り、T-18のmentions列（JSONB）へそのまま保持する。
+# 参加者であることの検証（insert_mention_blocks）は予約時点ではなく発言化のタイミング
+# （scheduled_dispatcher.py）で行う。予約から送信までの間に対象者がチャンネルを抜ける可能性が
+# あり、A-11/A-14が「投稿時点の参加者」を基準にするのと同じ考え方を送信時点に合わせるため。
+# 元発言がDMの場合はA-11/A-14と同じくメンション候補元（A-46）が無いため常に空として扱う。
+# ファイル添付との併用は引き続き対象外（要件定義書3.2節）。
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_auth
 from database import get_pool
+from mentions import MentionInput
 
 router = APIRouter(prefix="/api/scheduled-messages", tags=["scheduled-messages"])
 
@@ -32,6 +37,7 @@ class CreateScheduledMessageRequest(BaseModel):
     dm_id: str | None = None
     thread_parent_id: str | None = None
     body: str = Field(min_length=1, max_length=4000)
+    mentions: list[MentionInput] = []
     scheduled_at: str
 
 
@@ -78,10 +84,14 @@ async def create_scheduled_message(
         if not is_member:
             raise HTTPException(404, detail="見つかりません")
 
+    # DMはメンション候補元（A-46）が無いため、A-11/A-14と同じくmentionsを送っても無視する
+    mentions_to_store = body.mentions if channel_id is not None else []
     row = await pool.fetchrow(
-        """INSERT INTO scheduled_messages (channel_id, dm_id, thread_parent_id, sender_user_id, body, scheduled_at)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING *""",
-        channel_id, dm_id, thread_parent_id, user.id, body.body, scheduled_at,
+        """INSERT INTO scheduled_messages
+               (channel_id, dm_id, thread_parent_id, sender_user_id, body, mentions, scheduled_at)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING *""",
+        channel_id, dm_id, thread_parent_id, user.id, body.body,
+        json.dumps([m.model_dump() for m in mentions_to_store]), scheduled_at,
     )
     return _out(row)
 

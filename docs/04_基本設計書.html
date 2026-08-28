@@ -17,7 +17,7 @@
     <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
     <div class="meta">
       <span>作成日: 2026-08-19</span>
-      <span>版数: 1.23</span>
+      <span>版数: 1.24</span>
       <span>作成: コガソフトウェア株式会社</span>
     </div>
     <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
@@ -52,6 +52,7 @@
       <tr class="diff-new"><td>1.21</td><td>2026-08-28</td><td>F-34に公開チャンネルへの招待を追加した。従来A-08は公開チャンネルを本人自己参加のみに限定していたが、既存の参加者が対象user_idを指定して他の利用者を追加する経路（非公開チャンネルと同じ仕組み）にも対応し、公開チャンネルでも「自分で検索して参加する」「招待される」の両方の入り方ができるようにした。5.14節・API一覧（A-08）を更新。要件定義書v1.23・画面モックアップ（補足03）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.22</td><td>2026-08-28</td><td>S-03・DM会話に「ここから未読メッセージ」区切り線を追加した（6.2節に設計判断を追記）。会話を開いた瞬間の未読件数（既存のunread_count）をフロントエンドのみで区切り線の位置に変換して表示する方式とし、新規API・DB列は追加していない。画面モックアップ（S-03）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.23</td><td>2026-08-28</td><td>F-43のシステム通知（bot_display_name='システム通知'）を返信（A-14）・削除（A-12）の対象外とした（6.2節に設計判断を追記）。参加・退出の記録として信頼できる状態を保つための制約で、F-36/F-38のBOT発言は対象外にしない。詳細設計書API設計（A-12・A-14の説明を更新、v1.15）を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.24</td><td>2026-08-28</td><td>F-35（送信予約）に@メンション（F-41）を対応させた。新規T-18.mentions列（JSONB）に予約時点の指定を保持し、実際の発言化タイミング（services/scheduled_dispatcher.py）でinsert_mention_blocksへ渡してT-07 message_blocksへ反映する（6.2節に設計判断を追記。予約から送信までの間に対象者がチャンネルを抜ける可能性があるため、参加者検証を送信時点に揃えた）。5.15節・A-50を更新した。DM宛ての予約はA-11/A-14と同じくメンションを無視する。詳細設計書DB設計（T-18、v1.3）・API設計（A-50、v1.16）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -609,7 +610,7 @@
   </table>
 
   <h3 class="diff-new">5.15 F-35 メッセージの送信予約</h3>
-  <p class="diff-new"><strong>処理概要:</strong> チャンネル・DM・スレッド返信いずれの投稿欄でも、送信ボタンの隣の🕐ボタンから送信日時（<code>scheduled_at</code>）を指定して予約できる（A-50）。予約中の内容はT-05（発言）にはまだ存在せず、専用のT-18 scheduled_messagesにpending状態で保持され、予約した本人以外には見えない。<code>services/scheduled_dispatcher.py</code>がアプリ起動時から30秒間隔で稼働し、<code>scheduled_at</code>を過ぎたpending行を検出すると、通常のメッセージ投稿（A-11/A-14/A-19相当）と同じ経路でT-05へ発言化する。これにより、@メンションによるAIエージェント処理（8章）も予約時ではなく実際の送信時点で通常どおりトリガーされる。送信前であれば、予約した本人がいつでもキャンセルできる（A-52、補足04「予約中のメッセージ」）。ファイル添付との併用は対象外（要件定義書3.2節）。</p>
+  <p class="diff-new"><strong>処理概要:</strong> チャンネル・DM・スレッド返信いずれの投稿欄でも、送信ボタンの隣の🕐ボタンから送信日時（<code>scheduled_at</code>）を指定して予約できる（A-50）。予約中の内容はT-05（発言）にはまだ存在せず、専用のT-18 scheduled_messagesにpending状態で保持され、予約した本人以外には見えない。<code>services/scheduled_dispatcher.py</code>がアプリ起動時から30秒間隔で稼働し、<code>scheduled_at</code>を過ぎたpending行を検出すると、通常のメッセージ投稿（A-11/A-14/A-19相当）と同じ経路でT-05へ発言化する。これにより、@メンションによるAIエージェント処理（8章）も予約時ではなく実際の送信時点で通常どおりトリガーされる。送信前であれば、予約した本人がいつでもキャンセルできる（A-52、補足04「予約中のメッセージ」）。<span class="diff-new">投稿欄の@メンション（F-41）は予約時にも入力でき、選択した内容はT-18.mentions（JSONB）へそのまま保持される。T-07 message_blocksへの反映はA-11/A-14と同じ「参加者であることの検証」を伴うため、予約時点ではなく実際に発言化するタイミング（ディスパッチャがmessagesへINSERTする同一トランザクション内）で行う（6.2節「設計判断」）。DM宛ての予約はA-11/A-14と同じくメンション候補元（A-46）が無いため対象外。</span>ファイル添付との併用は対象外（要件定義書3.2節）。</p>
   <table class="diff-new">
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
     <tbody><tr><td>S-03, S-04, 補足04</td><td>A-50, A-51, A-52</td><td>T-18</td></tr></tbody>
@@ -920,6 +921,10 @@
     <strong>設計判断（S-03/DM会話に「ここから未読メッセージ」区切り線を追加した理由・新規API/DBを設けなかった理由）:</strong> 未読バッジは件数を示すのみで、実際に会話画面を開いたときにどこから読めばよいかが分かりにくいという課題があったため、開いた瞬間の未読件数（既存のunread_count）をそのままフロントエンドだけで区切り線の位置に変換して表示する。会話を開いた時点のunread_countを1回だけ記録し、表示中に既読化ポーリング（A-69/A-70）でread_statesの最終既読時刻が更新されても、この画面を開いている間は記録した件数のまま区切り線の位置を固定する（Slack等の「新着メッセージ」区切り線と同じ考え方）。区切り線の対象メッセージは、記録した件数だけ末尾から遡り、自分以外が送った発言（本体タイムラインのみ、スレッド返信は元から含まれない）を数えて特定する。この計算はフロントエンドの表示ロジックのみで完結するため、新規API・DB列は追加していない。A-10/A-18が直近50件のみを初期読み込みする制約上、未読件数が読み込み済みの範囲を超える場合は読み込み済みの先頭に区切り線を出す。
   </div>
 
+  <div class="callout diff-new">
+    <strong>設計判断（送信予約に@メンションを対応させた際、T-18へmentions列を持たせT-07への反映を発言化のタイミングまで遅らせた理由）:</strong> A-11/A-14の@メンション保存（insert_mention_blocks）は「対象が投稿時点のチャンネル参加者であること」を検証してからT-07 message_blocksへ書き込む。送信予約は作成から実際の発言化までに時間差があり、その間に対象者がチャンネルを抜ける可能性があるため、予約作成時点でT-07へ先に書き込んでしまうと、送信時点では既に参加者でなくなった相手へのメンションが残り続けてしまう。そこでT-18 scheduled_messagesにmentions列（JSONB、MentionInput相当の配列）を追加し、予約時点の指定はいったんそのまま保持するだけにとどめ、実際にservices/scheduled_dispatcher.pyがmessagesへ発言化するのと同一トランザクション内でinsert_mention_blocksを呼び出す（＝送信時点の参加者を基準に検証する）方式とした。これによりA-11/A-14と全く同じ「投稿（発言化）時点の参加者であること」という基準を、予約送信でも一貫して守れる。DM宛ての予約はA-11/A-14と同じくメンション候補元（A-46）が存在しないため、mentionsを指定しても無視する。
+  </div>
+
   <h3>6.3 共通設計方針</h3>
   <ul>
     <li>主キー: <code>id</code> は BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY で統一する（channel_members・channel_doc_folders等の中間テーブルは複合主キー）。</li>
@@ -992,7 +997,7 @@
       <tr class="diff-new"><td>A-47</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/admins</code></td><td>当該chadmin/admin</td><td>チャンネル管理者を追加（対象はこのチャンネルの参加者に限る。F-33）</td></tr>
       <tr class="diff-new"><td>A-48</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/admins/{userId}</code></td><td>当該chadmin/admin</td><td>チャンネル管理者を解除（最後の1人は400で拒否。F-33）</td></tr>
       <tr class="diff-new"><td>A-49</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/visibility</code></td><td>当該chadmin/admin</td><td>公開／非公開を切り替える（is_public。F-34）</td></tr>
-      <tr class="diff-new"><td>A-50</td><td><span class="badge badge-post">POST</span></td><td><code>/api/scheduled-messages</code></td><td>チャンネル/DM参加者</td><td>送信予約を作成（channel_id または dm_id、任意でthread_parent_id、body、scheduled_at。scheduled_atは未来日時のみ許可。F-35）</td></tr>
+      <tr class="diff-new"><td>A-50</td><td><span class="badge badge-post">POST</span></td><td><code>/api/scheduled-messages</code></td><td>チャンネル/DM参加者</td><td>送信予約を作成（channel_id または dm_id、任意でthread_parent_id、body、<span class="diff-new">mentions（F-41、DM宛ては無視）、</span>scheduled_at。scheduled_atは未来日時のみ許可。F-35）</td></tr>
       <tr class="diff-new"><td>A-51</td><td><span class="badge badge-get">GET</span></td><td><code>/api/scheduled-messages</code></td><td>認証済</td><td>自分が予約したメッセージの一覧（status='pending'のみ。宛先チャンネル/DMを横断。補足04）</td></tr>
       <tr class="diff-new"><td>A-52</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/scheduled-messages/{id}</code></td><td>予約した本人</td><td>予約をキャンセル（status='cancelled'に変更。既にstatus='sent'の場合は404）</td></tr>
       <tr class="diff-new"><td>A-53</td><td><span class="badge badge-get">GET</span></td><td><code>/api/channels/{id}/recurring-posts</code></td><td>当該chadmin/admin</td><td>このチャンネルの定期投稿ルール一覧（F-36）</td></tr>
