@@ -87,9 +87,12 @@ export interface Message {
   sender_type: 'human' | 'ai' | 'bot'
   sender_user_id: string | null
   sender_name: string | null
-  /** AI発言はペルソナアイコンのスナップショット（services/ai_agent.py）。
-   * BOT発言は常にnull（アイコン未実装、F-36/F-38） */
+  /** AI発言はペルソナアイコン、BOT発言（F-36/F-38）は送り主アイコン画像のスナップショット
+   * （bot_icon_url優先。いずれも未設定ならnull） */
   sender_picture_url: string | null
+  /** BOT発言（F-36/F-38）の絵文字アイコン。sender_picture_urlが無いときのフォールバック表示に使う。
+   * AI・人間の発言、F-43システム通知では常にnull */
+  bot_icon?: string | null
   body: string
   generation_status: 'generating' | null
   /** 元発言のみに含まれる（S-04スレッド表示への導線。A-10/A-18）。返信自体には付かない */
@@ -144,6 +147,45 @@ export interface ScheduleTarget {
   channel_id?: string
   dm_id?: string
   thread_parent_id?: string
+}
+
+/** F-36 定期投稿（T-19 recurring_posts、S-06「定期投稿」タブ） */
+export interface RecurringPost {
+  id: string
+  channel_id: string
+  body: string
+  bot_display_name: string
+  bot_icon: string | null
+  bot_icon_url: string | null
+  frequency: 'once' | 'daily' | 'weekly' | 'monthly'
+  anchor_at: string
+  next_run_at: string
+  is_active: boolean
+  last_sent_at: string | null
+  created_at: string
+}
+
+export interface RecurringPostsResponse {
+  items: RecurringPost[]
+}
+
+/** F-38 自動応答トリガー（T-21 trigger_rules、S-06「自動応答トリガー」タブ） */
+export interface TriggerRule {
+  id: string
+  channel_id: string
+  trigger_type: 'keyword' | 'emoji'
+  trigger_value: string
+  action_type: 'post_message'
+  action_body: string
+  bot_display_name: string
+  bot_icon: string | null
+  bot_icon_url: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export interface TriggerRulesResponse {
+  items: TriggerRule[]
 }
 
 export interface UserSearchResult {

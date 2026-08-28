@@ -7,7 +7,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import database
-from routers import admin, ai_settings, auth, channels, dms, icons, messages, scheduled_messages, search, users
+from routers import (
+    admin, ai_settings, auth, channels, dms, icons, messages, recurring_posts,
+    scheduled_messages, search, trigger_rules, users,
+)
 from services import scheduled_dispatcher
 
 
@@ -29,8 +32,10 @@ app.include_router(channels.router)
 app.include_router(dms.router)
 app.include_router(icons.router)
 app.include_router(messages.router)
+app.include_router(recurring_posts.router)
 app.include_router(scheduled_messages.router)
 app.include_router(search.router)
+app.include_router(trigger_rules.router)
 app.include_router(users.router)
 
 

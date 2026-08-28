@@ -231,6 +231,74 @@ CREATE TABLE IF NOT EXISTS ai_usage_logs (
     CHECK ((channel_id IS NULL) <> (dm_id IS NULL))
 );
 ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
+
+-- T-19 recurring_posts（定期投稿、F-36。05-1_詳細設計書_DB設計.html 3.14節）。
+-- services/scheduled_dispatcher.pyが30秒間隔でnext_run_at<=now() AND is_active=trueの行を検出し、
+-- T-05へsender_type='bot'の発言を1件作成する（F-35と同じディスパッチャ、専用ジョブキューは導入しない）。
+-- 送信後、頻度に応じてnext_run_atを更新する（'once'はis_active=falseにする）。個人宛て複数可への
+-- 対応は一度実装したが方針転換で対象外に戻した（要件定義書3.2節「対象外機能」、T-20が欠番の理由）。
+CREATE TABLE IF NOT EXISTS recurring_posts (
+    id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id        BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    created_by        BIGINT NOT NULL REFERENCES users(id),
+    body              TEXT NOT NULL,
+    bot_display_name  TEXT NOT NULL,
+    bot_icon          TEXT DEFAULT '📌',
+    bot_icon_url      TEXT,
+    frequency         TEXT NOT NULL CHECK (frequency IN ('once', 'daily', 'weekly', 'monthly')),
+    anchor_at         TIMESTAMPTZ NOT NULL,
+    next_run_at       TIMESTAMPTZ NOT NULL,
+    is_active         BOOLEAN NOT NULL DEFAULT true,
+    last_sent_at      TIMESTAMPTZ,
+    updated_by        BIGINT REFERENCES users(id),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_posts_dispatch ON recurring_posts (is_active, next_run_at);
+ALTER TABLE recurring_posts ENABLE ROW LEVEL SECURITY;
+
+-- T-21 trigger_rules（自動応答トリガー、F-38。05-1_詳細設計書_DB設計.html 3.16節）。F-35/F-36の
+-- 時刻ベースのディスパッチャとは異なり、A-11（メッセージ投稿）内で同期的に判定するイベント駆動方式
+-- （services/trigger_matcher.py。基本設計書6.2節「設計判断」）。
+CREATE TABLE IF NOT EXISTS trigger_rules (
+    id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id        BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    created_by        BIGINT NOT NULL REFERENCES users(id),
+    trigger_type      TEXT NOT NULL CHECK (trigger_type IN ('keyword', 'emoji')),
+    trigger_value     TEXT NOT NULL,
+    action_type       TEXT NOT NULL DEFAULT 'post_message' CHECK (action_type IN ('post_message')),
+    action_body       TEXT NOT NULL,
+    bot_display_name  TEXT NOT NULL,
+    bot_icon          TEXT DEFAULT '⚡',
+    bot_icon_url      TEXT,
+    is_active         BOOLEAN NOT NULL DEFAULT true,
+    updated_by        BIGINT REFERENCES users(id),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_trigger_rules_channel_active ON trigger_rules (channel_id, is_active);
+ALTER TABLE trigger_rules ENABLE ROW LEVEL SECURITY;
+
+-- messages.recurring_post_id/trigger_rule_idは、参照先（T-19/T-21）が無い時期にF-43実装時点で
+-- 先に列だけ用意していたため、FK無しの列だった。既存テーブルへのFK追加はCREATE TABLE
+-- IF NOT EXISTSでretrofitされないため、messages.dm_idと同じ要領でここで明示的に付与する。
+DO $$ BEGIN
+    ALTER TABLE messages ADD CONSTRAINT messages_recurring_post_id_fkey
+        FOREIGN KEY (recurring_post_id) REFERENCES recurring_posts(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE messages ADD CONSTRAINT messages_trigger_rule_id_fkey
+        FOREIGN KEY (trigger_rule_id) REFERENCES trigger_rules(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+-- 1件の発言はrecurring_posts由来かtrigger_rules由来かのどちらか一方（またはどちらでもないF-43等）
+-- （05-1_詳細設計書_DB設計.html 3.5節）
+DO $$ BEGIN
+    ALTER TABLE messages ADD CONSTRAINT messages_recurring_or_trigger_check
+        CHECK (recurring_post_id IS NULL OR trigger_rule_id IS NULL);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 """
 
 

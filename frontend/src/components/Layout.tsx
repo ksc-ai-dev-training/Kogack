@@ -42,7 +42,8 @@ export default function Layout({ me, children }: { me: Me; children: React.React
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
   // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。実装済みなのは
-  // 4タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義）のみのため、未実装タブは出さない
+  // 6タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・定期投稿・自動応答トリガー）のみのため、
+  // 未実装タブ（参照ドキュメント範囲・スキル・反応モード・自動対応範囲）は出さない
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
   const [searchParams] = useSearchParams()
@@ -129,6 +130,27 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   className={navItemClass(settingsTab === 'prompt')}
                 >
                   <span className="text-sm">📝</span>振る舞い定義
+                </Link>
+              </li>
+            </ul>
+            <div className="mb-1.5 mt-4.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">
+              その他の設定
+            </div>
+            <ul>
+              <li>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=recurring`}
+                  className={navItemClass(settingsTab === 'recurring')}
+                >
+                  <span className="text-sm">🔁</span>定期投稿
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=trigger`}
+                  className={navItemClass(settingsTab === 'trigger')}
+                >
+                  <span className="text-sm">⚡</span>自動応答トリガー
                 </Link>
               </li>
             </ul>

@@ -83,7 +83,9 @@ export function Avatar({ message, onClick }: { message: Message; onClick?: () =>
   // アイコン画像を設定済みならそれを表示し、無ければ種別ごとのフォールバックにする
   // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）。
   // AI発言はペルソナアイコン（未設定なら後段の「AI」表示にフォールバック）、人間の発言は
-  // プロフィール画像が対象（services/ai_agent.py・A-62）
+  // プロフィール画像が対象（services/ai_agent.py・A-62）。BOT発言（F-36/F-38）は送り主アイコン画像
+  // （bot_icon_url、この分岐の対象）を優先し、次点でbot_icon（絵文字、次の分岐）、
+  // どちらも未設定なら🔔（F-43システム通知と同じ既定表示）にフォールバックする
   if (message.sender_picture_url) {
     return (
       <img
@@ -98,7 +100,7 @@ export function Avatar({ message, onClick }: { message: Message; onClick?: () =>
   if (message.sender_type === 'bot') {
     return (
       <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-bot-bg text-base">
-        🔔
+        {message.bot_icon || '🔔'}
       </div>
     )
   }

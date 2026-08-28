@@ -45,6 +45,7 @@
       <tr class="diff-new"><td>1.14</td><td>2026-08-28</td><td>A-08を拡張し、公開チャンネルでも既存の参加者が他の利用者をuser_id指定で招待できるようにした（従来は非公開チャンネルのみ対応。公開チャンネルの本人自己参加は従来どおり誰でも可能）。呼び出し元が当該チャンネルの参加者でない場合の403を明記した。要件定義書v1.23・基本設計書v1.21を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.15</td><td>2026-08-28</td><td>F-43のシステム通知（bot_display_name='システム通知'）をA-12（削除）・A-14（返信）の対象外とし、いずれも400を返すことを明記した。F-36/F-38のBOT発言は対象外にしない（sender_type='bot'一律ではなくbot_display_nameで判定）。基本設計書v1.23を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.16</td><td>2026-08-28</td><td>A-50にmentions（F-41、MentionInput形式）を追加した。参加者検証はA-11/A-14と異なり作成時点では行わず、実際の発言化タイミング（scheduled_dispatcher.py）まで遅らせることを明記した。DM宛ての予約はmentionsを無視する。基本設計書v1.24・詳細設計書DB設計（T-18.mentions列、v1.3）を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.17</td><td>2026-08-28</td><td>A-53〜A-56（定期投稿、F-36）・A-63〜A-66（自動応答トリガー、F-38）を実装した。A-56/A-66の削除時の挙動（発言は残す、ON DELETE SET NULL）とbot_display_name未指定時の既定値を明記した。基本設計書v1.25・詳細設計書DB設計（T-19・T-21、v1.4）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -339,7 +340,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 { "trigger_type": "keyword", "trigger_value": "サポート", "action_body": "サポート窓口は #総務 へどうぞ",
   "bot_display_name": "ヘルプ案内Bot", "bot_icon": "⚡" }
 // response 201: { "id": "5", "is_active": true }</code></pre>
-  <p class="muted">A-55/A-65（PUT）は同一スキーマの部分更新に加え、<code>{"is_active": false}</code>のみを送る呼び出しで一時停止/再開をトグルできる。</p>
+  <p class="muted">A-55/A-65（PUT）は同一スキーマの部分更新に加え、<code>{"is_active": false}</code>のみを送る呼び出しで一時停止/再開をトグルできる。<span class="diff-new">A-56/A-66（DELETE）は204を返し、既に送信・投稿済みのT-05発言は削除しない（messages.recurring_post_id/trigger_rule_idはON DELETE SET NULLのため、削除後は参照が外れるだけで本文・アイコンは残る。基本設計書6.2節「設計判断」）。bot_display_name未指定時はA-54で「お知らせBot」、A-64で「自動応答Bot」を既定値として補う。</span></p>
 
   <h3>4.11 プロフィール（A-62, A-67）</h3>
   <pre><code>PUT /api/users/me
