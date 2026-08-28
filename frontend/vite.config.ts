@@ -36,7 +36,14 @@ export default defineConfig({
   server: {
     port: frontendPort,
     proxy: {
-      '/api': `http://localhost:${backendPort}`,
+      // changeOrigin: falseで、バックエンドへ転送するリクエストのHostヘッダーを
+      // ブラウザが実際にアクセスしているlocalhost:{frontendPort}のまま維持する
+      // （既定のchangeOrigin:trueだと転送先のlocalhost:{backendPort}に書き換わってしまい、
+      // google_auth.pyのredirect_uri_for()がHostヘッダーから組み立てるコールバックURLの
+      // ポート番号がバックエンド側になってしまう。Google Cloud Consoleにはフロントエンドの
+      // ポート（ブラウザが実際に見ているアドレス）で登録されているため、これが一致しないと
+      // ローカルでのGoogle認証がredirect_uri_mismatchで失敗する）。
+      '/api': { target: `http://localhost:${backendPort}`, changeOrigin: false },
     },
   },
 })
