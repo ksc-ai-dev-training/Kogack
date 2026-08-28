@@ -230,6 +230,7 @@ export interface AdminUser {
   id: string
   name: string
   email: string
+  picture_url: string | null
   role: Role
   is_active: boolean
   last_login_at: string | null

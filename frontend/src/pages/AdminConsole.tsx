@@ -124,12 +124,21 @@ export default function AdminConsole() {
               <tr key={u.id} className={`border-b border-line ${u.is_active ? '' : 'text-ink-subtle'}`}>
                 <td className="px-3 py-2.5">
                   <div className="flex items-center gap-2.5">
-                    <span
-                      className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
-                      style={{ background: avatarColorFor(u.id) }}
-                    >
-                      {u.name.slice(0, 1)}
-                    </span>
+                    {u.picture_url ? (
+                      <img
+                        src={u.picture_url}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="h-6 w-6 flex-none rounded-full object-cover"
+                      />
+                    ) : (
+                      <span
+                        className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
+                        style={{ background: avatarColorFor(u.id) }}
+                      >
+                        {u.name.slice(0, 1)}
+                      </span>
+                    )}
                     <span className={`font-semibold ${u.is_active ? 'text-ink' : 'text-ink-subtle line-through'}`}>
                       {u.name}
                     </span>

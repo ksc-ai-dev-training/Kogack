@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 async def list_users(user: CurrentUser = Depends(require_roles("admin"))):
     """A-36: 利用者一覧。chadmin_channelsは参考表示のみ（変更はS-06チャンネル管理者タブで行う）"""
     rows = await get_pool().fetch(
-        """SELECT u.id, u.name, u.email, u.role, u.is_active, u.last_login_at,
+        """SELECT u.id, u.name, u.email, u.picture_url, u.role, u.is_active, u.last_login_at,
                COALESCE(array_agg(c.name ORDER BY c.name) FILTER (WHERE cm.is_channel_admin), '{}')
                    AS chadmin_channels
            FROM users u
@@ -26,7 +26,8 @@ async def list_users(user: CurrentUser = Depends(require_roles("admin"))):
     return {
         "items": [
             {
-                "id": str(r["id"]), "name": r["name"], "email": r["email"], "role": r["role"],
+                "id": str(r["id"]), "name": r["name"], "email": r["email"],
+                "picture_url": r["picture_url"], "role": r["role"],
                 "is_active": r["is_active"],
                 "last_login_at": r["last_login_at"].isoformat() if r["last_login_at"] else None,
                 "chadmin_channels": list(r["chadmin_channels"]),
