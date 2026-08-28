@@ -221,7 +221,8 @@ async def join_channel(
 async def leave_channel(channel_id: int, user: CurrentUser = Depends(require_channel_member)):
     """A-72: チャンネルからの退出。管理者不在を防ぐため、自分が最後のチャンネル管理者の場合は拒否する
     （A-48「最後の管理者は解除できません」と同じ考え方。最後の1人は必ずchadminであるため、
-    このチェックだけでチャンネルが参加者ゼロになる事態も同時に防げる）"""
+    このチェックだけでチャンネルが参加者ゼロになる事態も同時に防げる）。F-43の入室通知と対になる
+    退出通知をT-05へ作成する（同じsender_type='bot'の枠組みを流用）"""
     pool = get_pool()
     is_admin = await pool.fetchval(
         "SELECT is_channel_admin FROM channel_members WHERE channel_id = $1 AND user_id = $2",
@@ -235,9 +236,15 @@ async def leave_channel(channel_id: int, user: CurrentUser = Depends(require_cha
             raise HTTPException(
                 400, detail="最後のチャンネル管理者は退出できません。先に他の参加者をチャンネル管理者にしてください"
             )
-    await pool.execute(
-        "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, user.id
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, user.id
+        )
+        await conn.execute(
+            """INSERT INTO messages (channel_id, sender_type, bot_display_name, body)
+               VALUES ($1, 'bot', 'システム通知', $2)""",
+            channel_id, f"{user.name} さんが退出しました。",
+        )
 
 
 @router.delete("/{channel_id}/members/{target_user_id}", status_code=204)
@@ -248,7 +255,9 @@ async def remove_channel_member(
     チャンネル管理者の場合はA-48/A-72と同じ理由で400拒否する（chadmin同士でも実行できる）。
     この経路より前に`/{channel_id}/members/me`（A-72）を定義しておく必要がある。FastAPIは
     パスの文字列としては"me"も{target_user_id}にマッチしうるため、後で定義するとA-72に
-    「me」という文字列でリクエストが来てもこちらが先に一致し、int変換に失敗して422になってしまう"""
+    「me」という文字列でリクエストが来てもこちらが先に一致し、int変換に失敗して422になってしまう。
+    A-72と同じ退出通知をT-05へ作成する（誰が退出させたかは本文に含めない。F-43の入室通知が
+    招待者を明記しないのと同じ考え方）"""
     pool = get_pool()
     is_target_admin = await pool.fetchval(
         "SELECT is_channel_admin FROM channel_members WHERE channel_id = $1 AND user_id = $2",
@@ -264,9 +273,16 @@ async def remove_channel_member(
             raise HTTPException(
                 400, detail="最後のチャンネル管理者は退出させられません。先に他の参加者をチャンネル管理者にしてください"
             )
-    await pool.execute(
-        "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, target_user_id
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        target_name = await conn.fetchval("SELECT name FROM users WHERE id = $1", target_user_id)
+        await conn.execute(
+            "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, target_user_id
+        )
+        await conn.execute(
+            """INSERT INTO messages (channel_id, sender_type, bot_display_name, body)
+               VALUES ($1, 'bot', 'システム通知', $2)""",
+            channel_id, f"{target_name} さんが退出しました。",
+        )
 
 
 @router.get("/{channel_id}/members")
