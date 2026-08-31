@@ -233,8 +233,8 @@ CREATE TABLE IF NOT EXISTS channel_ai_settings (
 ALTER TABLE channel_ai_settings ENABLE ROW LEVEL SECURITY;
 
 -- T-13 ai_usage_logs（05-1_詳細設計書_DB設計.html 3.11節）。質問文・回答文そのものは記録しない
--- （発言本文はT-05に既に保存されているため。基本設計書8.6節）。T-14上限管理・80%通知（F-29後半）は
--- このスライスでは対象外（記録のみ行う）。dm_idはDMでのAI応答が未実装のため現状常にNULL。
+-- （発言本文はT-05に既に保存されているため。基本設計書8.6節）。dm_idはDMでのAI応答が未実装のため
+-- 現状常にNULL。
 CREATE TABLE IF NOT EXISTS ai_usage_logs (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     channel_id          BIGINT REFERENCES channels(id) ON DELETE CASCADE,
@@ -248,6 +248,26 @@ CREATE TABLE IF NOT EXISTS ai_usage_logs (
     CHECK ((channel_id IS NULL) <> (dm_id IS NULL))
 );
 ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
+
+-- T-14 ai_usage_limits（05-1_詳細設計書_DB設計.html 3.11節）。S-08「AI利用状況・コスト」タブの
+-- 上限設定（A-43）用。scope='global'は最大1行、scope='channel'はchannel_idごとに最大1行に
+-- 部分ユニークインデックスで制約する（PostgreSQLのON CONFLICT ... WHEREで洗い替えを行う）。
+-- 80%到達時の通知メール送信・応答停止制御はこのスライスでは対象外（上限到達時の挙動は
+-- 要件定義書8.2節のとおり千田氏との別途協議事項のため、設定の保存・使用率の表示のみ行う）。
+CREATE TABLE IF NOT EXISTS ai_usage_limits (
+    id                     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    scope                  TEXT NOT NULL CHECK (scope IN ('global', 'channel')),
+    channel_id             BIGINT REFERENCES channels(id) ON DELETE CASCADE,
+    monthly_limit_yen      NUMERIC(10, 2) NOT NULL,
+    notify_threshold_pct   INT NOT NULL DEFAULT 80,
+    notify_email           TEXT NOT NULL,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (scope = 'channel' OR channel_id IS NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_usage_limits_global ON ai_usage_limits (scope) WHERE scope = 'global';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_usage_limits_channel ON ai_usage_limits (channel_id) WHERE scope = 'channel';
+ALTER TABLE ai_usage_limits ENABLE ROW LEVEL SECURITY;
 
 -- T-19 recurring_posts（定期投稿、F-36。05-1_詳細設計書_DB設計.html 3.14節）。
 -- services/scheduled_dispatcher.pyが30秒間隔でnext_run_at<=now() AND is_active=trueの行を検出し、

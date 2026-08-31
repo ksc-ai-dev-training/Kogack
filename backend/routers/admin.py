@@ -1,7 +1,10 @@
-# A-36〜A-40（詳細設計書 API設計4.8節、基本設計書3.3節・S-08管理コンソール）。
-# 利用者管理（A-36/A-37）・ドキュメント参照範囲のフォルダ登録（A-38〜A-40、F-22）を実装。
-# AI利用状況・監査ログの2タブはAI呼び出し・監査ログ基盤が未実装のため対象外（CLAUDE.md 実装状況節）。
+# A-36〜A-43（詳細設計書 API設計4.8節、基本設計書3.3節・S-08管理コンソール）。
+# 利用者管理（A-36/A-37）・ドキュメント参照範囲のフォルダ登録（A-38〜A-40、F-22）・
+# AI利用状況・コスト（A-42/A-43、F-29）を実装。監査ログタブ（A-44、T-16）は書き込み先が
+# まだ無いため対象外（CLAUDE.md 実装状況節）。
 import re
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -10,6 +13,7 @@ from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+JST = ZoneInfo("Asia/Tokyo")
 
 
 @router.get("/users")
@@ -152,3 +156,165 @@ async def delete_doc_folder(folder_id: int, user: CurrentUser = Depends(require_
     deleted = await get_pool().fetchval("DELETE FROM doc_folders WHERE id = $1 RETURNING id", folder_id)
     if deleted is None:
         raise HTTPException(404, detail="見つかりません")
+
+
+def _month_range(month: str | None) -> tuple[datetime, datetime, str]:
+    """month（YYYY-MM）省略時はJSTの当月を対象とする。開始（含む）〜終了（含まない）の
+    UTC対応datetimeと、正規化したmonth文字列を返す"""
+    if month:
+        try:
+            start_date = date.fromisoformat(f"{month}-01")
+        except ValueError:
+            raise HTTPException(422, detail="monthはYYYY-MM形式です")
+    else:
+        start_date = datetime.now(JST).date().replace(day=1)
+    start = datetime.combine(start_date, time.min, tzinfo=JST)
+    end = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
+    return start, end, f"{start_date.year:04d}-{start_date.month:02d}"
+
+
+def _limit_out(row, used_cost_yen: float) -> dict:
+    limit = float(row["monthly_limit_yen"])
+    return {
+        "monthly_limit_yen": limit,
+        "notify_threshold_pct": row["notify_threshold_pct"],
+        "notify_email": row["notify_email"],
+        "used_pct": round(used_cost_yen / limit * 100, 1) if limit > 0 else 0.0,
+    }
+
+
+@router.get("/usage")
+async def get_usage(month: str | None = None, user: CurrentUser = Depends(require_roles("admin"))):
+    """A-42: AI利用状況・概算コストの月次集計（F-29）。T-13を月次・チャンネル別・利用者別に
+    集計する（基本設計書8.6節「月次・チャンネル別・利用者別に集計して表示する」。05-2 API設計の
+    レスポンス例はby_channelのみだったが、05-3画面設計「利用者別テーブル」の記載とあわせて
+    by_userも追加した）。dm_idはAIのDM応答が未実装のため現状常に発生しない（by_channelのみ）。"""
+    start, end, month_str = _month_range(month)
+    pool = get_pool()
+
+    total = await pool.fetchrow(
+        """SELECT count(*) AS call_count, COALESCE(sum(estimated_cost_yen), 0) AS cost_yen
+           FROM ai_usage_logs WHERE created_at >= $1 AND created_at < $2""",
+        start, end,
+    )
+    by_channel_rows = await pool.fetch(
+        """SELECT l.channel_id, c.name AS channel_name, count(*) AS call_count,
+               sum(l.input_tokens) AS input_tokens, sum(l.output_tokens) AS output_tokens,
+               sum(l.estimated_cost_yen) AS cost_yen
+           FROM ai_usage_logs l
+           LEFT JOIN channels c ON c.id = l.channel_id
+           WHERE l.created_at >= $1 AND l.created_at < $2 AND l.channel_id IS NOT NULL
+           GROUP BY l.channel_id, c.name
+           ORDER BY cost_yen DESC""",
+        start, end,
+    )
+    by_user_rows = await pool.fetch(
+        """SELECT l.requested_by, u.name AS user_name, count(*) AS call_count,
+               sum(l.input_tokens) AS input_tokens, sum(l.output_tokens) AS output_tokens,
+               sum(l.estimated_cost_yen) AS cost_yen
+           FROM ai_usage_logs l
+           JOIN users u ON u.id = l.requested_by
+           WHERE l.created_at >= $1 AND l.created_at < $2
+           GROUP BY l.requested_by, u.name
+           ORDER BY cost_yen DESC""",
+        start, end,
+    )
+    limit_rows = await pool.fetch(
+        """SELECT l.*, c.name AS channel_name FROM ai_usage_limits l
+           LEFT JOIN channels c ON c.id = l.channel_id"""
+    )
+
+    total_cost = float(total["cost_yen"])
+    channel_cost = {r["channel_id"]: float(r["cost_yen"]) for r in by_channel_rows}
+    global_limit_row = next((r for r in limit_rows if r["scope"] == "global"), None)
+    channel_limit_rows = [r for r in limit_rows if r["scope"] == "channel"]
+
+    return {
+        "month": month_str,
+        "total_cost_yen": total_cost,
+        "total_call_count": total["call_count"],
+        "by_channel": [
+            {
+                "channel_id": str(r["channel_id"]),
+                "channel_name": r["channel_name"],
+                "call_count": r["call_count"],
+                "input_tokens": r["input_tokens"],
+                "output_tokens": r["output_tokens"],
+                "cost_yen": float(r["cost_yen"]),
+            }
+            for r in by_channel_rows
+        ],
+        "by_user": [
+            {
+                "user_id": str(r["requested_by"]),
+                "user_name": r["user_name"],
+                "call_count": r["call_count"],
+                "input_tokens": r["input_tokens"],
+                "output_tokens": r["output_tokens"],
+                "cost_yen": float(r["cost_yen"]),
+            }
+            for r in by_user_rows
+        ],
+        "limits": {
+            "global": _limit_out(global_limit_row, total_cost) if global_limit_row else None,
+            "channels": [
+                {
+                    "channel_id": str(r["channel_id"]),
+                    "channel_name": r["channel_name"],
+                    **_limit_out(r, channel_cost.get(r["channel_id"], 0.0)),
+                }
+                for r in channel_limit_rows
+            ],
+        },
+    }
+
+
+class UpdateUsageLimitRequest(BaseModel):
+    scope: str
+    channel_id: str | None = None
+    monthly_limit_yen: float = Field(gt=0)
+    notify_threshold_pct: int = Field(default=80, ge=1, le=100)
+    notify_email: str = Field(min_length=1, max_length=200)
+
+
+@router.put("/usage/limits")
+async def update_usage_limit(body: UpdateUsageLimitRequest, user: CurrentUser = Depends(require_roles("admin"))):
+    """A-43: 上限設定・通知先の更新（F-29）。scope='global'は常に1行、scope='channel'は
+    channel_idごとに1行を洗い替える（05-1 DB設計3.11節の部分ユニークインデックスをON CONFLICTの
+    対象にする）。80%到達時の通知メール送信・上限到達時の応答停止はこのスライスでは対象外
+    （要件定義書8.2節のとおり上限到達時の挙動は千田氏との別途協議事項のため、設定の保存と
+    使用率表示（A-42のused_pct）のみ行う）。"""
+    if body.scope not in ("global", "channel"):
+        raise HTTPException(422, detail="scopeはglobal/channelのいずれかです")
+    pool = get_pool()
+    if body.scope == "global":
+        row = await pool.fetchrow(
+            """INSERT INTO ai_usage_limits (scope, monthly_limit_yen, notify_threshold_pct, notify_email)
+               VALUES ('global', $1, $2, $3)
+               ON CONFLICT (scope) WHERE scope = 'global'
+               DO UPDATE SET monthly_limit_yen = $1, notify_threshold_pct = $2, notify_email = $3, updated_at = now()
+               RETURNING *""",
+            body.monthly_limit_yen, body.notify_threshold_pct, body.notify_email,
+        )
+    else:
+        if body.channel_id is None or not body.channel_id.isdigit():
+            raise HTTPException(422, detail="scope='channel'の場合はchannel_idが必要です")
+        channel_id = int(body.channel_id)
+        exists = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM channels WHERE id = $1)", channel_id)
+        if not exists:
+            raise HTTPException(404, detail="見つかりません")
+        row = await pool.fetchrow(
+            """INSERT INTO ai_usage_limits (scope, channel_id, monthly_limit_yen, notify_threshold_pct, notify_email)
+               VALUES ('channel', $1, $2, $3, $4)
+               ON CONFLICT (channel_id) WHERE scope = 'channel'
+               DO UPDATE SET monthly_limit_yen = $2, notify_threshold_pct = $3, notify_email = $4, updated_at = now()
+               RETURNING *""",
+            channel_id, body.monthly_limit_yen, body.notify_threshold_pct, body.notify_email,
+        )
+    return {
+        "scope": row["scope"],
+        "channel_id": str(row["channel_id"]) if row["channel_id"] is not None else None,
+        "monthly_limit_yen": float(row["monthly_limit_yen"]),
+        "notify_threshold_pct": row["notify_threshold_pct"],
+        "notify_email": row["notify_email"],
+    }

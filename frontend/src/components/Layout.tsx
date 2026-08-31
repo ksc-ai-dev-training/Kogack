@@ -178,6 +178,11 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   <span className="text-sm">📁</span>ドキュメント参照範囲
                 </Link>
               </li>
+              <li>
+                <Link to="/admin?tab=usage" className={navItemClass(adminTab === 'usage')}>
+                  <span className="text-sm">💰</span>AI利用状況・コスト
+                </Link>
+              </li>
             </ul>
           </div>
         ) : (

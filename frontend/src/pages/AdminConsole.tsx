@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAdminUsers } from '../hooks/useAdminUsers'
 import { useDocFolders } from '../hooks/useDocFolders'
+import { useUsageStats } from '../hooks/useUsageStats'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import type { DocFolder, Me, Role } from '../types'
+import type { DocFolder, Me, Role, UsageLimit, UsageStats } from '../types'
 
 function formatDateTime(iso: string | null) {
   if (!iso) return '—'
@@ -17,8 +18,17 @@ function formatDateTime(iso: string | null) {
   })
 }
 
-// S-08 管理コンソール。このスライスは「利用者管理」「ドキュメント参照範囲」の2タブを実装。
-// AI利用状況・監査ログの2タブはAI呼び出し・監査ログ基盤が未実装のため対象外（CLAUDE.md実装状況節）。
+function formatYen(yen: number) {
+  return `¥${Math.round(yen).toLocaleString('ja-JP')}`
+}
+
+function currentMonthStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+// S-08 管理コンソール。このスライスは「利用者管理」「ドキュメント参照範囲」「AI利用状況・コスト」の
+// 3タブを実装。監査ログタブ（A-44、T-16）は書き込み先が無く対象外（CLAUDE.md実装状況節）。
 // タブ切替はS-06 ChannelSettingsと同じ?tab=クエリパラメータで行う（Layout.tsxと共有）。
 export default function AdminConsole() {
   const navigate = useNavigate()
@@ -38,11 +48,7 @@ export default function AdminConsole() {
 
   return (
     <div className="flex h-full flex-col">
-      {tab === 'docs' ? (
-        <DocFoldersTab />
-      ) : (
-        <UsersTab me={me} />
-      )}
+      {tab === 'docs' ? <DocFoldersTab /> : tab === 'usage' ? <UsageTab /> : <UsersTab me={me} />}
     </div>
   )
 }
@@ -362,6 +368,244 @@ function DocFoldersTab() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// A-42/A-43: AI利用状況・コストタブ本体（F-29）。基本設計書8.6節「T-13を月次・チャンネル別・
+// 利用者別に集計して表示する」のとおりチャンネル別・利用者別の内訳テーブルを表示する。上限設定は
+// 全体（scope='global'）のみこのスライスで編集UIを設け、チャンネル別上限（scope='channel'）は
+// バックエンドは対応済みだが編集UIは対象外とした（既存の値があれば参考表示のみ）。80%到達時の
+// 通知メール送信・上限到達時の応答停止は未実装（上限到達時の挙動は要件定義書8.2節のとおり
+// 千田氏との別途協議事項のため、このスライスは設定の保存とused_pct表示のみ行う）
+function UsageTab() {
+  const [month, setMonth] = useState(currentMonthStr)
+  const { usage, mutate } = useUsageStats(month)
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex-none border-b border-line bg-surface px-7 py-4">
+        <Link to="/" className="text-xs text-accent-700 hover:underline">
+          ← ワークスペースに戻る
+        </Link>
+        <div className="mt-1 flex items-center gap-2.5">
+          <span className="text-[16px] font-bold text-ink">AI利用状況・コスト</span>
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value || currentMonthStr())}
+            className="ml-auto rounded-lg border border-line-strong px-2.5 py-1 text-[12.5px] text-ink outline-none focus:border-accent-600"
+          />
+        </div>
+        <p className="mt-1.5 max-w-[640px] text-[12.5px] leading-relaxed text-ink-muted">
+          チャンネルAIの呼び出し件数・トークン数・概算コストを月次で集計します（F-29）。質問文・回答文そのものは記録していません。
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-7 py-5">
+        {!usage ? <p className="text-sm text-ink-subtle">読み込み中...</p> : <UsageTabBody usage={usage} mutate={mutate} />}
+      </div>
+    </div>
+  )
+}
+
+function UsageTabBody({ usage, mutate }: { usage: UsageStats; mutate: () => Promise<unknown> }) {
+  return (
+    <div className="max-w-[820px]">
+      <div className="mb-5 flex gap-3">
+        <div className="flex-1 rounded-[10px] border border-line px-4 py-3">
+          <div className="text-[11px] font-bold text-ink-subtle">概算コスト合計</div>
+          <div className="mt-1 text-xl font-bold text-ink">{formatYen(usage.total_cost_yen)}</div>
+        </div>
+        <div className="flex-1 rounded-[10px] border border-line px-4 py-3">
+          <div className="text-[11px] font-bold text-ink-subtle">呼び出し件数</div>
+          <div className="mt-1 text-xl font-bold text-ink">{usage.total_call_count.toLocaleString('ja-JP')}件</div>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <div className="mb-1.5 text-[12.5px] font-bold text-ink">チャンネル別</div>
+        <table className="w-full border-collapse text-left text-[12.5px]">
+          <thead>
+            <tr>
+              {['チャンネル', '呼び出し件数', '入力トークン', '出力トークン', '概算コスト'].map((h) => (
+                <th key={h} className="border-b border-line-strong px-2.5 py-1.5 text-[11px] font-bold text-ink-subtle">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {usage.by_channel.map((r) => (
+              <tr key={r.channel_id} className="border-b border-line">
+                <td className="px-2.5 py-2 font-semibold text-ink"># {r.channel_name ?? '(削除済み)'}</td>
+                <td className="px-2.5 py-2 text-ink-muted">{r.call_count.toLocaleString('ja-JP')}</td>
+                <td className="px-2.5 py-2 text-ink-muted">{r.input_tokens.toLocaleString('ja-JP')}</td>
+                <td className="px-2.5 py-2 text-ink-muted">{r.output_tokens.toLocaleString('ja-JP')}</td>
+                <td className="px-2.5 py-2 font-semibold text-ink">{formatYen(r.cost_yen)}</td>
+              </tr>
+            ))}
+            {usage.by_channel.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-2.5 py-6 text-center text-ink-subtle">
+                  この月の利用はありません。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mb-6">
+        <div className="mb-1.5 text-[12.5px] font-bold text-ink">利用者別</div>
+        <table className="w-full border-collapse text-left text-[12.5px]">
+          <thead>
+            <tr>
+              {['利用者', '呼び出し件数', '入力トークン', '出力トークン', '概算コスト'].map((h) => (
+                <th key={h} className="border-b border-line-strong px-2.5 py-1.5 text-[11px] font-bold text-ink-subtle">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {usage.by_user.map((r) => (
+              <tr key={r.user_id} className="border-b border-line">
+                <td className="px-2.5 py-2 font-semibold text-ink">{r.user_name}</td>
+                <td className="px-2.5 py-2 text-ink-muted">{r.call_count.toLocaleString('ja-JP')}</td>
+                <td className="px-2.5 py-2 text-ink-muted">{r.input_tokens.toLocaleString('ja-JP')}</td>
+                <td className="px-2.5 py-2 text-ink-muted">{r.output_tokens.toLocaleString('ja-JP')}</td>
+                <td className="px-2.5 py-2 font-semibold text-ink">{formatYen(r.cost_yen)}</td>
+              </tr>
+            ))}
+            {usage.by_user.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-2.5 py-6 text-center text-ink-subtle">
+                  この月の利用はありません。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {usage.limits.channels.length > 0 && (
+        <div className="mb-6">
+          <div className="mb-1.5 text-[12.5px] font-bold text-ink">チャンネル別上限（参考表示）</div>
+          <ul className="space-y-1.5">
+            {usage.limits.channels.map((l) => (
+              <li key={l.channel_id} className="rounded-[8px] border border-line px-3 py-2 text-[12px] text-ink-muted">
+                # {l.channel_name ?? '(削除済み)'}: {formatYen(l.monthly_limit_yen)} 中 {l.used_pct}% 使用（通知先: {l.notify_email}）
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[11px] text-ink-subtle">
+            チャンネル別上限の追加・編集UIはこのスライスでは対象外です（バックエンドAPIは対応済み）。
+          </p>
+        </div>
+      )}
+
+      <GlobalLimitForm limit={usage.limits.global} mutate={mutate} />
+    </div>
+  )
+}
+
+function GlobalLimitForm({ limit, mutate }: { limit: UsageLimit | null; mutate: () => Promise<unknown> }) {
+  const toast = useToast()
+  const [limitYen, setLimitYen] = useState(limit ? String(limit.monthly_limit_yen) : '')
+  const [thresholdPct, setThresholdPct] = useState(limit ? String(limit.notify_threshold_pct) : '80')
+  const [notifyEmail, setNotifyEmail] = useState(limit?.notify_email ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const yen = Number(limitYen)
+    if (!yen || yen <= 0) {
+      toast('上限額は0より大きい数値で入力してください', 'error')
+      return
+    }
+    if (!notifyEmail.trim()) {
+      toast('通知先メールアドレスを入力してください', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch('/api/admin/usage/limits', {
+        method: 'PUT',
+        body: JSON.stringify({
+          scope: 'global',
+          monthly_limit_yen: yen,
+          notify_threshold_pct: Number(thresholdPct) || 80,
+          notify_email: notifyEmail.trim(),
+        }),
+      })
+      await mutate()
+      toast('上限設定を保存しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="max-w-[420px] rounded-[10px] border border-line-strong bg-surface-subtle px-4 py-4">
+      <div className="mb-3.5 text-[12.5px] font-bold text-ink">全体の上限設定</div>
+      {limit && (
+        <div className="mb-3.5">
+          <div className="mb-1 flex justify-between text-[11px] text-ink-subtle">
+            <span>今月の使用率</span>
+            <span>{limit.used_pct}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
+            <div
+              className={`h-full rounded-full ${limit.used_pct >= 100 ? 'bg-danger-text' : limit.used_pct >= limit.notify_threshold_pct ? 'bg-off-text' : 'bg-accent-600'}`}
+              style={{ width: `${Math.min(limit.used_pct, 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">月次上限額（円）</label>
+        <input
+          type="number"
+          min="1"
+          value={limitYen}
+          onChange={(e) => setLimitYen(e.target.value)}
+          placeholder="例: 20000"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">通知しきい値（%）</label>
+        <input
+          type="number"
+          min="1"
+          max="100"
+          value={thresholdPct}
+          onChange={(e) => setThresholdPct(e.target.value)}
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">通知先メールアドレス</label>
+        <input
+          value={notifyEmail}
+          onChange={(e) => setNotifyEmail(e.target.value)}
+          placeholder="admin@kogasoftware.com"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+      <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
+        しきい値到達時の通知メール送信・上限到達時の応答停止は未実装です（挙動は別途協議事項のため、現時点では使用率の表示のみ行います）。
+      </div>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={save}
+        className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+      >
+        保存
+      </button>
     </div>
   )
 }

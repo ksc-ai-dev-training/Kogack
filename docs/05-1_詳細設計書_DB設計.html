@@ -34,6 +34,7 @@
       <tr class="diff-new"><td>1.3</td><td>2026-08-28</td><td>T-18 scheduled_messagesにmentions列（JSONB）を追加し、送信予約でも@メンションの構造化（T-07 message_blocks）に対応できるようにした（基本設計書v1.24「設計判断」）。</td></tr>
       <tr class="diff-new"><td>1.4</td><td>2026-08-28</td><td>T-19 recurring_posts・T-21 trigger_rules（F-36・F-38）を実装した。あわせてT-05.recurring_post_id/trigger_rule_idにON DELETE SET NULLのFKを付与し、両者が排他であることを示すCHECK制約を明記した（基本設計書v1.25「設計判断」）。</td></tr>
       <tr class="diff-new"><td>1.5</td><td>2026-08-28</td><td>T-06 message_attachments（F-07 ファイル共有）を実装した。message_idがNOT NULLのため、アップロード時点ではDB行を作らずファイル実体のみを保存し、発言確定後の同一トランザクション内で紐づけることを明記した。</td></tr>
+      <tr class="diff-new"><td>1.6</td><td>2026-08-31</td><td>T-14 ai_usage_limits（F-29上限設定、A-43）を実装した。定義済みのカラム構成はそのままに、scope='global'の行を最大1行、scope='channel'の行をchannel_idごとに最大1行へ制約する部分ユニークインデックス（A-43のON CONFLICT対象）を追記した（従来の定義には無かった実装詳細のbackfill）。</td></tr>
     </tbody>
   </table>
 
@@ -253,7 +254,7 @@
       <tr><td>T-14</td><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
   </table>
-  <p class="muted">索引: <code>(channel_id, created_at)</code>（S-08のAI利用状況タブでの月次集計、A-42）。</p>
+  <p class="muted">索引: <code>(channel_id, created_at)</code>（S-08のAI利用状況タブでの月次集計、A-42）。<span class="diff-new">T-14は<code>scope='global'</code>の行を<code>scope</code>列の部分ユニークインデックスで最大1行に、<code>scope='channel'</code>の行を<code>channel_id</code>列の部分ユニークインデックスでchannel_idごとに最大1行に制約する（A-43はこれらをON CONFLICTの対象にして洗い替える）。</span></p>
 
   <h3>3.12 T-15 pending_actions / T-16 audit_logs</h3>
   <table>

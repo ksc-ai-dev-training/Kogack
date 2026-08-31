@@ -278,3 +278,48 @@ export interface DocFolder {
 export interface DocFoldersResponse {
   items: DocFolder[]
 }
+
+/** F-29 AI利用状況・コスト（T-13 ai_usage_logs、S-08「AI利用状況・コスト」タブ） */
+export interface UsageByChannel {
+  channel_id: string
+  channel_name: string | null
+  call_count: number
+  input_tokens: number
+  output_tokens: number
+  cost_yen: number
+}
+
+export interface UsageByUser {
+  user_id: string
+  user_name: string
+  call_count: number
+  input_tokens: number
+  output_tokens: number
+  cost_yen: number
+}
+
+/** T-14 ai_usage_limits。80%到達時の通知メール送信・応答停止は未実装（上限到達時の挙動は
+ * 千田氏との別途協議事項のため、このスライスは設定の保存とused_pct表示のみ） */
+export interface UsageLimit {
+  monthly_limit_yen: number
+  notify_threshold_pct: number
+  notify_email: string
+  used_pct: number
+}
+
+export interface UsageChannelLimit extends UsageLimit {
+  channel_id: string
+  channel_name: string | null
+}
+
+export interface UsageStats {
+  month: string
+  total_cost_yen: number
+  total_call_count: number
+  by_channel: UsageByChannel[]
+  by_user: UsageByUser[]
+  limits: {
+    global: UsageLimit | null
+    channels: UsageChannelLimit[]
+  }
+}

@@ -49,6 +49,7 @@
       <tr class="diff-new"><td>1.18</td><td>2026-08-28</td><td>A-21・A-22（ファイル共有、F-07）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。アップロード時点ではT-06行を作らずファイル実体のみ保存し、投稿時（A-11/A-14/A-19）にattachmentsとして紐づけることを明記した。あわせてA-20にファイル検索（type=file）を実装し、file_nameへのILIKE判定・in/with/from/日付系の条件共有について追記した。基本設計書v1.26・詳細設計書DB設計（T-06、v1.5）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.19</td><td>2026-08-31</td><td>層2ドキュメントQ&Aの最初のスライスとして、A-27（参照ドキュメント範囲）・A-38〜A-40（フォルダ候補の一覧/追加/削除）のリクエスト/レスポンス例を新規追加した。A-27はfolder_idsを送信された集合でT-10へ洗い替えること、存在しないfolder_idは黙って無視すること（F-41のメンション対象外指定と同じ考え方）を明記した。A-39はGoogle Picker連携ではなくフォルダURL・IDの手動貼り付けを受け付け、URLの場合はfolder_idを正規表現で抽出することを明記した。A-38はS-06からチャンネル管理者が閲覧する必要があるためadmin限定から認証済み全員に権限を広げた（基本設計書6.2節「設計判断」、A-39/A-40は引き続きadmin限定）。A-41（今すぐ同期）は実際のDrive同期・索引化が未実装のためこのスライスでは対象外のまま。基本設計書v1.27を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.20</td><td>2026-08-31</td><td>A-15（要約実行、F-14）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。要約結果はA-11のAIメンション応答と同じ生成中プレースホルダ方式でsender_type='ai'の発言として投稿され、依頼した本人だけでなく参加者全員に見えることを明記した（基本設計書6.2節「設計判断」）。thread_id指定時はそのスレッド全体（上限なし）、省略時はチャンネル本体の直近100件が対象。AI未設定・チャンネルAI無効時は400を返すことを明記した。基本設計書v1.28を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.21</td><td>2026-08-31</td><td>A-42（AI利用状況の月次集計）・A-43（上限設定）のリクエスト/レスポンス例を新規追加した（従来はA-42のみ簡略な例があり、A-43は未記載だった抜けをbackfill）。A-42はby_userを追加し、8.6節「月次・チャンネル別・利用者別に集計して表示する」の記載に実装を合わせた。A-43はT-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象に洗い替えること、しきい値到達時の通知メール送信・応答停止は実装しないことを明記した。基本設計書v1.29を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -358,9 +359,28 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p><strong>A-42 <span class="badge badge-get">GET</span> /api/admin/usage</strong></p>
   <pre><code>GET /api/admin/usage?month=2026-08
 // response 200
-{ "total_cost_yen": 4820.5, "by_channel": [ { "channel_id":"42","channel_name":"開発部",
+{ "month": "2026-08", "total_cost_yen": 4820.5, "total_call_count": 130,
+  "by_channel": [ { "channel_id":"42","channel_name":"開発部",
     "call_count": 130, "input_tokens": 210000, "output_tokens": 45000, "cost_yen": 1200.0 } ],
-  "limits": { "global": { "monthly_limit_yen": 20000, "used_pct": 24.1 } } }</code></pre>
+  "by_user": [ { "user_id": "7", "user_name": "田中 智子",
+    "call_count": 42, "input_tokens": 70000, "output_tokens": 15000, "cost_yen": 400.0 } ],
+  "limits": { "global": { "monthly_limit_yen": 20000, "notify_threshold_pct": 80,
+      "notify_email": "admin@kogasoftware.com", "used_pct": 24.1 },
+    "channels": [ { "channel_id": "42", "channel_name": "開発部", "monthly_limit_yen": 5000,
+      "notify_threshold_pct": 80, "notify_email": "dev-lead@kogasoftware.com", "used_pct": 24.0 } ] } }</code></pre>
+  <p class="muted diff-new"><code>month</code>省略時はJSTの当月。<code>by_user</code>は基本設計書8.6節「月次・チャンネル別・利用者別に集計して表示する」の記載に合わせて追加した（旧いレスポンス例はby_channelのみだった抜けをbackfill）。<code>limits.global</code>・<code>limits.channels[]</code>はいずれも設定が無ければ<code>global</code>はnull・<code>channels</code>は空配列。<code>used_pct</code>は<code>指定月のcost_yen ÷ monthly_limit_yen × 100</code>（小数第1位まで）。dm分の集計は現状発生しない（AIのDM応答が未実装のため）。</p>
+
+  <p><strong>A-43 <span class="badge badge-put">PUT</span> /api/admin/usage/limits</strong></p>
+  <pre><code>// scope='global'（channel_idは指定しない）
+{ "scope": "global", "monthly_limit_yen": 20000, "notify_threshold_pct": 80,
+  "notify_email": "admin@kogasoftware.com" }
+// scope='channel'（channel_id必須）
+{ "scope": "channel", "channel_id": "42", "monthly_limit_yen": 5000,
+  "notify_threshold_pct": 80, "notify_email": "dev-lead@kogasoftware.com" }
+// response 200
+{ "scope": "global", "channel_id": null, "monthly_limit_yen": 20000,
+  "notify_threshold_pct": 80, "notify_email": "admin@kogasoftware.com" }</code></pre>
+  <p class="muted diff-new">T-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象にして洗い替える。scope='global'は常に1行、scope='channel'はchannel_idごとに1行のみ存在する（同じscope+channel_idへのPUTは新規行を増やさず上書き）。<code>scope</code>がglobal/channel以外、または<code>scope='channel'</code>なのに<code>channel_id</code>未指定・存在しないchannel_idの場合はそれぞれ422・404。<strong>しきい値（notify_threshold_pct）到達時の通知メール送信、および上限到達時にAIの応答を止めるかどうかの制御は、このAPIでは実装しない</strong>（要件定義書8.2節のとおり上限到達時の挙動は千田氏との別途協議事項のため、設定の保存とA-42のused_pct表示のみ行う）。</p>
 
   <h3>4.9 送信予約（A-50〜A-52）</h3>
   <pre><code>// A-50 POST /api/scheduled-messages（channel_id/dm_idはどちらか一方、thread_parent_idは任意）
