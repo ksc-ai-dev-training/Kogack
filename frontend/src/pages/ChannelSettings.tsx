@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useAiSettings } from '../hooks/useAiSettings'
+import { useDocFolders } from '../hooks/useDocFolders'
 import { useRecurringPosts } from '../hooks/useRecurringPosts'
 import { useTriggerRules } from '../hooks/useTriggerRules'
 import { useMe } from '../hooks/useMe'
@@ -15,9 +16,9 @@ import type { AiSettings, ChannelDetail, RecurringPost, TriggerRule } from '../t
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_ICON_BYTES = 5 * 1024 * 1024
 
-// S-06 チャンネル設定。このスライスは6タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
-// 定期投稿・自動応答トリガー）を実装。「参照ドキュメント範囲」「スキル」「反応モード」「自動対応範囲」
-// タブはドキュメントQ&A・自動対応分類が未実装のため対象外（CLAUDE.md 実装状況節）。
+// S-06 チャンネル設定。このスライスは7タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
+// 参照ドキュメント範囲・定期投稿・自動応答トリガー）を実装。「スキル」「反応モード」「自動対応範囲」
+// タブは自動対応分類（層3）が未実装のため対象外（CLAUDE.md 実装状況節）。
 // タブ切替はLayout.tsxと共有する?tab=クエリパラメータで行う。
 export default function ChannelSettings() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -60,6 +61,9 @@ export default function ChannelSettings() {
         )}
         {tab === 'prompt' && channelId && settings && (
           <PromptTab channelId={channelId} settings={settings} mutate={mutateAi} />
+        )}
+        {tab === 'docscope' && channelId && settings && (
+          <DocScopeTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
         {tab === 'admin' && channelId && <AdminTab channelId={channelId} />}
         {tab === 'recurring' && channelId && <RecurringPostsTab channelId={channelId} />}
@@ -603,6 +607,120 @@ function PromptTab({
         disabled={saving}
         onClick={save}
         className="mt-4 rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+      >
+        保存
+      </button>
+    </div>
+  )
+}
+
+// A-27: 参照ドキュメント範囲タブ（F-11・F-22）。候補（doc_folders）はS-08管理コンソールの
+// 「ドキュメント参照範囲」タブで管理者が登録し、ここではチャンネルごとに使用する候補を選ぶ
+// （T-10 channel_doc_foldersの洗い替え）。実際のDrive同期・索引・AI検索（search_documentsツール）
+// は次のスライスで実装するため、この設定はまだAI応答には反映されない（CLAUDE.md実装状況節）
+function DocScopeTab({
+  channelId,
+  settings,
+  mutate,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+}) {
+  const toast = useToast()
+  const { folders } = useDocFolders()
+  const [selected, setSelected] = useState(() => new Set(settings.folder_ids))
+  const [policy, setPolicy] = useState(settings.out_of_scope_policy)
+  const [saving, setSaving] = useState(false)
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/doc-scope`, {
+        method: 'PUT',
+        body: JSON.stringify({ folder_ids: Array.from(selected), out_of_scope_policy: policy }),
+      })
+      await mutate()
+      toast('参照ドキュメント範囲を保存しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="max-w-[560px]">
+      <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
+        チャンネルAIが回答の根拠として参照するGoogleドライブのフォルダを選びます（F-11・F-22）。候補は管理コンソールの「ドキュメント参照範囲」タブで管理者が登録します。実際のDrive同期・索引・AI検索は次のスライスで実装するため、この設定はまだAI応答には反映されません。
+      </p>
+
+      <div className="mb-5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">参照するフォルダ</label>
+        {folders.length === 0 ? (
+          <p className="rounded-[10px] border border-dashed border-line-strong px-3.5 py-3 text-[12px] text-ink-subtle">
+            登録済みのフォルダ候補がありません。管理コンソールの「ドキュメント参照範囲」タブから登録してください。
+          </p>
+        ) : (
+          <ul className="space-y-1 rounded-[10px] border border-line px-3.5 py-2.5">
+            {folders.map((f) => (
+              <li key={f.id}>
+                <label className="flex items-center gap-2 py-1 text-[13px] text-ink">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(f.id)}
+                    onChange={() => toggle(f.id)}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="text-sm">📁</span>
+                  {f.drive_folder_name}
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="mb-5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">参照範囲外の質問への対応</label>
+        <div className="space-y-1.5">
+          <label className="flex items-start gap-2 text-[13px] text-ink">
+            <input
+              type="radio"
+              name="out-of-scope-policy"
+              checked={policy === 'strict'}
+              onChange={() => setPolicy('strict')}
+              className="mt-1"
+            />
+            <span>厳格に制限する（根拠文書が無い場合は「担当外のためお答えできません」と回答する）</span>
+          </label>
+          <label className="flex items-start gap-2 text-[13px] text-ink">
+            <input
+              type="radio"
+              name="out-of-scope-policy"
+              checked={policy === 'general'}
+              onChange={() => setPolicy('general')}
+              className="mt-1"
+            />
+            <span>一般回答を許可する（文書根拠が無い旨とAI回答への注意喚起を付記した上で、一般的な知識で回答してよい）</span>
+          </label>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        disabled={saving}
+        onClick={save}
+        className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
       >
         保存
       </button>

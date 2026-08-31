@@ -316,6 +316,28 @@ DO $$ BEGIN
         CHECK (recurring_post_id IS NULL OR trigger_rule_id IS NULL);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- T-09 doc_folders / T-10 channel_doc_folders（参照ドキュメント範囲、F-22。
+-- 05-1_詳細設計書_DB設計.html 3.9節）。管理者がGoogle Driveのフォルダを候補として登録し（T-09）、
+-- チャンネルごとに使用する候補を選ぶ（T-10）。このスライスはフォルダの登録・チャンネルへの
+-- 割当までを対象とし、実際のDrive同期・埋め込み索引・AI検索（基本設計書8.2節のsearch_documents）
+-- は次スライスで実装する（CLAUDE.md実装状況節）。
+CREATE TABLE IF NOT EXISTS doc_folders (
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    drive_folder_id    TEXT NOT NULL UNIQUE,
+    drive_folder_name  TEXT NOT NULL,
+    added_by           BIGINT NOT NULL REFERENCES users(id),
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE doc_folders ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS channel_doc_folders (
+    channel_id  BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    folder_id   BIGINT NOT NULL REFERENCES doc_folders(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (channel_id, folder_id)
+);
+ALTER TABLE channel_doc_folders ENABLE ROW LEVEL SECURITY;
 """
 
 

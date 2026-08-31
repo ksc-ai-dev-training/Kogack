@@ -47,6 +47,7 @@
       <tr class="diff-new"><td>1.16</td><td>2026-08-28</td><td>A-50にmentions（F-41、MentionInput形式）を追加した。参加者検証はA-11/A-14と異なり作成時点では行わず、実際の発言化タイミング（scheduled_dispatcher.py）まで遅らせることを明記した。DM宛ての予約はmentionsを無視する。基本設計書v1.24・詳細設計書DB設計（T-18.mentions列、v1.3）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.17</td><td>2026-08-28</td><td>A-53〜A-56（定期投稿、F-36）・A-63〜A-66（自動応答トリガー、F-38）を実装した。A-56/A-66の削除時の挙動（発言は残す、ON DELETE SET NULL）とbot_display_name未指定時の既定値を明記した。基本設計書v1.25・詳細設計書DB設計（T-19・T-21、v1.4）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.18</td><td>2026-08-28</td><td>A-21・A-22（ファイル共有、F-07）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。アップロード時点ではT-06行を作らずファイル実体のみ保存し、投稿時（A-11/A-14/A-19）にattachmentsとして紐づけることを明記した。あわせてA-20にファイル検索（type=file）を実装し、file_nameへのILIKE判定・in/with/from/日付系の条件共有について追記した。基本設計書v1.26・詳細設計書DB設計（T-06、v1.5）を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.19</td><td>2026-08-31</td><td>層2ドキュメントQ&Aの最初のスライスとして、A-27（参照ドキュメント範囲）・A-38〜A-40（フォルダ候補の一覧/追加/削除）のリクエスト/レスポンス例を新規追加した。A-27はfolder_idsを送信された集合でT-10へ洗い替えること、存在しないfolder_idは黙って無視すること（F-41のメンション対象外指定と同じ考え方）を明記した。A-39はGoogle Picker連携ではなくフォルダURL・IDの手動貼り付けを受け付け、URLの場合はfolder_idを正規表現で抽出することを明記した。A-38はS-06からチャンネル管理者が閲覧する必要があるためadmin限定から認証済み全員に権限を広げた（基本設計書6.2節「設計判断」、A-39/A-40は引き続きadmin限定）。A-41（今すぐ同期）は実際のDrive同期・索引化が未実装のためこのスライスでは対象外のまま。基本設計書v1.27を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -272,8 +273,9 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p><strong>A-23 <span class="badge badge-get">GET</span> /api/channels/{id}/ai-settings</strong></p>
   <pre><code>// response 200
 { "channel_id": "42", "is_ai_enabled": true, "persona_name": "AI", "persona_icon_url": null,
-  "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only" }</code></pre>
-  <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。out_of_scope_policy・fallback_handoff_user_idはドキュメントQ&A・自動対応分類が未実装のためレスポンスに含めない（値はDB上に既定のまま保持される）。</p>
+  "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only",
+  "out_of_scope_policy": "strict", "folder_ids": ["3", "5"] }</code></pre>
+  <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。</span>fallback_handoff_user_idは引き継ぎ（F-17）が未実装のためレスポンスに含めない（値はDB上に既定のまま保持される）。</p>
 
   <p><strong>A-24 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/general</strong></p>
   <pre><code>{ "is_ai_enabled": false }
@@ -292,8 +294,8 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 
   <p><strong>A-27 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/doc-scope</strong></p>
   <pre><code>{ "folder_ids": ["3", "5"], "out_of_scope_policy": "strict" }
-// response 200</code></pre>
-  <p class="muted"><code>folder_ids</code> は送信された集合でT-10を洗い替える（追加・削除の差分計算はAPI側で行う）。</p>
+// response 200: A-23と同じ形で、更新後のfolder_ids・out_of_scope_policyを返す</code></pre>
+  <p class="muted"><span class="diff-new"><code>folder_ids</code> は送信された集合でT-10を洗い替える（DELETE→INSERTのトランザクション。差分計算はしない）。存在しないfolder_id（S-08で削除済み等）は黙って無視し、設定保存自体は失敗させない（F-41のメンション対象外指定と同じ考え方）。folder_idsが空配列の場合は「参照ドキュメント無し」として全件削除する。out_of_scope_policyはstrict/generalのいずれか以外は422。実際のDrive同期・索引・AI検索（search_documentsツール、総論8.2節）は次のスライスで実装するため、この設定は現時点ではAI応答に反映されない。</span></p>
 
   <p><strong>A-45 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/handoff</strong></p>
   <pre><code>{ "fallback_handoff_user_id": "15" }  // nullで既定（chadmin）へ戻す
@@ -323,6 +325,27 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <pre><code>{ "role": "admin", "is_active": true }
 // response 200: { "id": "15", "role": "admin", "is_active": true }</code></pre>
   <p class="muted"><code>role</code>・<code>is_active</code>はいずれも省略可（指定したフィールドのみ更新する）。<code>role</code>は<code>member</code>/<code>admin</code>のみ許可。管理者ロックアウト防止のため、自分自身を<code>is_active=false</code>にする操作、および自分自身の<code>role</code>を<code>member</code>にする操作はいずれも400で拒否する（唯一の管理者が誤って自分を無効化・降格し、以後誰もS-08を開けなくなる事態を防ぐ）。フロントエンドは自分自身の行のロール選択・無効化ボタンをあらかじめ操作不可にする。</p>
+
+  <p class="diff-new"><strong>A-38 <span class="badge badge-get">GET</span> /api/admin/doc-folders</strong></p>
+  <pre class="diff-new"><code>// response 200
+{ "items": [
+    { "id": "3", "drive_folder_id": "1AbCdEfGhIjKlMnOpQrS", "drive_folder_name": "開発部 ドキュメント",
+      "added_by_name": "石井 直樹", "channel_count": 2, "created_at": "2026-08-31T02:51:18Z" }
+] }</code></pre>
+  <p class="muted diff-new">F-22（参照ドキュメント範囲）の候補一覧。S-06「参照ドキュメント範囲」タブ（A-27）でチャンネル管理者（chadmin）が選択に使うため、閲覧のみ<code>require_auth</code>（認証済み全員）とし、admin限定にしていない（基本設計書6.2節「設計判断」）。<code>channel_count</code>はA-40で削除する前の目安として参考表示する（05-1 DB設計3.9節のT-09/T-10とchannel_doc_foldersの件数を集計）。</p>
+
+  <p class="diff-new"><strong>A-39 <span class="badge badge-post">POST</span> /api/admin/doc-folders</strong></p>
+  <pre class="diff-new"><code>{ "drive_folder_id": "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrS?usp=sharing",
+  "drive_folder_name": "開発部 ドキュメント" }
+// response 201: A-38の1件と同じ形（channel_count: 0）</code></pre>
+  <p class="muted diff-new"><code>drive_folder_id</code>はGoogleドライブのフォルダURLまたはID自体のいずれでも受け付け、URL形式の場合はAPI側で正規表現によりIDを抽出する（画面設計8.2節が想定するGoogle Picker連携はDrive OAuthスコープ拡張が前提のため次スライスに持ち越し、このスライスは手動貼り付けの簡易フォームとする）。抽出後のIDが既存の<code>drive_folder_id</code>と重複する場合は409。admin限定。</p>
+
+  <p class="diff-new"><strong>A-40 <span class="badge badge-delete">DELETE</span> /api/admin/doc-folders/{id}</strong></p>
+  <pre class="diff-new"><code>// response 204（存在しないidは404）</code></pre>
+  <p class="muted diff-new">使用中のチャンネル（channel_doc_folders）があっても確認なく削除する。ON DELETE CASCADEでT-10側の割当も連動削除され、当該チャンネルのA-23レスポンスのfolder_idsから自動的に外れる。admin限定。</p>
+
+  <p class="diff-new"><strong>A-41 <span class="badge badge-post">POST</span> /api/admin/doc-folders/sync</strong></p>
+  <p class="muted diff-new">未実装（F-22の索引・埋め込みベクトル生成、基本設計書8.2節）。S-08の「今すぐ同期」ボタンは無効表示のままとし、次のスライス（Drive OAuthスコープ拡張・埋め込みAPI呼び出しを実装するスライス）で対応する。</p>
 
   <p><strong>A-42 <span class="badge badge-get">GET</span> /api/admin/usage</strong></p>
   <pre><code>GET /api/admin/usage?month=2026-08

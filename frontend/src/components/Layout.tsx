@@ -41,13 +41,14 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const [scheduledModalOpen, setScheduledModalOpen] = useState(false)
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
-  // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。実装済みなのは
-  // 6タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・定期投稿・自動応答トリガー）のみのため、
-  // 未実装タブ（参照ドキュメント範囲・スキル・反応モード・自動対応範囲）は出さない
+  // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。S-06は7タブ
+  // （チャンネル管理者・基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・定期投稿・
+  // 自動応答トリガー）を実装済み。未実装タブ（スキル・反応モード・自動対応範囲）は出さない
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
   const [searchParams] = useSearchParams()
   const settingsTab = searchParams.get('tab') ?? 'admin'
+  const adminTab = searchParams.get('tab') ?? 'users'
 
   const logout = async () => {
     await apiFetch('/api/auth/logout', { method: 'POST' })
@@ -132,6 +133,14 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   <span className="text-sm">📝</span>振る舞い定義
                 </Link>
               </li>
+              <li>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=docscope`}
+                  className={navItemClass(settingsTab === 'docscope')}
+                >
+                  <span className="text-sm">📁</span>参照ドキュメント範囲
+                </Link>
+              </li>
             </ul>
             <div className="mb-1.5 mt-4.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">
               その他の設定
@@ -160,9 +169,14 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">管理コンソール</div>
             <ul>
               <li>
-                <span className={navItemClass(true)}>
+                <Link to="/admin?tab=users" className={navItemClass(adminTab === 'users')}>
                   <span className="text-sm">👤</span>利用者管理
-                </span>
+                </Link>
+              </li>
+              <li>
+                <Link to="/admin?tab=docs" className={navItemClass(adminTab === 'docs')}>
+                  <span className="text-sm">📁</span>ドキュメント参照範囲
+                </Link>
               </li>
             </ul>
           </div>

@@ -49,6 +49,8 @@ export interface AiSettings {
   persona_tone: string | null
   behavior_prompt: string | null
   reaction_mode: 'mention_only' | 'proactive'
+  out_of_scope_policy: 'strict' | 'general'
+  folder_ids: string[]
 }
 
 export interface ChannelMember {
@@ -261,4 +263,18 @@ export interface AdminUser {
 
 export interface AdminUsersResponse {
   items: AdminUser[]
+}
+
+/** F-22 参照ドキュメント範囲（T-09 doc_folders、S-08「ドキュメント参照範囲」タブ） */
+export interface DocFolder {
+  id: string
+  drive_folder_id: string
+  drive_folder_name: string
+  added_by_name: string
+  channel_count: number
+  created_at: string
+}
+
+export interface DocFoldersResponse {
+  items: DocFolder[]
 }

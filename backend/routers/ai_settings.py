@@ -1,8 +1,7 @@
-# A-23〜A-26（詳細設計書 API設計4.6節、基本設計書8.3節）。S-06 AI設定タブのうち「基本設定」
-# 「キャラクタ」「振る舞い定義」の3タブに対応する。A-27（参照ドキュメント範囲）・A-28〜A-30
-# （スキル）・A-31（自動対応範囲）はドキュメントQ&A・自動対応分類（層2/層3）が未実装のため
-# 対象外（CLAUDE.md実装状況節）。
-from fastapi import APIRouter, Depends
+# A-23〜A-27（詳細設計書 API設計4.6節、基本設計書8.3節）。S-06 AI設定タブのうち「基本設定」
+# 「キャラクタ」「振る舞い定義」「参照ドキュメント範囲」の4タブに対応する。A-28〜A-30
+# （スキル）・A-31（自動対応範囲）は自動対応分類（層3）が未実装のため対象外（CLAUDE.md実装状況節）。
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_channel_admin
@@ -11,7 +10,7 @@ from database import get_pool
 router = APIRouter(prefix="/api/channels", tags=["ai-settings"])
 
 
-def _out(row) -> dict:
+def _out(row, folder_ids: list[str]) -> dict:
     return {
         "channel_id": str(row["channel_id"]),
         "is_ai_enabled": row["is_ai_enabled"],
@@ -20,6 +19,8 @@ def _out(row) -> dict:
         "persona_tone": row["persona_tone"],
         "behavior_prompt": row["behavior_prompt"],
         "reaction_mode": row["reaction_mode"],
+        "out_of_scope_policy": row["out_of_scope_policy"],
+        "folder_ids": folder_ids,
     }
 
 
@@ -35,10 +36,19 @@ async def _get_or_create(channel_id: int) -> dict:
     return dict(row)
 
 
+async def _folder_ids(channel_id: int) -> list[str]:
+    rows = await get_pool().fetch(
+        "SELECT folder_id FROM channel_doc_folders WHERE channel_id = $1 ORDER BY folder_id", channel_id
+    )
+    return [str(r["folder_id"]) for r in rows]
+
+
 @router.get("/{channel_id}/ai-settings")
 async def get_ai_settings(channel_id: int, user: CurrentUser = Depends(require_channel_admin)):
-    """A-23: AI設定一括取得（S-06）"""
-    return _out(await _get_or_create(channel_id))
+    """A-23: AI設定一括取得（S-06）。fallback_handoff_user_idは引き継ぎ（F-17）が未実装のため
+    レスポンスに含めない（値はDB上に既定のまま保持される）"""
+    settings = await _get_or_create(channel_id)
+    return _out(settings, await _folder_ids(channel_id))
 
 
 class UpdateGeneralRequest(BaseModel):
@@ -57,7 +67,7 @@ async def update_general(
            WHERE channel_id = $1 RETURNING *""",
         channel_id, body.is_ai_enabled, user.id,
     )
-    return _out(row)
+    return _out(row, await _folder_ids(channel_id))
 
 
 class UpdateCharacterRequest(BaseModel):
@@ -80,7 +90,7 @@ async def update_character(
            WHERE channel_id = $1 RETURNING *""",
         channel_id, body.persona_name, body.persona_icon_url, body.persona_tone, user.id,
     )
-    return _out(row)
+    return _out(row, await _folder_ids(channel_id))
 
 
 class UpdatePromptRequest(BaseModel):
@@ -99,4 +109,44 @@ async def update_prompt(
            WHERE channel_id = $1 RETURNING *""",
         channel_id, body.behavior_prompt, user.id,
     )
-    return _out(row)
+    return _out(row, await _folder_ids(channel_id))
+
+
+class UpdateDocScopeRequest(BaseModel):
+    folder_ids: list[str] = Field(default_factory=list)
+    out_of_scope_policy: str = "strict"
+
+
+@router.put("/{channel_id}/ai-settings/doc-scope")
+async def update_doc_scope(
+    channel_id: int, body: UpdateDocScopeRequest, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-27: 参照ドキュメント範囲（F-11・F-22）。folder_idsは送信された集合でT-10を洗い替える。
+    S-08で削除済み・存在しないfolder_idは黙って無視する（F-41のメンション対象外指定と同じ考え方で、
+    設定保存自体を失敗させない）。実際のDrive同期・索引・AI検索（search_documentsツール）は
+    次スライスで実装するため、この設定は現時点ではAI応答に反映されない（CLAUDE.md実装状況節）"""
+    if body.out_of_scope_policy not in ("strict", "general"):
+        raise HTTPException(422, detail="out_of_scope_policyはstrict/generalのいずれかです")
+    try:
+        requested_ids = [int(x) for x in body.folder_ids]
+    except ValueError:
+        raise HTTPException(422, detail="folder_idsは数値のIDです")
+
+    await _get_or_create(channel_id)
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        valid_ids = {
+            r["id"] for r in await conn.fetch("SELECT id FROM doc_folders WHERE id = ANY($1::bigint[])", requested_ids)
+        }
+        await conn.execute("DELETE FROM channel_doc_folders WHERE channel_id = $1", channel_id)
+        if valid_ids:
+            await conn.executemany(
+                "INSERT INTO channel_doc_folders (channel_id, folder_id) VALUES ($1, $2)",
+                [(channel_id, fid) for fid in valid_ids],
+            )
+        row = await conn.fetchrow(
+            """UPDATE channel_ai_settings SET out_of_scope_policy = $2, updated_by = $3, updated_at = now()
+               WHERE channel_id = $1 RETURNING *""",
+            channel_id, body.out_of_scope_policy, user.id,
+        )
+    return _out(row, await _folder_ids(channel_id))
