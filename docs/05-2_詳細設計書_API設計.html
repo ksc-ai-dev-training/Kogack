@@ -48,6 +48,7 @@
       <tr class="diff-new"><td>1.17</td><td>2026-08-28</td><td>A-53〜A-56（定期投稿、F-36）・A-63〜A-66（自動応答トリガー、F-38）を実装した。A-56/A-66の削除時の挙動（発言は残す、ON DELETE SET NULL）とbot_display_name未指定時の既定値を明記した。基本設計書v1.25・詳細設計書DB設計（T-19・T-21、v1.4）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.18</td><td>2026-08-28</td><td>A-21・A-22（ファイル共有、F-07）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。アップロード時点ではT-06行を作らずファイル実体のみ保存し、投稿時（A-11/A-14/A-19）にattachmentsとして紐づけることを明記した。あわせてA-20にファイル検索（type=file）を実装し、file_nameへのILIKE判定・in/with/from/日付系の条件共有について追記した。基本設計書v1.26・詳細設計書DB設計（T-06、v1.5）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.19</td><td>2026-08-31</td><td>層2ドキュメントQ&Aの最初のスライスとして、A-27（参照ドキュメント範囲）・A-38〜A-40（フォルダ候補の一覧/追加/削除）のリクエスト/レスポンス例を新規追加した。A-27はfolder_idsを送信された集合でT-10へ洗い替えること、存在しないfolder_idは黙って無視すること（F-41のメンション対象外指定と同じ考え方）を明記した。A-39はGoogle Picker連携ではなくフォルダURL・IDの手動貼り付けを受け付け、URLの場合はfolder_idを正規表現で抽出することを明記した。A-38はS-06からチャンネル管理者が閲覧する必要があるためadmin限定から認証済み全員に権限を広げた（基本設計書6.2節「設計判断」、A-39/A-40は引き続きadmin限定）。A-41（今すぐ同期）は実際のDrive同期・索引化が未実装のためこのスライスでは対象外のまま。基本設計書v1.27を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.20</td><td>2026-08-31</td><td>A-15（要約実行、F-14）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。要約結果はA-11のAIメンション応答と同じ生成中プレースホルダ方式でsender_type='ai'の発言として投稿され、依頼した本人だけでなく参加者全員に見えることを明記した（基本設計書6.2節「設計判断」）。thread_id指定時はそのスレッド全体（上限なし）、省略時はチャンネル本体の直近100件が対象。AI未設定・チャンネルAI無効時は400を返すことを明記した。基本設計書v1.28を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -202,6 +203,13 @@ POST /api/channels/42/members
   <p><strong>A-49 <span class="badge badge-put">PUT</span> /api/channels/{id}/visibility（公開/非公開切替）</strong></p>
   <pre><code>{ "is_public": false }
 // response 200: { "id": "42", "is_public": false }</code></pre>
+
+  <p class="diff-new"><strong>A-15 <span class="badge badge-post">POST</span> /api/channels/{id}/summarize（要約実行）</strong></p>
+  <pre class="diff-new"><code>// request（thread_id省略時はチャンネル本体の直近100件が対象）
+{ "thread_id": "10301" }
+// response 201
+{ "message_id": "10420", "thread_id": "10301" }</code></pre>
+  <p class="muted diff-new"><code>thread_id</code>指定時はそのスレッド全体（元発言＋返信、件数上限なし）、省略時はチャンネル本体の直近100件（<code>thread_parent_id IS NULL</code>）を要約対象とする（基本設計書5.6節）。<code>thread_id</code>は当該チャンネルの発言でなければ404。要約結果はA-11のAIメンション応答と同じ生成中プレースホルダ方式（<code>generation_status='generating'</code>、AIサポート10.3節）でT-05へ<code>sender_type='ai'</code>の発言として投稿される（<code>thread_id</code>指定時はそのスレッドへの返信、省略時はチャンネル本体への新規発言）。したがって要約結果は依頼した本人だけでなく参加者全員に見える（基本設計書6.2節「設計判断」）。本APIも投稿完了を待たずに返す（REQ-N-05）。AI未設定またはチャンネルAI無効（<code>channel_ai_settings.is_ai_enabled=false</code>）の場合は400を返す（A-11のAIメンション検知が条件不成立時に黙って何もしないのと異なり、明示的なボタン操作のため理由を返す）。</p>
 
   <h3>4.4 DM（A-16〜A-19, A-70）</h3>
   <p><strong>A-16 <span class="badge badge-get">GET</span> /api/dms（参加中DM一覧）</strong></p>

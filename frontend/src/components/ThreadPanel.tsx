@@ -4,6 +4,7 @@ import { apiFetch } from '../lib/api'
 import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageList'
 import Composer from './Composer'
 import ProfileCard from './ProfileCard'
+import { useToast } from './Toast'
 import type { AttachmentPayload, ChannelMember, MentionPayload, Message } from '../types'
 
 // S-04 スレッド表示（画面モックアップ S-04）。S-03/DmViewの右側に重ねて表示するパネル。
@@ -32,6 +33,8 @@ export default function ThreadPanel({
   // F-40 プロフィールカード（元発言のヘッダーはMessageListの外で個別に描画しているため、
   // ここだけ別途状態を持つ）
   const [parentProfileOpen, setParentProfileOpen] = useState(false)
+  const [summarizing, setSummarizing] = useState(false)
+  const toast = useToast()
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
@@ -46,6 +49,26 @@ export default function ThreadPanel({
     onReplyPosted?.()
   }
 
+  // A-15: このスレッド全体の要約（F-14）。チャンネルのスレッドのみ対象（DMのスレッドにはAI機能が
+  // 無いため、channel_idを持つ元発言のときだけボタンを表示する）。要約結果はこのスレッドへの
+  // 返信として投稿されるため、返信一覧を再取得して生成中プレースホルダをすぐ表示する。
+  const summarizeThread = async () => {
+    if (!parentMessage?.channel_id) return
+    setSummarizing(true)
+    try {
+      await apiFetch(`/api/channels/${parentMessage.channel_id}/summarize`, {
+        method: 'POST',
+        body: JSON.stringify({ thread_id: messageId }),
+      })
+      await mutateReplies()
+      onReplyPosted?.()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '要約に失敗しました', 'error')
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
   return (
     <aside className="flex w-[380px] flex-none flex-col border-l border-line-strong bg-surface shadow-[-4px_0_16px_rgba(16,24,40,0.05)]">
       <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-4">
@@ -53,11 +76,24 @@ export default function ThreadPanel({
           <span className="text-sm font-bold text-ink">スレッド</span>
           <span className="truncate text-[11px] text-ink-subtle">{headerSub}</span>
         </div>
+        {parentMessage?.channel_id && (
+          <button
+            type="button"
+            disabled={summarizing}
+            onClick={summarizeThread}
+            title="このスレッド全体を要約します（F-14）"
+            className="ml-auto flex-none rounded-[7px] border border-accent-100 bg-accent-50 px-2 py-1 text-[11px] font-semibold text-accent-700 hover:bg-accent-100 disabled:opacity-50"
+          >
+            📝 {summarizing ? '要約中...' : '要約'}
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
           title="閉じる"
-          className="ml-auto flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          className={`flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted ${
+            parentMessage?.channel_id ? '' : 'ml-auto'
+          }`}
         >
           ✕
         </button>

@@ -10,9 +10,10 @@ import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
+import { useToast } from '../components/Toast'
 import type { AttachmentPayload, MentionPayload } from '../types'
 
-// S-03 チャンネル会話＋S-04 スレッド表示（このスライスは添付・送信予約・要約は未実装）
+// S-03 チャンネル会話＋S-04 スレッド表示（このスライスは添付・送信予約は未実装）
 export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -32,6 +33,8 @@ export default function ChannelView() {
   )
   const listRef = useRef<HTMLDivElement>(null)
   const [membersModalTab, setMembersModalTab] = useState<'info' | 'members' | null>(null)
+  const [summarizing, setSummarizing] = useState(false)
+  const toast = useToast()
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
@@ -66,6 +69,23 @@ export default function ChannelView() {
     })
   }
 
+  // A-15: チャンネル本体の要約（F-14）。押した時点までの直近100件を対象に、要約結果は
+  // このチャンネルへのAI発言として投稿される（生成中はMessageListが「生成中」を表示するため、
+  // ここでは投稿完了を待たずすぐにボタンを元に戻す。mutateMessages()は3秒ポーリングを待たず
+  // プレースホルダ行を早く表示するための一手）
+  const summarize = async () => {
+    if (!channelId) return
+    setSummarizing(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/summarize`, { method: 'POST', body: JSON.stringify({}) })
+      await mutateMessages()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '要約に失敗しました', 'error')
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
   return (
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -85,6 +105,17 @@ export default function ChannelView() {
               className="ml-auto flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
             >
               👥 所属メンバー：{channel.member_count}人
+            </button>
+          )}
+          {channel && (
+            <button
+              type="button"
+              disabled={summarizing}
+              onClick={summarize}
+              title="押した時点までの直近100件を要約します（F-14）"
+              className="flex-none rounded-[7px] border border-accent-100 bg-accent-50 px-2.5 py-1 text-xs font-semibold text-accent-700 hover:bg-accent-100 disabled:opacity-50"
+            >
+              📝 {summarizing ? '要約中...' : '要約'}
             </button>
           )}
           {(channel?.is_channel_admin || me?.role === 'admin') && (

@@ -17,6 +17,11 @@
 # is_ai_enabled=trueのとき、非同期タスクとして起動する（8.1節・8.7節、REQ-N-05。A-11自体は
 # 応答を待たずに投稿完了を返す）。AIへのメンションはID参照化の対象外（基本設計書5.22節
 # 「設計判断」。チャンネルAIは1チャンネルにつき1つしかなく、同姓同名のような曖昧さが生じない）。
+#
+# F-14 やりとりの要約（start_summary/_generate_summary_and_post）はA-15（routers/channels.py）から
+# 呼ばれる別経路で、メンション応答と同じ生成中プレースホルダ方式・T-13コスト記録を再利用しつつ、
+# システムプロンプトと参照する発言範囲（チャンネル直近100件、またはthread_id指定時はスレッド全体）
+# が異なる。自動対応範囲・スキル等のスコープ外事項はこちらにも同様に適用される。
 import asyncio
 import traceback
 
@@ -24,8 +29,15 @@ from database import get_pool
 from services import ai_client
 
 MAX_HISTORY_MESSAGES = 200
+MAX_SUMMARY_CHANNEL_MESSAGES = 100  # F-14: チャンネル本体を要約する場合の対象件数上限（スレッド全体は上限なし）
 TEMPERATURE = 0.5
 MAX_OUTPUT_TOKENS = 1000
+
+
+class SummaryUnavailable(Exception):
+    """A-15呼び出し元（routers/channels.py）が400として利用者に伝えるための例外。メンション応答の
+    maybe_triggerと異なり、要約はボタンの明示的な操作のため、条件を満たさない場合に黙って
+    何もしないのではなく理由を返す。"""
 
 # 全チャンネル共通のシステム指示（基本設計書8.3節・詳細設計書10.2節）。チャンネル管理者は編集できず
 # アプリ側で固定する。ドキュメント検索・座席予約が未実装であることも明示し、ハルシネーションで
@@ -62,6 +74,34 @@ async def _fetch_settings(channel_id: int) -> dict | None:
         "SELECT * FROM channel_ai_settings WHERE channel_id = $1", channel_id
     )
     return dict(row) if row else None
+
+
+async def _resolve_sender_names(rows) -> dict[int, str]:
+    """履歴整形用にsender_user_idのnameだけ別途取得する（_generate_and_post・要約生成で共有）"""
+    user_ids = {r["sender_user_id"] for r in rows if r["sender_user_id"] is not None}
+    if not user_ids:
+        return {}
+    return {
+        r["id"]: r["name"]
+        for r in await get_pool().fetch("SELECT id, name FROM users WHERE id = ANY($1::bigint[])", list(user_ids))
+    }
+
+
+def _rows_to_chat_messages(rows, names: dict[int, str]) -> list[dict]:
+    """T-05の行をOpenAI Chat Completions形式のmessagesへ変換する（_generate_and_post・要約生成で共有）"""
+    messages: list[dict] = []
+    for r in rows:
+        if not r["body"]:
+            continue
+        if r["sender_type"] == "human":
+            name = names.get(r["sender_user_id"], "利用者")
+            messages.append({"role": "user", "content": f"{name}: {r['body']}"})
+        elif r["sender_type"] == "ai":
+            messages.append({"role": "assistant", "content": r["body"]})
+        else:
+            # BOT発言（定期投稿・トリガー）はAIの自己発言と混同しないよう利用者側の文脈として渡す
+            messages.append({"role": "user", "content": f"{r['bot_display_name'] or 'BOT'}: {r['body']}"})
+    return messages
 
 
 async def maybe_trigger(channel_id: int, body: str, requested_by: int) -> None:
@@ -104,28 +144,9 @@ async def _generate_and_post(channel_id: int, settings: dict, requested_by: int)
             channel_id, MAX_HISTORY_MESSAGES,
         )
         history_rows = list(reversed(rows))
-
-        # 発言者名の解決用にsender_user_idのnameだけ別途取得する（履歴の整形専用の軽い問い合わせ）
-        user_ids = {r["sender_user_id"] for r in history_rows if r["sender_user_id"] is not None}
-        names: dict[int, str] = {}
-        if user_ids:
-            for r in await pool.fetch(
-                "SELECT id, name FROM users WHERE id = ANY($1::bigint[])", list(user_ids)
-            ):
-                names[r["id"]] = r["name"]
-
+        names = await _resolve_sender_names(history_rows)
         messages: list[dict] = [{"role": "system", "content": _build_system_prompt(settings)}]
-        for r in history_rows:
-            if not r["body"]:
-                continue
-            if r["sender_type"] == "human":
-                name = names.get(r["sender_user_id"], "利用者")
-                messages.append({"role": "user", "content": f"{name}: {r['body']}"})
-            elif r["sender_type"] == "ai":
-                messages.append({"role": "assistant", "content": r["body"]})
-            else:
-                # BOT発言（定期投稿・トリガー）はAIの自己発言と混同しないよう利用者側の文脈として渡す
-                messages.append({"role": "user", "content": f"{r['bot_display_name'] or 'BOT'}: {r['body']}"})
+        messages += _rows_to_chat_messages(history_rows, names)
 
         client = ai_client.get_client()
         model = ai_client.get_model()
@@ -154,4 +175,123 @@ async def _generate_and_post(channel_id: int, settings: dict, requested_by: int)
         await pool.execute(
             "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
             message_id, "（エラーが発生したため回答できませんでした）",
+        )
+
+
+# F-14 やりとりの要約（基本設計書5.6節・8.7節「生成中表示」を流用）。手動実行のボタン契機のみで
+# 自動要約はしない（要件定義書3.2節）。ユーザーの選択により、要約結果はメンション応答と同じ
+# sender_type='ai'のチャンネル発言として投稿する（参加者全員に見える。AIバッジ・生成中表示・
+# T-13コスト記録もメンション応答と共通の仕組みをそのまま使う）。
+SUMMARY_INSTRUCTION = "ここまでのやりとりを要約してください。"
+
+
+def _build_summary_prompt(settings: dict) -> str:
+    persona_name = settings["persona_name"] or "AI"
+    persona_tone = settings["persona_tone"] or "自然な日本語"
+    return (
+        f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}\n'
+        "これまでのやりとりの要約を求められています。次の方針に従うこと。\n"
+        "- 誰が何を発言・決定したかが分かるよう、要点を箇条書きでまとめる\n"
+        "- 未解決の質問や次に必要なアクションがあれば末尾に明記する\n"
+        "- 元のやりとりに無い情報を推測・創作しない\n"
+        "- 日本語で簡潔にまとめる（目安400字程度）"
+    )
+
+
+async def _fetch_summary_source_rows(channel_id: int, thread_id: int | None):
+    """要約対象を取得する。thread_id指定時はそのスレッド全体（元発言＋返信、上限なし。F-14の
+    「スレッド内であればそのスレッド全体」の記載どおり）、未指定時はチャンネル本体の直近100件。
+    いずれもgeneration_status IS NULLで絞り込み、生成中の（このリクエスト自身の仮レコードを
+    含む）AI発言を要約対象から除外する。"""
+    pool = get_pool()
+    if thread_id is not None:
+        rows = await pool.fetch(
+            """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+               FROM messages
+               WHERE (id = $1 OR thread_parent_id = $1)
+                 AND deleted_at IS NULL AND generation_status IS NULL
+               ORDER BY created_at ASC""",
+            thread_id,
+        )
+        return list(rows)
+    rows = await pool.fetch(
+        """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+           FROM messages
+           WHERE channel_id = $1 AND deleted_at IS NULL AND thread_parent_id IS NULL
+             AND generation_status IS NULL
+           ORDER BY created_at DESC LIMIT $2""",
+        channel_id, MAX_SUMMARY_CHANNEL_MESSAGES,
+    )
+    return list(reversed(rows))
+
+
+async def start_summary(channel_id: int, thread_id: int | None, requested_by: int) -> dict:
+    """A-15から呼ばれる。生成中プレースホルダを同期的に作成してから、実際の生成は
+    _generate_summary_and_postへ任せる非同期タスクとして起動する（8.7節と同じ方式）。
+    thread_id指定時はそのスレッドへの返信として、未指定時はチャンネル本体の新規発言として投稿する。"""
+    if not ai_client.is_configured():
+        raise SummaryUnavailable("AI機能が設定されていないため要約できません")
+    settings = await _fetch_settings(channel_id)
+    if settings is None or not settings["is_ai_enabled"]:
+        raise SummaryUnavailable("このチャンネルのAIは無効になっています")
+
+    pool = get_pool()
+    persona_name = settings["persona_name"] or "AI"
+    persona_icon_url = settings["persona_icon_url"]
+    placeholder = await pool.fetchrow(
+        """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body, generation_status,
+               bot_display_name, bot_icon_url)
+           VALUES ($1, $2, 'ai', '', 'generating', $3, $4) RETURNING id""",
+        channel_id, thread_id, persona_name, persona_icon_url,
+    )
+    message_id = placeholder["id"]
+    asyncio.create_task(_generate_summary_and_post(channel_id, thread_id, message_id, settings, requested_by))
+    return {"message_id": message_id, "thread_id": thread_id}
+
+
+async def _generate_summary_and_post(
+    channel_id: int, thread_id: int | None, message_id: int, settings: dict, requested_by: int,
+) -> None:
+    pool = get_pool()
+    try:
+        rows = await _fetch_summary_source_rows(channel_id, thread_id)
+        if not rows:
+            await pool.execute(
+                "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+                message_id, "（要約する発言がありませんでした）",
+            )
+            return
+
+        names = await _resolve_sender_names(rows)
+        messages: list[dict] = [{"role": "system", "content": _build_summary_prompt(settings)}]
+        messages += _rows_to_chat_messages(rows, names)
+        messages.append({"role": "user", "content": SUMMARY_INSTRUCTION})
+
+        client = ai_client.get_client()
+        model = ai_client.get_model()
+        res = await client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=TEMPERATURE, max_completion_tokens=MAX_OUTPUT_TOKENS,
+        )
+        reply = (res.choices[0].message.content or "").strip() or "（要約を生成できませんでした）"
+
+        await pool.execute(
+            "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+            message_id, reply,
+        )
+
+        if res.usage:
+            cost = ai_client.estimate_cost_yen(model, res.usage.prompt_tokens, res.usage.completion_tokens)
+            await pool.execute(
+                """INSERT INTO ai_usage_logs
+                       (channel_id, requested_by, model, input_tokens, output_tokens, estimated_cost_yen)
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                channel_id, requested_by, model,
+                res.usage.prompt_tokens, res.usage.completion_tokens, cost,
+            )
+    except Exception:
+        traceback.print_exc()
+        await pool.execute(
+            "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+            message_id, "（エラーが発生したため要約できませんでした）",
         )

@@ -510,3 +510,36 @@ async def post_message(
         blocks,
         attachments,
     )
+
+
+class SummarizeRequest(BaseModel):
+    thread_id: str | None = None
+
+
+@router.post("/{channel_id}/summarize", status_code=201)
+async def summarize_channel(
+    channel_id: int, body: SummarizeRequest, user: CurrentUser = Depends(require_channel_member),
+):
+    """A-15: 要約実行（F-14）。thread_id指定時はそのスレッド全体、未指定時はチャンネル本体の
+    直近100件を対象とする（基本設計書5.6節）。実際の生成はservices/ai_agent.pyが非同期で行い
+    （メンション応答と同じgeneration_status='generating'の仮レコード方式、8.7節）、このAPIは
+    投稿完了を待たずに返す。AI未設定・チャンネルAI無効の場合は400（maybe_triggerと異なり、
+    明示的なボタン操作のため黙って何もしないのではなく理由を返す）。"""
+    thread_id: int | None = None
+    if body.thread_id is not None:
+        if not body.thread_id.isdigit():
+            raise HTTPException(422, detail="thread_idは数値のIDです")
+        thread_id = int(body.thread_id)
+        parent = await get_pool().fetchrow(
+            "SELECT channel_id FROM messages WHERE id = $1 AND deleted_at IS NULL", thread_id
+        )
+        if parent is None or parent["channel_id"] != channel_id:
+            raise HTTPException(404, detail="見つかりません")
+    try:
+        result = await ai_agent.start_summary(channel_id, thread_id, user.id)
+    except ai_agent.SummaryUnavailable as e:
+        raise HTTPException(400, detail=str(e))
+    return {
+        "message_id": str(result["message_id"]),
+        "thread_id": str(result["thread_id"]) if result["thread_id"] is not None else None,
+    }
