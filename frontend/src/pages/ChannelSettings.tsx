@@ -711,12 +711,104 @@ function defaultAnchor(): { date: string; time: string } {
   }
 }
 
-// 定期投稿タブ（A-53〜A-56、F-36）。新規作成・編集を同じフォームで扱う（editingがnullなら新規作成）
+// 定期投稿の入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目）
+function RecurringPostFormFields({
+  displayName, onDisplayNameChange,
+  emoji, onEmojiChange,
+  iconUrl, onIconUrlChange,
+  body, onBodyChange,
+  frequency, onFrequencyChange,
+  date, onDateChange,
+  time, onTimeChange,
+}: {
+  displayName: string
+  onDisplayNameChange: (v: string) => void
+  emoji: string
+  onEmojiChange: (v: string) => void
+  iconUrl: string | null
+  onIconUrlChange: (v: string | null) => void
+  body: string
+  onBodyChange: (v: string) => void
+  frequency: 'once' | 'daily' | 'weekly' | 'monthly'
+  onFrequencyChange: (v: 'once' | 'daily' | 'weekly' | 'monthly') => void
+  date: string
+  onDateChange: (v: string) => void
+  time: string
+  onTimeChange: (v: string) => void
+}) {
+  return (
+    <>
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">送り主の表示名</label>
+        <input
+          value={displayName}
+          onChange={(e) => onDisplayNameChange(e.target.value)}
+          placeholder="例: お知らせBot"
+          maxLength={100}
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+
+      <IconInput emoji={emoji} onEmojiChange={onEmojiChange} iconUrl={iconUrl} onIconUrlChange={onIconUrlChange} />
+
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
+        <textarea
+          value={body}
+          onChange={(e) => onBodyChange(e.target.value)}
+          rows={3}
+          maxLength={4000}
+          placeholder="投稿する内容を入力（@でメンション可。ただしAIへの応答は発生しません）"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+
+      <div className="mb-1 flex gap-3">
+        <div className="flex-1">
+          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">頻度</label>
+          <select
+            value={frequency}
+            onChange={(e) => onFrequencyChange(e.target.value as typeof frequency)}
+            className="w-full rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+          >
+            <option value="once">1回のみ</option>
+            <option value="daily">毎日</option>
+            <option value="weekly">毎週</option>
+            <option value="monthly">毎月</option>
+          </select>
+        </div>
+        <div className="flex-1">
+          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">初回の送信日時</label>
+          <div className="flex gap-1.5">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => onDateChange(e.target.value)}
+              className="w-1/2 rounded-lg border border-line-strong px-2 py-2 text-[12.5px] text-ink outline-none"
+            />
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => onTimeChange(e.target.value)}
+              className="w-1/2 rounded-lg border border-line-strong px-2 py-2 text-[12.5px] text-ink outline-none"
+            />
+          </div>
+        </div>
+      </div>
+      <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
+        「毎週」は初回日時の曜日、「毎月」は初回日時の日にちで繰り返します（該当日が存在しない月は月末に送信）。「1回のみ」は指定日時に1度だけ投稿し、以降は自動的に一時停止扱いになります。
+      </div>
+    </>
+  )
+}
+
+// 定期投稿タブ（A-53〜A-56、F-36）。新規作成は常時表示のパネル、編集は一覧の「編集」から開くモーダルと
+// 画面を明確に分けている（同じフォームを使い回すと新規作成と編集の見分けが付きにくいため。ユーザー指摘を受けて改善）
 function RecurringPostsTab({ channelId }: { channelId: string }) {
   const toast = useToast()
   const confirm = useConfirm()
   const { items, mutate } = useRecurringPosts(channelId)
-  const [editing, setEditing] = useState<RecurringPost | null>(null)
+  const [editingItem, setEditingItem] = useState<RecurringPost | null>(null)
   const [body, setBody] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [emoji, setEmoji] = useState('📌')
@@ -726,20 +818,7 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
   const [time, setTime] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const startEdit = (item: RecurringPost) => {
-    setEditing(item)
-    setBody(item.body)
-    setDisplayName(item.bot_display_name)
-    setEmoji(item.bot_icon ?? '📌')
-    setIconUrl(item.bot_icon_url)
-    setFrequency(item.frequency)
-    const d = new Date(item.anchor_at)
-    setDate(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`)
-    setTime(`${pad2(d.getHours())}:${pad2(d.getMinutes())}`)
-  }
-
   const resetForm = () => {
-    setEditing(null)
     setBody('')
     setDisplayName('')
     setEmoji('📌')
@@ -771,27 +850,18 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
     }
     setSaving(true)
     try {
-      const payload = {
-        body: body.trim(),
-        bot_display_name: displayName.trim() || null,
-        bot_icon: iconUrl ? null : emoji.trim() || null,
-        bot_icon_url: iconUrl,
-        frequency,
-        anchor_at: anchorAt.toISOString(),
-      }
-      if (editing) {
-        await apiFetch(`/api/channels/${channelId}/recurring-posts/${editing.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        })
-        toast('定期投稿を更新しました')
-      } else {
-        await apiFetch(`/api/channels/${channelId}/recurring-posts`, {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        })
-        toast('定期投稿を追加しました')
-      }
+      await apiFetch(`/api/channels/${channelId}/recurring-posts`, {
+        method: 'POST',
+        body: JSON.stringify({
+          body: body.trim(),
+          bot_display_name: displayName.trim() || null,
+          bot_icon: iconUrl ? null : emoji.trim() || null,
+          bot_icon_url: iconUrl,
+          frequency,
+          anchor_at: anchorAt.toISOString(),
+        }),
+      })
+      toast('定期投稿を追加しました')
       await mutate()
       resetForm()
     } catch (e) {
@@ -824,7 +894,7 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
     try {
       await apiFetch(`/api/channels/${channelId}/recurring-posts/${item.id}`, { method: 'DELETE' })
       await mutate()
-      if (editing?.id === item.id) resetForm()
+      if (editingItem?.id === item.id) setEditingItem(null)
       toast('定期投稿を削除しました')
     } catch (e) {
       toast(e instanceof Error ? e.message : '削除に失敗しました', 'error')
@@ -874,7 +944,7 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
               <div className="ml-auto flex gap-1.5">
                 <button
                   type="button"
-                  onClick={() => startEdit(item)}
+                  onClick={() => setEditingItem(item)}
                   className="rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
                 >
                   編集
@@ -892,69 +962,25 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
         ))}
       </ul>
 
-      <div className="rounded-[10px] border border-line-strong bg-surface-subtle px-4 py-4">
-        <div className="mb-3.5 text-[12.5px] font-bold text-ink">{editing ? '定期投稿を編集' : '定期投稿を追加'}</div>
+      <div className="rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
+        <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しい定期投稿を追加</div>
 
-        <div className="mb-3.5">
-          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">送り主の表示名</label>
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="例: お知らせBot"
-            maxLength={100}
-            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-          />
-        </div>
-
-        <IconInput emoji={emoji} onEmojiChange={setEmoji} iconUrl={iconUrl} onIconUrlChange={setIconUrl} />
-
-        <div className="mb-3.5">
-          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={3}
-            maxLength={4000}
-            placeholder="投稿する内容を入力（@でメンション可。ただしAIへの応答は発生しません）"
-            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-          />
-        </div>
-
-        <div className="mb-1 flex gap-3">
-          <div className="flex-1">
-            <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">頻度</label>
-            <select
-              value={frequency}
-              onChange={(e) => setFrequency(e.target.value as typeof frequency)}
-              className="w-full rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-            >
-              <option value="once">1回のみ</option>
-              <option value="daily">毎日</option>
-              <option value="weekly">毎週</option>
-              <option value="monthly">毎月</option>
-            </select>
-          </div>
-          <div className="flex-1">
-            <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">初回の送信日時</label>
-            <div className="flex gap-1.5">
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-1/2 rounded-lg border border-line-strong px-2 py-2 text-[12.5px] text-ink outline-none"
-              />
-              <input
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="w-1/2 rounded-lg border border-line-strong px-2 py-2 text-[12.5px] text-ink outline-none"
-              />
-            </div>
-          </div>
-        </div>
-        <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
-          「毎週」は初回日時の曜日、「毎月」は初回日時の日にちで繰り返します（該当日が存在しない月は月末に送信）。「1回のみ」は指定日時に1度だけ投稿し、以降は自動的に一時停止扱いになります。
-        </div>
+        <RecurringPostFormFields
+          displayName={displayName}
+          onDisplayNameChange={setDisplayName}
+          emoji={emoji}
+          onEmojiChange={setEmoji}
+          iconUrl={iconUrl}
+          onIconUrlChange={setIconUrl}
+          body={body}
+          onBodyChange={setBody}
+          frequency={frequency}
+          onFrequencyChange={setFrequency}
+          date={date}
+          onDateChange={setDate}
+          time={time}
+          onTimeChange={setTime}
+        />
 
         <div className="flex gap-2">
           <button
@@ -963,17 +989,115 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
             onClick={submit}
             className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
           >
-            {editing ? '更新する' : '＋ 定期投稿を追加'}
+            ＋ 定期投稿を追加
           </button>
-          {editing && (
-            <button
-              type="button"
-              onClick={resetForm}
-              className="rounded-lg border border-line-strong px-4 py-2 text-[13px] font-semibold text-ink-muted"
-            >
-              キャンセル
-            </button>
-          )}
+        </div>
+      </div>
+
+      {editingItem && (
+        <RecurringPostEditModal
+          key={editingItem.id}
+          item={editingItem}
+          channelId={channelId}
+          onClose={() => setEditingItem(null)}
+          onSaved={mutate}
+        />
+      )}
+    </div>
+  )
+}
+
+// 定期投稿の編集モーダル（一覧の「編集」から開く）。新規作成パネルとは別画面にすることで、
+// 「今どちらの操作をしているか」を一目で区別できるようにしている
+function RecurringPostEditModal({
+  item, channelId, onClose, onSaved,
+}: {
+  item: RecurringPost
+  channelId: string
+  onClose: () => void
+  onSaved: () => Promise<unknown>
+}) {
+  const toast = useToast()
+  const initialAnchor = new Date(item.anchor_at)
+  const [body, setBody] = useState(item.body)
+  const [displayName, setDisplayName] = useState(item.bot_display_name)
+  const [emoji, setEmoji] = useState(item.bot_icon ?? '📌')
+  const [iconUrl, setIconUrl] = useState<string | null>(item.bot_icon_url)
+  const [frequency, setFrequency] = useState<'once' | 'daily' | 'weekly' | 'monthly'>(item.frequency)
+  const [date, setDate] = useState(`${initialAnchor.getFullYear()}-${pad2(initialAnchor.getMonth() + 1)}-${pad2(initialAnchor.getDate())}`)
+  const [time, setTime] = useState(`${pad2(initialAnchor.getHours())}:${pad2(initialAnchor.getMinutes())}`)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (!body.trim()) {
+      toast('メッセージ本文を入力してください', 'error')
+      return
+    }
+    if (!date || !time) {
+      toast('送信日時を指定してください', 'error')
+      return
+    }
+    const anchorAt = new Date(`${date}T${time}:00`)
+    if (Number.isNaN(anchorAt.getTime())) {
+      toast('送信日時の形式が不正です', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/recurring-posts/${item.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          body: body.trim(),
+          bot_display_name: displayName.trim() || null,
+          bot_icon: iconUrl ? null : emoji.trim() || null,
+          bot_icon_url: iconUrl,
+          frequency,
+          anchor_at: anchorAt.toISOString(),
+        }),
+      })
+      toast('定期投稿を更新しました')
+      await onSaved()
+      onClose()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 px-[22px] pb-1 pt-4.5">
+          <h2 className="flex-1 text-[15.5px] font-bold text-ink">定期投稿を編集</h2>
+          <button type="button" onClick={onClose} className="text-ink-subtle hover:text-ink-muted">✕</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-[22px] pb-1 pt-4.5">
+          <RecurringPostFormFields
+            displayName={displayName}
+            onDisplayNameChange={setDisplayName}
+            emoji={emoji}
+            onEmojiChange={setEmoji}
+            iconUrl={iconUrl}
+            onIconUrlChange={setIconUrl}
+            body={body}
+            onBodyChange={setBody}
+            frequency={frequency}
+            onFrequencyChange={setFrequency}
+            date={date}
+            onDateChange={setDate}
+            time={time}
+            onTimeChange={setTime}
+          />
+        </div>
+        <div className="px-[22px] pb-5 pt-4">
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink-muted">キャンセル</button>
+            <button type="button" disabled={saving} onClick={save} className="flex-1 rounded-lg bg-accent-600 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-40">更新する</button>
+          </div>
         </div>
       </div>
     </div>
@@ -982,13 +1106,103 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
 
 const TRIGGER_TYPE_LABEL: Record<TriggerRule['trigger_type'], string> = { keyword: 'キーワード', emoji: '絵文字' }
 
-// 自動応答トリガータブ（A-63〜A-66、F-38）。定期投稿タブと同じ「新規作成・編集を同じフォームで扱う」
-// 構成にしている
+// 自動応答トリガーの入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目）
+function TriggerRuleFormFields({
+  triggerType, onTriggerTypeChange,
+  triggerValue, onTriggerValueChange,
+  actionBody, onActionBodyChange,
+  displayName, onDisplayNameChange,
+  emoji, onEmojiChange,
+  iconUrl, onIconUrlChange,
+}: {
+  triggerType: 'keyword' | 'emoji'
+  onTriggerTypeChange: (v: 'keyword' | 'emoji') => void
+  triggerValue: string
+  onTriggerValueChange: (v: string) => void
+  actionBody: string
+  onActionBodyChange: (v: string) => void
+  displayName: string
+  onDisplayNameChange: (v: string) => void
+  emoji: string
+  onEmojiChange: (v: string) => void
+  iconUrl: string | null
+  onIconUrlChange: (v: string | null) => void
+}) {
+  return (
+    <>
+      <div className="mb-3.5 flex gap-3">
+        <div className="flex-1">
+          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">トリガーの種類</label>
+          <select
+            value={triggerType}
+            onChange={(e) => onTriggerTypeChange(e.target.value as typeof triggerType)}
+            className="w-full rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+          >
+            <option value="keyword">キーワード</option>
+            <option value="emoji">絵文字</option>
+          </select>
+        </div>
+        <div className="flex-1">
+          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">トリガーの値</label>
+          <input
+            value={triggerValue}
+            onChange={(e) => onTriggerValueChange(e.target.value)}
+            placeholder={triggerType === 'keyword' ? '例: サポート' : '例: 🚨'}
+            maxLength={100}
+            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+          />
+        </div>
+      </div>
+
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">実行する処理</label>
+        <select disabled className="w-full rounded-lg border border-line-strong bg-surface-muted px-2.5 py-2 text-[13px] text-ink-subtle opacity-70">
+          <option>メッセージを投稿する</option>
+        </select>
+        <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
+          現時点で選べる処理はメッセージの投稿のみです（本文にURLを含めることもできます）。
+        </div>
+      </div>
+
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">投稿する本文</label>
+        <textarea
+          value={actionBody}
+          onChange={(e) => onActionBodyChange(e.target.value)}
+          rows={3}
+          maxLength={4000}
+          placeholder="トリガーに一致したときに投稿する内容を入力"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">送り主の表示名</label>
+        <input
+          value={displayName}
+          onChange={(e) => onDisplayNameChange(e.target.value)}
+          placeholder="例: ヘルプ案内Bot"
+          maxLength={100}
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+
+      <IconInput emoji={emoji} onEmojiChange={onEmojiChange} iconUrl={iconUrl} onIconUrlChange={onIconUrlChange} />
+
+      <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
+        人間の発言のみが判定対象で、BOT自身の投稿が別のトリガーを呼び出すことはありません。チャンネル本体の投稿のみが対象です（スレッド内の発言は対象外）。
+      </div>
+    </>
+  )
+}
+
+// 自動応答トリガータブ（A-63〜A-66、F-38）。定期投稿タブと同じ考え方で、新規作成は常時表示のパネル、
+// 編集は一覧の「編集」から開くモーダルと画面を分けている（ユーザー指摘を受けて改善）
 function TriggerRulesTab({ channelId }: { channelId: string }) {
   const toast = useToast()
   const confirm = useConfirm()
   const { items, mutate } = useTriggerRules(channelId)
-  const [editing, setEditing] = useState<TriggerRule | null>(null)
+  const [editingItem, setEditingItem] = useState<TriggerRule | null>(null)
   const [triggerType, setTriggerType] = useState<'keyword' | 'emoji'>('keyword')
   const [triggerValue, setTriggerValue] = useState('')
   const [actionBody, setActionBody] = useState('')
@@ -998,7 +1212,6 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
   const [saving, setSaving] = useState(false)
 
   const resetForm = () => {
-    setEditing(null)
     setTriggerType('keyword')
     setTriggerValue('')
     setActionBody('')
@@ -1012,16 +1225,6 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId])
 
-  const startEdit = (item: TriggerRule) => {
-    setEditing(item)
-    setTriggerType(item.trigger_type)
-    setTriggerValue(item.trigger_value)
-    setActionBody(item.action_body)
-    setDisplayName(item.bot_display_name)
-    setEmoji(item.bot_icon ?? '⚡')
-    setIconUrl(item.bot_icon_url)
-  }
-
   const submit = async () => {
     if (!triggerValue.trim()) {
       toast('トリガーの値を入力してください', 'error')
@@ -1033,27 +1236,18 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
     }
     setSaving(true)
     try {
-      const payload = {
-        trigger_type: triggerType,
-        trigger_value: triggerValue.trim(),
-        action_body: actionBody.trim(),
-        bot_display_name: displayName.trim() || null,
-        bot_icon: iconUrl ? null : emoji.trim() || null,
-        bot_icon_url: iconUrl,
-      }
-      if (editing) {
-        await apiFetch(`/api/channels/${channelId}/trigger-rules/${editing.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        })
-        toast('トリガーを更新しました')
-      } else {
-        await apiFetch(`/api/channels/${channelId}/trigger-rules`, {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        })
-        toast('トリガーを追加しました')
-      }
+      await apiFetch(`/api/channels/${channelId}/trigger-rules`, {
+        method: 'POST',
+        body: JSON.stringify({
+          trigger_type: triggerType,
+          trigger_value: triggerValue.trim(),
+          action_body: actionBody.trim(),
+          bot_display_name: displayName.trim() || null,
+          bot_icon: iconUrl ? null : emoji.trim() || null,
+          bot_icon_url: iconUrl,
+        }),
+      })
+      toast('トリガーを追加しました')
       await mutate()
       resetForm()
     } catch (e) {
@@ -1086,7 +1280,7 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
     try {
       await apiFetch(`/api/channels/${channelId}/trigger-rules/${item.id}`, { method: 'DELETE' })
       await mutate()
-      if (editing?.id === item.id) resetForm()
+      if (editingItem?.id === item.id) setEditingItem(null)
       toast('トリガーを削除しました')
     } catch (e) {
       toast(e instanceof Error ? e.message : '削除に失敗しました', 'error')
@@ -1138,7 +1332,7 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
               <div className="ml-auto flex gap-1.5">
                 <button
                   type="button"
-                  onClick={() => startEdit(item)}
+                  onClick={() => setEditingItem(item)}
                   className="rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
                 >
                   編集
@@ -1156,71 +1350,23 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
         ))}
       </ul>
 
-      <div className="rounded-[10px] border border-line-strong bg-surface-subtle px-4 py-4">
-        <div className="mb-3.5 text-[12.5px] font-bold text-ink">{editing ? 'トリガーを編集' : 'トリガーを追加'}</div>
+      <div className="rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
+        <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しいトリガーを追加</div>
 
-        <div className="mb-3.5 flex gap-3">
-          <div className="flex-1">
-            <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">トリガーの種類</label>
-            <select
-              value={triggerType}
-              onChange={(e) => setTriggerType(e.target.value as typeof triggerType)}
-              className="w-full rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-            >
-              <option value="keyword">キーワード</option>
-              <option value="emoji">絵文字</option>
-            </select>
-          </div>
-          <div className="flex-1">
-            <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">トリガーの値</label>
-            <input
-              value={triggerValue}
-              onChange={(e) => setTriggerValue(e.target.value)}
-              placeholder={triggerType === 'keyword' ? '例: サポート' : '例: 🚨'}
-              maxLength={100}
-              className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-            />
-          </div>
-        </div>
-
-        <div className="mb-3.5">
-          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">実行する処理</label>
-          <select disabled className="w-full rounded-lg border border-line-strong bg-surface-muted px-2.5 py-2 text-[13px] text-ink-subtle opacity-70">
-            <option>メッセージを投稿する</option>
-          </select>
-          <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
-            現時点で選べる処理はメッセージの投稿のみです（本文にURLを含めることもできます）。
-          </div>
-        </div>
-
-        <div className="mb-3.5">
-          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">投稿する本文</label>
-          <textarea
-            value={actionBody}
-            onChange={(e) => setActionBody(e.target.value)}
-            rows={3}
-            maxLength={4000}
-            placeholder="トリガーに一致したときに投稿する内容を入力"
-            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-          />
-        </div>
-
-        <div className="mb-3.5">
-          <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">送り主の表示名</label>
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="例: ヘルプ案内Bot"
-            maxLength={100}
-            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-          />
-        </div>
-
-        <IconInput emoji={emoji} onEmojiChange={setEmoji} iconUrl={iconUrl} onIconUrlChange={setIconUrl} />
-
-        <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
-          人間の発言のみが判定対象で、BOT自身の投稿が別のトリガーを呼び出すことはありません。チャンネル本体の投稿のみが対象です（スレッド内の発言は対象外）。
-        </div>
+        <TriggerRuleFormFields
+          triggerType={triggerType}
+          onTriggerTypeChange={setTriggerType}
+          triggerValue={triggerValue}
+          onTriggerValueChange={setTriggerValue}
+          actionBody={actionBody}
+          onActionBodyChange={setActionBody}
+          displayName={displayName}
+          onDisplayNameChange={setDisplayName}
+          emoji={emoji}
+          onEmojiChange={setEmoji}
+          iconUrl={iconUrl}
+          onIconUrlChange={setIconUrl}
+        />
 
         <div className="flex gap-2">
           <button
@@ -1229,17 +1375,105 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
             onClick={submit}
             className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
           >
-            {editing ? '更新する' : '＋ トリガーを追加'}
+            ＋ トリガーを追加
           </button>
-          {editing && (
-            <button
-              type="button"
-              onClick={resetForm}
-              className="rounded-lg border border-line-strong px-4 py-2 text-[13px] font-semibold text-ink-muted"
-            >
-              キャンセル
-            </button>
-          )}
+        </div>
+      </div>
+
+      {editingItem && (
+        <TriggerRuleEditModal
+          key={editingItem.id}
+          item={editingItem}
+          channelId={channelId}
+          onClose={() => setEditingItem(null)}
+          onSaved={mutate}
+        />
+      )}
+    </div>
+  )
+}
+
+// 自動応答トリガーの編集モーダル（一覧の「編集」から開く）
+function TriggerRuleEditModal({
+  item, channelId, onClose, onSaved,
+}: {
+  item: TriggerRule
+  channelId: string
+  onClose: () => void
+  onSaved: () => Promise<unknown>
+}) {
+  const toast = useToast()
+  const [triggerType, setTriggerType] = useState(item.trigger_type)
+  const [triggerValue, setTriggerValue] = useState(item.trigger_value)
+  const [actionBody, setActionBody] = useState(item.action_body)
+  const [displayName, setDisplayName] = useState(item.bot_display_name)
+  const [emoji, setEmoji] = useState(item.bot_icon ?? '⚡')
+  const [iconUrl, setIconUrl] = useState<string | null>(item.bot_icon_url)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (!triggerValue.trim()) {
+      toast('トリガーの値を入力してください', 'error')
+      return
+    }
+    if (!actionBody.trim()) {
+      toast('投稿する本文を入力してください', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/trigger-rules/${item.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          trigger_type: triggerType,
+          trigger_value: triggerValue.trim(),
+          action_body: actionBody.trim(),
+          bot_display_name: displayName.trim() || null,
+          bot_icon: iconUrl ? null : emoji.trim() || null,
+          bot_icon_url: iconUrl,
+        }),
+      })
+      toast('トリガーを更新しました')
+      await onSaved()
+      onClose()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 px-[22px] pb-1 pt-4.5">
+          <h2 className="flex-1 text-[15.5px] font-bold text-ink">トリガーを編集</h2>
+          <button type="button" onClick={onClose} className="text-ink-subtle hover:text-ink-muted">✕</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-[22px] pb-1 pt-4.5">
+          <TriggerRuleFormFields
+            triggerType={triggerType}
+            onTriggerTypeChange={setTriggerType}
+            triggerValue={triggerValue}
+            onTriggerValueChange={setTriggerValue}
+            actionBody={actionBody}
+            onActionBodyChange={setActionBody}
+            displayName={displayName}
+            onDisplayNameChange={setDisplayName}
+            emoji={emoji}
+            onEmojiChange={setEmoji}
+            iconUrl={iconUrl}
+            onIconUrlChange={setIconUrl}
+          />
+        </div>
+        <div className="px-[22px] pb-5 pt-4">
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink-muted">キャンセル</button>
+            <button type="button" disabled={saving} onClick={save} className="flex-1 rounded-lg bg-accent-600 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-40">更新する</button>
+          </div>
         </div>
       </div>
     </div>
