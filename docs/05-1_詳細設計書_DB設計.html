@@ -36,6 +36,7 @@
       <tr class="diff-new"><td>1.5</td><td>2026-08-28</td><td>T-06 message_attachments（F-07 ファイル共有）を実装した。message_idがNOT NULLのため、アップロード時点ではDB行を作らずファイル実体のみを保存し、発言確定後の同一トランザクション内で紐づけることを明記した。</td></tr>
       <tr class="diff-new"><td>1.6</td><td>2026-08-31</td><td>T-14 ai_usage_limits（F-29上限設定、A-43）を実装した。定義済みのカラム構成はそのままに、scope='global'の行を最大1行、scope='channel'の行をchannel_idごとに最大1行へ制約する部分ユニークインデックス（A-43のON CONFLICT対象）を追記した（従来の定義には無かった実装詳細のbackfill）。</td></tr>
       <tr class="diff-new"><td>1.7</td><td>2026-09-01</td><td>T-16 audit_logs（監査ログ、A-44）を実装した。定義済みのカラム構成はそのままに、target_channel_idをON DELETE SET NULLとする設計判断を追記した（他の多くのFKはCASCADEだが、監査ログはチャンネル削除後も記録自体を残す目的のため）。</td></tr>
+      <tr class="diff-new"><td>1.8</td><td>2026-09-01</td><td>T-11 channel_skills（F-12スキル登録・F-17引き継ぎ先、A-28〜A-30・A-45）を実装した。定義済みのカラム構成はそのままに、channel_idをON DELETE CASCADEとする実装詳細を追記した（大半のFKと同じ「チャンネル削除で連動削除」の考え方。監査ログ・送信済みBOT発言のようにチャンネル削除後も記録を残す性質のテーブルではないため、T-16やmessages.recurring_post_idのSET NULL方針とは異なる）。</td></tr>
     </tbody>
   </table>
 

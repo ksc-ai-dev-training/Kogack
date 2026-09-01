@@ -1,6 +1,6 @@
-# A-23〜A-27（詳細設計書 API設計4.6節、基本設計書8.3節）。S-06 AI設定タブのうち「基本設定」
-# 「キャラクタ」「振る舞い定義」「参照ドキュメント範囲」の4タブに対応する。A-28〜A-30
-# （スキル）・A-31（自動対応範囲）は自動対応分類（層3）が未実装のため対象外（CLAUDE.md実装状況節）。
+# A-23〜A-30, A-45（詳細設計書 API設計4.6節、基本設計書8.3節）。S-06 AI設定タブのうち「基本設定」
+# 「キャラクタ」「振る舞い定義」「参照ドキュメント範囲」「スキル」の5タブに対応する。A-31
+# （自動対応範囲）は自動対応分類（層3）が未実装のため対象外（CLAUDE.md実装状況節）。
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -11,7 +11,7 @@ from database import get_pool
 router = APIRouter(prefix="/api/channels", tags=["ai-settings"])
 
 
-def _out(row, folder_ids: list[str]) -> dict:
+def _out(row, folder_ids: list[str], skills: list[dict]) -> dict:
     return {
         "channel_id": str(row["channel_id"]),
         "is_ai_enabled": row["is_ai_enabled"],
@@ -22,6 +22,10 @@ def _out(row, folder_ids: list[str]) -> dict:
         "reaction_mode": row["reaction_mode"],
         "out_of_scope_policy": row["out_of_scope_policy"],
         "folder_ids": folder_ids,
+        "skills": skills,
+        "fallback_handoff_user_id": (
+            str(row["fallback_handoff_user_id"]) if row["fallback_handoff_user_id"] is not None else None
+        ),
     }
 
 
@@ -44,12 +48,18 @@ async def _folder_ids(channel_id: int) -> list[str]:
     return [str(r["folder_id"]) for r in rows]
 
 
+async def _skills(channel_id: int) -> list[dict]:
+    rows = await get_pool().fetch(
+        "SELECT id, title, instructions FROM channel_skills WHERE channel_id = $1 ORDER BY created_at", channel_id
+    )
+    return [{"id": str(r["id"]), "title": r["title"], "instructions": r["instructions"]} for r in rows]
+
+
 @router.get("/{channel_id}/ai-settings")
 async def get_ai_settings(channel_id: int, user: CurrentUser = Depends(require_channel_admin)):
-    """A-23: AI設定一括取得（S-06）。fallback_handoff_user_idは引き継ぎ（F-17）が未実装のため
-    レスポンスに含めない（値はDB上に既定のまま保持される）"""
+    """A-23: AI設定一括取得（S-06）"""
     settings = await _get_or_create(channel_id)
-    return _out(settings, await _folder_ids(channel_id))
+    return _out(settings, await _folder_ids(channel_id), await _skills(channel_id))
 
 
 class UpdateGeneralRequest(BaseModel):
@@ -74,7 +84,7 @@ async def update_general(
         f"AIを{'有効' if body.is_ai_enabled else '無効'}にしました",
         target_channel_id=channel_id, target_field="is_ai_enabled",
     )
-    return _out(row, await _folder_ids(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
 
 
 class UpdateCharacterRequest(BaseModel):
@@ -102,7 +112,7 @@ async def update_character(
         pool, "channel_ai_setting_change", user.id, "キャラクタ設定を更新しました",
         target_channel_id=channel_id, target_field="character",
     )
-    return _out(row, await _folder_ids(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
 
 
 class UpdatePromptRequest(BaseModel):
@@ -126,7 +136,7 @@ async def update_prompt(
         pool, "channel_ai_setting_change", user.id, "振る舞い定義を更新しました",
         target_channel_id=channel_id, target_field="behavior_prompt",
     )
-    return _out(row, await _folder_ids(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
 
 
 class UpdateDocScopeRequest(BaseModel):
@@ -170,4 +180,111 @@ async def update_doc_scope(
             conn, "channel_ai_setting_change", user.id, "参照ドキュメント範囲を更新しました",
             target_channel_id=channel_id, target_field="doc_scope",
         )
-    return _out(row, await _folder_ids(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
+
+
+class CreateSkillRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    instructions: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/{channel_id}/skills", status_code=201)
+async def create_skill(
+    channel_id: int, body: CreateSkillRequest, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-28: スキル追加（F-12）。「依頼を受けたらこう進める」手順をtitle＋instructionsで登録する。
+    services/ai_agent.pyがシステムプロンプトの「# あなたのスキル」節で列挙する"""
+    await _get_or_create(channel_id)
+    pool = get_pool()
+    title = body.title.strip()
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            """INSERT INTO channel_skills (channel_id, title, instructions) VALUES ($1, $2, $3)
+               RETURNING id, title, instructions""",
+            channel_id, title, body.instructions.strip(),
+        )
+        await audit_log.record(
+            conn, "channel_ai_setting_change", user.id, f"スキル「{title}」を追加しました",
+            target_channel_id=channel_id, target_field="skill",
+        )
+    return {"id": str(row["id"]), "title": row["title"], "instructions": row["instructions"]}
+
+
+class UpdateSkillRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    instructions: str = Field(min_length=1, max_length=4000)
+
+
+@router.put("/{channel_id}/skills/{skill_id}")
+async def update_skill(
+    channel_id: int, skill_id: int, body: UpdateSkillRequest, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-29: スキル更新"""
+    pool = get_pool()
+    title = body.title.strip()
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            """UPDATE channel_skills SET title = $3, instructions = $4, updated_at = now()
+               WHERE id = $1 AND channel_id = $2 RETURNING id, title, instructions""",
+            skill_id, channel_id, title, body.instructions.strip(),
+        )
+        if row is None:
+            raise HTTPException(404, detail="スキルが見つかりません")
+        await audit_log.record(
+            conn, "channel_ai_setting_change", user.id, f"スキル「{title}」を更新しました",
+            target_channel_id=channel_id, target_field="skill",
+        )
+    return {"id": str(row["id"]), "title": row["title"], "instructions": row["instructions"]}
+
+
+@router.delete("/{channel_id}/skills/{skill_id}", status_code=204)
+async def delete_skill(channel_id: int, skill_id: int, user: CurrentUser = Depends(require_channel_admin)):
+    """A-30: スキル削除"""
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            "DELETE FROM channel_skills WHERE id = $1 AND channel_id = $2 RETURNING title", skill_id, channel_id
+        )
+        if row is None:
+            raise HTTPException(404, detail="スキルが見つかりません")
+        await audit_log.record(
+            conn, "channel_ai_setting_change", user.id, f"スキル「{row['title']}」を削除しました",
+            target_channel_id=channel_id, target_field="skill",
+        )
+
+
+class UpdateHandoffRequest(BaseModel):
+    fallback_handoff_user_id: str | None = None
+
+
+@router.put("/{channel_id}/ai-settings/handoff")
+async def update_handoff(
+    channel_id: int, body: UpdateHandoffRequest, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-45: スキルにない業務依頼の引き継ぎ先（F-17）。未指定（null）で既定のチャンネル管理者へ戻す。
+    指定する場合は当該チャンネルの参加者であることをAPI側で検証する（基本設計書8.3節の設計判断）。
+    指定した人物が退出・無効化された場合はNULLへ自動的に戻る（channels.py leave_channel/
+    remove_channel_member、admin.py update_userを参照）"""
+    await _get_or_create(channel_id)
+    pool = get_pool()
+    target_id: int | None = None
+    if body.fallback_handoff_user_id is not None:
+        if not body.fallback_handoff_user_id.isdigit():
+            raise HTTPException(422, detail="fallback_handoff_user_idは数値のIDです")
+        target_id = int(body.fallback_handoff_user_id)
+        is_member = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+            channel_id, target_id,
+        )
+        if not is_member:
+            raise HTTPException(400, detail="引き継ぎ先はこのチャンネルの参加者である必要があります")
+    row = await pool.fetchrow(
+        """UPDATE channel_ai_settings SET fallback_handoff_user_id = $2, updated_by = $3, updated_at = now()
+           WHERE channel_id = $1 RETURNING *""",
+        channel_id, target_id, user.id,
+    )
+    await audit_log.record(
+        pool, "channel_ai_setting_change", user.id, "スキルの引き継ぎ先を更新しました",
+        target_channel_id=channel_id, target_field="fallback_handoff_user_id",
+    )
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))

@@ -11,13 +11,13 @@ import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import type { AiSettings, ChannelDetail, RecurringPost, TriggerRule } from '../types'
+import type { AiSettings, ChannelDetail, RecurringPost, Skill, TriggerRule } from '../types'
 
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_ICON_BYTES = 5 * 1024 * 1024
 
-// S-06 チャンネル設定。このスライスは7タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
-// 参照ドキュメント範囲・定期投稿・自動応答トリガー）を実装。「スキル」「反応モード」「自動対応範囲」
+// S-06 チャンネル設定。このスライスは8タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
+// 参照ドキュメント範囲・スキル・定期投稿・自動応答トリガー）を実装。「反応モード」「自動対応範囲」
 // タブは自動対応分類（層3）が未実装のため対象外（CLAUDE.md 実装状況節）。
 // タブ切替はLayout.tsxと共有する?tab=クエリパラメータで行う。
 export default function ChannelSettings() {
@@ -64,6 +64,9 @@ export default function ChannelSettings() {
         )}
         {tab === 'docscope' && channelId && settings && (
           <DocScopeTab channelId={channelId} settings={settings} mutate={mutateAi} />
+        )}
+        {tab === 'skills' && channelId && settings && (
+          <SkillsTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
         {tab === 'admin' && channelId && <AdminTab channelId={channelId} />}
         {tab === 'recurring' && channelId && <RecurringPostsTab channelId={channelId} />}
@@ -724,6 +727,270 @@ function DocScopeTab({
       >
         保存
       </button>
+    </div>
+  )
+}
+
+// スキルの入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目。
+// 定期投稿・トリガーのFormFieldsコンポーネントと同じ考え方）
+function SkillFormFields({
+  title, onTitleChange,
+  instructions, onInstructionsChange,
+}: {
+  title: string
+  onTitleChange: (v: string) => void
+  instructions: string
+  onInstructionsChange: (v: string) => void
+}) {
+  return (
+    <>
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">スキル名</label>
+        <input
+          value={title}
+          onChange={(e) => onTitleChange(e.target.value)}
+          placeholder="例: 議事録の作成"
+          maxLength={100}
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+      <div className="mb-1">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">依頼を受けたときの進め方</label>
+        <textarea
+          value={instructions}
+          onChange={(e) => onInstructionsChange(e.target.value)}
+          rows={5}
+          maxLength={4000}
+          placeholder="例: 会議の発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+    </>
+  )
+}
+
+// スキルタブ（A-28〜A-30・A-45、F-12・F-17）。定期投稿・トリガーと同じ「新規作成パネル＋編集
+// モーダル」の構成。引き継ぎ先（fallback_handoff_user_id）はスキルと同じS-06タブに同居させる
+// （基本設計書「スキルにない業務依頼の引き継ぎ先も設定する」の記載どおり）。値は参加者から選ぶ
+// セレクトのみのシンプルな項目のため、GeneralTabのトグルと同じく選択時に即保存する
+function SkillsTab({
+  channelId,
+  settings,
+  mutate,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+}) {
+  const toast = useToast()
+  const confirm = useConfirm()
+  const { members } = useChannelMembers(channelId)
+  const [editingItem, setEditingItem] = useState<Skill | null>(null)
+  const [title, setTitle] = useState('')
+  const [instructions, setInstructions] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [handoffSaving, setHandoffSaving] = useState(false)
+
+  const submit = async () => {
+    if (!title.trim() || !instructions.trim()) {
+      toast('スキル名と進め方の両方を入力してください', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/skills`, {
+        method: 'POST',
+        body: JSON.stringify({ title: title.trim(), instructions: instructions.trim() }),
+      })
+      toast('スキルを追加しました')
+      await mutate()
+      setTitle('')
+      setInstructions('')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async (skill: Skill) => {
+    const ok = await confirm({
+      title: 'スキルを削除',
+      message: `「${skill.title}」を削除しますか？`,
+      confirmLabel: '削除する',
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await apiFetch(`/api/channels/${channelId}/skills/${skill.id}`, { method: 'DELETE' })
+      await mutate()
+      if (editingItem?.id === skill.id) setEditingItem(null)
+      toast('スキルを削除しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '削除に失敗しました', 'error')
+    }
+  }
+
+  const changeHandoff = async (userId: string) => {
+    setHandoffSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/handoff`, {
+        method: 'PUT',
+        body: JSON.stringify({ fallback_handoff_user_id: userId || null }),
+      })
+      await mutate()
+      toast('引き継ぎ先を更新しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '更新に失敗しました', 'error')
+    } finally {
+      setHandoffSaving(false)
+    }
+  }
+
+  return (
+    <div className="max-w-[700px]">
+      <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
+        「依頼を受けたらこう進める」という具体的な手順をスキルとして登録します（F-12）。登録したスキルはAIの応答生成時にそのまま指示として渡されます。
+      </p>
+
+      <ul className="mb-6 space-y-2.5">
+        {settings.skills.length === 0 && <p className="text-[12px] text-ink-subtle">スキルはまだありません。</p>}
+        {settings.skills.map((skill) => (
+          <li key={skill.id} className="rounded-[10px] border border-line px-3.5 py-3">
+            <div className="text-[13px] font-bold text-ink">{skill.title}</div>
+            <div className="mt-1.5 line-clamp-3 text-[12.5px] leading-relaxed text-ink-muted">{skill.instructions}</div>
+            <div className="mt-2.5 flex justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setEditingItem(skill)}
+                className="rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+              >
+                編集
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(skill)}
+                className="rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-danger-text hover:border-danger-border hover:bg-danger-bg"
+              >
+                削除
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mb-8 rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
+        <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しいスキルを追加</div>
+        <SkillFormFields
+          title={title}
+          onTitleChange={setTitle}
+          instructions={instructions}
+          onInstructionsChange={setInstructions}
+        />
+        <button
+          type="button"
+          disabled={saving}
+          onClick={submit}
+          className="mt-3.5 rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+        >
+          ＋ スキルを追加
+        </button>
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">スキルにない依頼の引き継ぎ先</label>
+        <p className="mb-2.5 text-[11.5px] leading-relaxed text-ink-subtle">
+          登録したどのスキルにも当てはまらない業務依頼を受けたとき、AIが案内する相談先です（F-17）。未指定の場合はこのチャンネルの管理者を案内します。指定した参加者が退出・無効化された場合は自動的に未指定へ戻ります。
+        </p>
+        <select
+          value={settings.fallback_handoff_user_id ?? ''}
+          onChange={(e) => changeHandoff(e.target.value)}
+          disabled={handoffSaving}
+          className="w-full max-w-[320px] rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        >
+          <option value="">未指定（このチャンネルの管理者）</option>
+          {members.filter((m) => m.is_active).map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.is_channel_admin ? '（chadmin）' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {editingItem && (
+        <SkillEditModal
+          key={editingItem.id}
+          skill={editingItem}
+          channelId={channelId}
+          onClose={() => setEditingItem(null)}
+          onSaved={mutate}
+        />
+      )}
+    </div>
+  )
+}
+
+// スキルの編集モーダル（一覧の「編集」から開く。定期投稿・トリガーの編集モーダルと同じパターン）
+function SkillEditModal({
+  skill, channelId, onClose, onSaved,
+}: {
+  skill: Skill
+  channelId: string
+  onClose: () => void
+  onSaved: () => Promise<unknown>
+}) {
+  const toast = useToast()
+  const [title, setTitle] = useState(skill.title)
+  const [instructions, setInstructions] = useState(skill.instructions)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (!title.trim() || !instructions.trim()) {
+      toast('スキル名と進め方の両方を入力してください', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/skills/${skill.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title: title.trim(), instructions: instructions.trim() }),
+      })
+      toast('スキルを更新しました')
+      await onSaved()
+      onClose()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 px-[22px] pb-1 pt-4.5">
+          <h2 className="flex-1 text-[15.5px] font-bold text-ink">スキルを編集</h2>
+          <button type="button" onClick={onClose} className="text-ink-subtle hover:text-ink-muted">✕</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-[22px] pb-1 pt-4.5">
+          <SkillFormFields
+            title={title}
+            onTitleChange={setTitle}
+            instructions={instructions}
+            onInstructionsChange={setInstructions}
+          />
+        </div>
+        <div className="px-[22px] pb-5 pt-4">
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink-muted">キャンセル</button>
+            <button type="button" disabled={saving} onClick={save} className="flex-1 rounded-lg bg-accent-600 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-40">更新する</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

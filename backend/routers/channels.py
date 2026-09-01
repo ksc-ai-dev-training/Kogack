@@ -244,7 +244,9 @@ async def leave_channel(channel_id: int, user: CurrentUser = Depends(require_cha
     """A-72: チャンネルからの退出。管理者不在を防ぐため、自分が最後のチャンネル管理者の場合は拒否する
     （A-48「最後の管理者は解除できません」と同じ考え方。最後の1人は必ずchadminであるため、
     このチェックだけでチャンネルが参加者ゼロになる事態も同時に防げる）。F-43の入室通知と対になる
-    退出通知をT-05へ作成する（同じsender_type='bot'の枠組みを流用）"""
+    退出通知をT-05へ作成する（同じsender_type='bot'の枠組みを流用）。F-17の引き継ぎ先
+    （channel_ai_settings.fallback_handoff_user_id）に自分が指定されていた場合はNULLへ戻す
+    （基本設計書8.3節「指定した人物が退出・無効化された場合は既定のchadminへ引き継ぎに戻す」）"""
     pool = get_pool()
     is_admin = await pool.fetchval(
         "SELECT is_channel_admin FROM channel_members WHERE channel_id = $1 AND user_id = $2",
@@ -263,6 +265,11 @@ async def leave_channel(channel_id: int, user: CurrentUser = Depends(require_cha
             "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, user.id
         )
         await conn.execute(
+            """UPDATE channel_ai_settings SET fallback_handoff_user_id = NULL
+               WHERE channel_id = $1 AND fallback_handoff_user_id = $2""",
+            channel_id, user.id,
+        )
+        await conn.execute(
             """INSERT INTO messages (channel_id, sender_type, bot_display_name, body)
                VALUES ($1, 'bot', 'システム通知', $2)""",
             channel_id, f"{user.name} さんが退出しました。",
@@ -279,7 +286,7 @@ async def remove_channel_member(
     パスの文字列としては"me"も{target_user_id}にマッチしうるため、後で定義するとA-72に
     「me」という文字列でリクエストが来てもこちらが先に一致し、int変換に失敗して422になってしまう。
     A-72と同じ退出通知をT-05へ作成する（誰が退出させたかは本文に含めない。F-43の入室通知が
-    招待者を明記しないのと同じ考え方）"""
+    招待者を明記しないのと同じ考え方）。A-72と同じくF-17の引き継ぎ先がこの対象者だった場合はNULLへ戻す"""
     pool = get_pool()
     is_target_admin = await pool.fetchval(
         "SELECT is_channel_admin FROM channel_members WHERE channel_id = $1 AND user_id = $2",
@@ -299,6 +306,11 @@ async def remove_channel_member(
         target_name = await conn.fetchval("SELECT name FROM users WHERE id = $1", target_user_id)
         await conn.execute(
             "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2", channel_id, target_user_id
+        )
+        await conn.execute(
+            """UPDATE channel_ai_settings SET fallback_handoff_user_id = NULL
+               WHERE channel_id = $1 AND fallback_handoff_user_id = $2""",
+            channel_id, target_user_id,
         )
         await conn.execute(
             """INSERT INTO messages (channel_id, sender_type, bot_display_name, body)

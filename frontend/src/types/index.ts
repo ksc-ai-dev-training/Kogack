@@ -38,9 +38,9 @@ export interface ChannelsResponse {
   joinable: Channel[]
 }
 
-/** T-08 channel_ai_settings（A-23〜A-26）。out_of_scope_policy/fallback_handoff_user_idは
- * ドキュメントQ&A・自動対応分類が未実装のためこのスライスでは編集UIを設けない（値はサーバー側の
- * 既定のまま）。reaction_modeも同様に常に'mention_only'（サーバー側の既定値をそのまま表示するのみ） */
+/** T-08 channel_ai_settings（A-23〜A-27, A-45）。out_of_scope_policyはドキュメントQ&Aが未実装の
+ * ためこのスライスでは編集UIを設けない（値はサーバー側の既定のまま）。reaction_modeも同様に
+ * 常に'mention_only'（サーバー側の既定値をそのまま表示するのみ） */
 export interface AiSettings {
   channel_id: string
   is_ai_enabled: boolean
@@ -51,6 +51,15 @@ export interface AiSettings {
   reaction_mode: 'mention_only' | 'proactive'
   out_of_scope_policy: 'strict' | 'general'
   folder_ids: string[]
+  skills: Skill[]
+  fallback_handoff_user_id: string | null
+}
+
+/** T-11 channel_skills（A-28〜A-30, F-12） */
+export interface Skill {
+  id: string
+  title: string
+  instructions: string
 }
 
 export interface ChannelMember {

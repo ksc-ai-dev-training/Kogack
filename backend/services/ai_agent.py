@@ -6,8 +6,9 @@
 #   - Function Calling（search_documents / get_seat_availability）は対象外。ドキュメント索引
 #     （T-09/T-10のGoogle Drive連携）・座席予約システム連携のいずれも未実装のため、
 #     プレーンな会話応答のみを行う
-#   - スキル（T-11）・自動対応範囲分類（T-12）・引き継ぎ（F-17）・実行前確認（F-25）は対象外。
-#     したがってT-08.out_of_scope_policy / fallback_handoff_user_idはこのスライスでは
+#   - スキル（T-11・F-12）とその引き継ぎ先（fallback_handoff_user_id・F-17）はこのスライスで
+#     システムプロンプトへ配線した（_build_skills_section）。自動対応範囲分類（T-12）・実行前確認
+#     （F-25）は引き続き対象外。T-08.out_of_scope_policyは層2ドキュメントQ&A関連のためこのスライスでは
 #     プロンプトに反映されない（値は保存できるが未使用。ドキュメントQ&A実装時に使う）
 #   - AI利用コストの上限判定・通知（T-14、F-29後半）は対象外。T-13への記録のみ行う
 #   - チャンネル本体の投稿（A-11）のみが起動対象。スレッド返信（A-14）内の@メンションはこの
@@ -50,15 +51,51 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 - 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない"""
 
 
-def _build_system_prompt(settings: dict) -> str:
+def _build_system_prompt(settings: dict, skills_section: str = "") -> str:
     persona_name = settings["persona_name"] or "AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
     behavior = (settings["behavior_prompt"] or "").strip()
     lines = [f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}']
     if behavior:
         lines.append(behavior)
+    if skills_section:
+        lines.append(skills_section)
     lines.append("")
     lines.append(FIXED_RULES)
+    return "\n".join(lines)
+
+
+async def _build_skills_section(channel_id: int, settings: dict) -> str:
+    """T-11 channel_skillsを「# あなたのスキル」節として列挙し、どのスキルにも当てはまらない
+    業務依頼を受けた場合の引き継ぎ案内（F-17・fallback_handoff_user_id）もあわせて指示する
+    （詳細設計書AIサポート10.2節）。スキルが1件も登録されていないチャンネルではこの節自体を
+    省略する（FIXED_RULESの「できない」案内で足りるため）。メンション応答（_generate_and_post）
+    専用で、要約（_build_summary_prompt）には使わない（要約は業務依頼への対応ではないため）。
+    生成したAI発言の本文はF-41のメンション構造化（message_blocks）を経由しない点に注意
+    （プレーンテキストとして「{名前}へ相談を」のように案内するのみで、クリック可能なメンションには
+    ならない。実際にID参照メンションを作るにはA-11/A-14と同じ`insert_mention_blocks`をAI応答経路
+    にも配線する必要があり、このスライスでは対象外）"""
+    pool = get_pool()
+    skills = await pool.fetch(
+        "SELECT title, instructions FROM channel_skills WHERE channel_id = $1 ORDER BY created_at", channel_id
+    )
+    if not skills:
+        return ""
+    handoff_id = settings["fallback_handoff_user_id"]
+    handoff_label = "このチャンネルの管理者"
+    if handoff_id is not None:
+        name = await pool.fetchval("SELECT name FROM users WHERE id = $1", handoff_id)
+        if name:
+            handoff_label = name
+    lines = ["", "# あなたのスキル", "依頼を受けたときは、次の手順に従って進めること。"]
+    for s in skills:
+        lines.append(f"## {s['title']}")
+        lines.append(s["instructions"])
+    lines.append("")
+    lines.append(
+        f"上記のいずれにも当てはまらない業務依頼を受けた場合は、正直に「その依頼には対応できません」と"
+        f"伝えた上で、{handoff_label}へ相談するよう案内すること（存在しない対応ができるかのように答えないこと）"
+    )
     return "\n".join(lines)
 
 
@@ -145,7 +182,8 @@ async def _generate_and_post(channel_id: int, settings: dict, requested_by: int)
         )
         history_rows = list(reversed(rows))
         names = await _resolve_sender_names(history_rows)
-        messages: list[dict] = [{"role": "system", "content": _build_system_prompt(settings)}]
+        skills_section = await _build_skills_section(channel_id, settings)
+        messages: list[dict] = [{"role": "system", "content": _build_system_prompt(settings, skills_section)}]
         messages += _rows_to_chat_messages(history_rows, names)
 
         client = ai_client.get_client()

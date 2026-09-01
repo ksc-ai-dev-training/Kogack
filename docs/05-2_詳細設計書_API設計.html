@@ -51,6 +51,7 @@
       <tr class="diff-new"><td>1.20</td><td>2026-08-31</td><td>A-15（要約実行、F-14）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。要約結果はA-11のAIメンション応答と同じ生成中プレースホルダ方式でsender_type='ai'の発言として投稿され、依頼した本人だけでなく参加者全員に見えることを明記した（基本設計書6.2節「設計判断」）。thread_id指定時はそのスレッド全体（上限なし）、省略時はチャンネル本体の直近100件が対象。AI未設定・チャンネルAI無効時は400を返すことを明記した。基本設計書v1.28を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.21</td><td>2026-08-31</td><td>A-42（AI利用状況の月次集計）・A-43（上限設定）のリクエスト/レスポンス例を新規追加した（従来はA-42のみ簡略な例があり、A-43は未記載だった抜けをbackfill）。A-42はby_userを追加し、8.6節「月次・チャンネル別・利用者別に集計して表示する」の記載に実装を合わせた。A-43はT-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象に洗い替えること、しきい値到達時の通知メール送信・応答停止は実装しないことを明記した。基本設計書v1.29を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.22</td><td>2026-09-01</td><td>A-44（監査ログ一覧）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。event_type='login'はA-02・dev-loginの成功時、'channel_ai_setting_change'はA-24〜A-27の成功時（A-45は未実装のため対象外）にそれぞれ記録することを明記した。event_type・channel_id・actor_user_id・after/beforeによる絞り込みを1ページ50件で提供する。基本設計書v1.30・詳細設計書DB設計（T-16のON DELETE SET NULL、v1.7）を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.23</td><td>2026-09-01</td><td>F-12（スキル登録）・F-17（引き継ぎ先設定）を実装し、A-28（スキル追加）・A-29（スキル更新）・A-30（スキル削除）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜け）。A-45（引き継ぎ先）は従来の簡略な例を拡充し、指定した利用者が退出・強制退出（A-72/A-73）・無効化（A-37）されたときに自動的にnullへ戻る挙動を明記した。A-23のレスポンス例にskills・fallback_handoff_user_idを追加した。A-44の説明から「A-45は未実装のため対象外」の記述を削除した（A-24〜A-30・A-45すべてがchannel_ai_setting_changeとして監査ログに記録される）。基本設計書v1.31を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -284,8 +285,10 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <pre><code>// response 200
 { "channel_id": "42", "is_ai_enabled": true, "persona_name": "AI", "persona_icon_url": null,
   "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only",
-  "out_of_scope_policy": "strict", "folder_ids": ["3", "5"] }</code></pre>
-  <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。</span>fallback_handoff_user_idは引き継ぎ（F-17）が未実装のためレスポンスに含めない（値はDB上に既定のまま保持される）。</p>
+  "out_of_scope_policy": "strict", "folder_ids": ["3", "5"],
+  "skills": [ { "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し..." } ],
+  "fallback_handoff_user_id": "15" }</code></pre>
+  <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。skills（T-11由来）・fallback_handoff_user_idはF-12実装（1.23版）に伴い追加した。skillsは登録が無ければ空配列、fallback_handoff_user_idは未設定ならnull（既定のチャンネル管理者へ引き継ぐ）。</span></p>
 
   <p><strong>A-24 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/general</strong></p>
   <pre><code>{ "is_ai_enabled": false }
@@ -307,10 +310,25 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 // response 200: A-23と同じ形で、更新後のfolder_ids・out_of_scope_policyを返す</code></pre>
   <p class="muted"><span class="diff-new"><code>folder_ids</code> は送信された集合でT-10を洗い替える（DELETE→INSERTのトランザクション。差分計算はしない）。存在しないfolder_id（S-08で削除済み等）は黙って無視し、設定保存自体は失敗させない（F-41のメンション対象外指定と同じ考え方）。folder_idsが空配列の場合は「参照ドキュメント無し」として全件削除する。out_of_scope_policyはstrict/generalのいずれか以外は422。実際のDrive同期・索引・AI検索（search_documentsツール、総論8.2節）は次のスライスで実装するため、この設定は現時点ではAI応答に反映されない。</span></p>
 
+  <p class="diff-new"><strong>A-28 <span class="badge badge-post">POST</span> /api/channels/{id}/skills</strong></p>
+  <pre class="diff-new"><code>{ "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる" }
+// response 201
+{ "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる" }</code></pre>
+  <p class="muted diff-new">T-11 channel_skillsへ1件追加する。title・instructionsはいずれも1文字以上必須（省略・空文字は422）。件数上限は設けない。当該chadmin/adminのみ実行できる。</p>
+
+  <p class="diff-new"><strong>A-29 <span class="badge badge-put">PUT</span> /api/channels/{id}/skills/{skillId}</strong></p>
+  <pre class="diff-new"><code>{ "title": "議事録の作成（改訂）", "instructions": "..." }
+// response 200: A-28と同じ形</code></pre>
+  <p class="muted diff-new">部分更新ではなくtitle・instructionsを丸ごと上書きする（A-26振る舞い定義と同じ考え方）。他チャンネルのskillIdや存在しないskillIdは404。</p>
+
+  <p class="diff-new"><strong>A-30 <span class="badge badge-delete">DELETE</span> /api/channels/{id}/skills/{skillId}</strong></p>
+  <pre class="diff-new"><code>// response 204（存在しないskillIdは404）</code></pre>
+  <p class="muted diff-new">確認なく削除する。参照するチャンネルAIの応答生成（services/ai_agent.py）へは次回の応答生成時から反映される（過去に生成済みの発言は変わらない）。</p>
+
   <p><strong>A-45 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/handoff</strong></p>
-  <pre><code>{ "fallback_handoff_user_id": "15" }  // nullで既定（chadmin）へ戻す
-// response 200</code></pre>
-  <p class="muted"><code>fallback_handoff_user_id</code> は当該チャンネルのT-03参加者であることをAPI側で検証（400）。</p>
+  <pre><code>{ "fallback_handoff_user_id": "15" }  // nullで既定（チャンネル管理者）へ戻す
+// response 200: A-23と同じ形</code></pre>
+  <p class="muted"><code>fallback_handoff_user_id</code> は当該チャンネルのT-03参加者であることをAPI側で検証（参加者でなければ400）。<span class="diff-new">指定した利用者がその後チャンネルから退出・強制退出（A-72/A-73）、またはシステム管理者により無効化（A-37でis_active=false）された場合は、いずれの経路でも同一トランザクション内で自動的にnullへ戻す（基本設計書8.3節「指定した人物が退出・無効化された場合はNULLへ戻す」の設計判断）。F-12スキル登録と同じS-06「スキル」タブに同居する項目（基本設計書5.9節）。</span></p>
 
   <h3>4.7 実行前確認（A-33〜A-35）</h3>
   <pre><code>// A-33 GET /api/pending-actions/88
@@ -394,7 +412,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
       "target_channel_id": null, "target_channel_name": null, "target_field": null,
       "summary": "ログインしました", "created_at": "2026-08-21T00:58:00Z" }
   ], "has_more": false }</code></pre>
-  <p class="muted diff-new">新しい順、1ページ50件。<code>event_type</code>（login/channel_ai_setting_change）・<code>channel_id</code>（target_channel_idで絞り込み）・<code>actor_user_id</code>・<code>after</code>/<code>before</code>（YYYY-MM-DD、afterは指定日を含む、beforeは指定日を含まない）はいずれも省略可。<code>event_type='login'</code>はA-02（OAuthコールバック）・dev-loginの成功時、<code>'channel_ai_setting_change'</code>はA-24〜A-27（A-45は未実装のため対象外）の成功時に、それぞれの更新と同一トランザクション内で1行記録する。<code>summary</code>は「どの項目が変更されたか」の説明のみで、変更後の実際の値（behavior_promptの本文等）は含めない（05-1 DB設計3.12節「本文差分は保持しない」）。</p>
+  <p class="muted diff-new">新しい順、1ページ50件。<code>event_type</code>（login/channel_ai_setting_change）・<code>channel_id</code>（target_channel_idで絞り込み）・<code>actor_user_id</code>・<code>after</code>/<code>before</code>（YYYY-MM-DD、afterは指定日を含む、beforeは指定日を含まない）はいずれも省略可。<code>event_type='login'</code>はA-02（OAuthコールバック）・dev-loginの成功時、<code>'channel_ai_setting_change'</code>はA-24〜A-27・<span class="diff-new">A-28〜A-30・A-45</span>の成功時に、それぞれの更新と同一トランザクション内で1行記録する。<code>summary</code>は「どの項目が変更されたか」の説明のみで、変更後の実際の値（behavior_promptの本文等）は含めない（05-1 DB設計3.12節「本文差分は保持しない」）。</p>
 
   <h3>4.9 送信予約（A-50〜A-52）</h3>
   <pre><code>// A-50 POST /api/scheduled-messages（channel_id/dm_idはどちらか一方、thread_parent_idは任意）

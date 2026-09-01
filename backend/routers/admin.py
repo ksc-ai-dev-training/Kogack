@@ -51,7 +51,10 @@ class UpdateUserRequest(BaseModel):
 async def update_user(
     target_id: int, body: UpdateUserRequest, user: CurrentUser = Depends(require_roles("admin")),
 ):
-    """A-37: ロール変更・有効/無効化。自分自身の無効化・adminからの降格は管理者ロックアウト防止のため拒否する"""
+    """A-37: ロール変更・有効/無効化。自分自身の無効化・adminからの降格は管理者ロックアウト防止のため拒否する。
+    無効化時はF-17の引き継ぎ先（channel_ai_settings.fallback_handoff_user_id）にこの利用者が
+    指定されている全チャンネルでNULLへ戻す（A-72/A-73の退出時クリーンアップと同じ設計判断、
+    基本設計書8.3節）"""
     if body.role is not None and body.role not in ("member", "admin"):
         raise HTTPException(422, detail="roleはmember/adminのいずれかです")
     if target_id == user.id and body.is_active is False:
@@ -70,6 +73,11 @@ async def update_user(
         await pool.execute(
             "UPDATE users SET is_active = $2, updated_at = now() WHERE id = $1", target_id, body.is_active
         )
+        if body.is_active is False:
+            await pool.execute(
+                "UPDATE channel_ai_settings SET fallback_handoff_user_id = NULL WHERE fallback_handoff_user_id = $1",
+                target_id,
+            )
 
     row = await pool.fetchrow("SELECT id, role, is_active FROM users WHERE id = $1", target_id)
     return {"id": str(row["id"]), "role": row["role"], "is_active": row["is_active"]}

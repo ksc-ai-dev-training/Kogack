@@ -377,6 +377,19 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at);
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- T-11 channel_skills（スキル、F-12。05-1_詳細設計書_DB設計.html 3.10節）。チャンネルAIに
+-- 割り当てる「依頼を受けたらこう進める」手順（タイトル＋本文）。services/ai_agent.pyの
+-- システムプロンプト「# あなたのスキル」節で列挙する（詳細設計書AIサポート10.2節）。
+CREATE TABLE IF NOT EXISTS channel_skills (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id    BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    title         TEXT NOT NULL,
+    instructions  TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE channel_skills ENABLE ROW LEVEL SECURITY;
 """
 
 
