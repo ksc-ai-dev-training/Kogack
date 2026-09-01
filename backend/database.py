@@ -358,6 +358,25 @@ CREATE TABLE IF NOT EXISTS channel_doc_folders (
     PRIMARY KEY (channel_id, folder_id)
 );
 ALTER TABLE channel_doc_folders ENABLE ROW LEVEL SECURITY;
+
+-- T-16 audit_logs（監査ログ、S-08「監査ログ」タブ。05-1_詳細設計書_DB設計.html 3.12節）。
+-- 「いつ・誰が・どの項目を」変更したかのみを記録し、変更内容そのもの（過去バージョン・差分）は
+-- 保持しない（summaryは種類の説明のみで実際の入力値は含めない）。event_type='login'はA-02
+-- コールバック・dev-loginの成功時、'channel_ai_setting_change'はA-24〜A-27・A-45の成功時に
+-- backend/audit_log.pyのrecord()から書き込む。target_channel_idはON DELETE SET NULLとし、
+-- チャンネル削除後も監査記録自体は残す（messages.recurring_post_id等と同じ「履歴は消さない」
+-- 設計判断。ここだけCASCADEにすると監査ログの目的に反してしまう）。
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_type          TEXT NOT NULL CHECK (event_type IN ('login', 'channel_ai_setting_change')),
+    actor_user_id       BIGINT NOT NULL REFERENCES users(id),
+    target_channel_id   BIGINT REFERENCES channels(id) ON DELETE SET NULL,
+    target_field        TEXT,
+    summary             TEXT NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at);
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 """
 
 

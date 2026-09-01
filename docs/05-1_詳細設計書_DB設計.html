@@ -35,6 +35,7 @@
       <tr class="diff-new"><td>1.4</td><td>2026-08-28</td><td>T-19 recurring_posts・T-21 trigger_rules（F-36・F-38）を実装した。あわせてT-05.recurring_post_id/trigger_rule_idにON DELETE SET NULLのFKを付与し、両者が排他であることを示すCHECK制約を明記した（基本設計書v1.25「設計判断」）。</td></tr>
       <tr class="diff-new"><td>1.5</td><td>2026-08-28</td><td>T-06 message_attachments（F-07 ファイル共有）を実装した。message_idがNOT NULLのため、アップロード時点ではDB行を作らずファイル実体のみを保存し、発言確定後の同一トランザクション内で紐づけることを明記した。</td></tr>
       <tr class="diff-new"><td>1.6</td><td>2026-08-31</td><td>T-14 ai_usage_limits（F-29上限設定、A-43）を実装した。定義済みのカラム構成はそのままに、scope='global'の行を最大1行、scope='channel'の行をchannel_idごとに最大1行へ制約する部分ユニークインデックス（A-43のON CONFLICT対象）を追記した（従来の定義には無かった実装詳細のbackfill）。</td></tr>
+      <tr class="diff-new"><td>1.7</td><td>2026-09-01</td><td>T-16 audit_logs（監査ログ、A-44）を実装した。定義済みのカラム構成はそのままに、target_channel_idをON DELETE SET NULLとする設計判断を追記した（他の多くのFKはCASCADEだが、監査ログはチャンネル削除後も記録自体を残す目的のため）。</td></tr>
     </tbody>
   </table>
 
@@ -271,12 +272,13 @@
       <tr><td>T-16</td><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
       <tr><td>T-16</td><td>event_type</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('login','channel_ai_setting_change')</td></tr>
       <tr><td>T-16</td><td>actor_user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
-      <tr><td>T-16</td><td>target_channel_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→channels.id</td></tr>
+      <tr><td>T-16</td><td>target_channel_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→channels.id<span class="diff-new">、ON DELETE SET NULL</span></td></tr>
       <tr><td>T-16</td><td>target_field</td><td>TEXT</td><td>NULL可</td><td>-</td><td>例: 'behavior_prompt', 'reaction_mode'</td></tr>
       <tr><td>T-16</td><td>summary</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>本文差分は保持しない</td></tr>
       <tr><td>T-16</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>索引: (created_at)</td></tr>
     </tbody>
   </table>
+  <p class="muted diff-new">T-16.target_channel_idはON DELETE SET NULLとした（他の多くのFKがON DELETE CASCADEなのとは異なる）。監査ログはチャンネル削除後も「いつ・誰が・どの項目を変更したか」の記録自体を残す目的のテーブルであり、CASCADEにすると監査対象のチャンネルが削除された際に最も参照したい記録が消えてしまうため。messages.recurring_post_id等と同じ「履歴は消さない」設計判断（基本設計書6.2節）。</p>
 
   <h3>3.13 T-18 scheduled_messages（予約メッセージ）</h3>
   <table>

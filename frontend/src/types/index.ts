@@ -323,3 +323,22 @@ export interface UsageStats {
     channels: UsageChannelLimit[]
   }
 }
+
+/** S-08「監査ログ」タブ（A-44、T-16）。ログイン・チャンネルAI設定変更の記録。
+ * summaryは種類の説明のみで、変更後の実際の値・差分は含まない */
+export interface AuditLogEntry {
+  id: string
+  event_type: 'login' | 'channel_ai_setting_change'
+  actor_user_id: string
+  actor_name: string
+  target_channel_id: string | null
+  target_channel_name: string | null
+  target_field: string | null
+  summary: string
+  created_at: string
+}
+
+export interface AuditLogsResponse {
+  items: AuditLogEntry[]
+  has_more: boolean
+}

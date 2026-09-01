@@ -50,6 +50,7 @@
       <tr class="diff-new"><td>1.19</td><td>2026-08-31</td><td>層2ドキュメントQ&Aの最初のスライスとして、A-27（参照ドキュメント範囲）・A-38〜A-40（フォルダ候補の一覧/追加/削除）のリクエスト/レスポンス例を新規追加した。A-27はfolder_idsを送信された集合でT-10へ洗い替えること、存在しないfolder_idは黙って無視すること（F-41のメンション対象外指定と同じ考え方）を明記した。A-39はGoogle Picker連携ではなくフォルダURL・IDの手動貼り付けを受け付け、URLの場合はfolder_idを正規表現で抽出することを明記した。A-38はS-06からチャンネル管理者が閲覧する必要があるためadmin限定から認証済み全員に権限を広げた（基本設計書6.2節「設計判断」、A-39/A-40は引き続きadmin限定）。A-41（今すぐ同期）は実際のDrive同期・索引化が未実装のためこのスライスでは対象外のまま。基本設計書v1.27を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.20</td><td>2026-08-31</td><td>A-15（要約実行、F-14）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。要約結果はA-11のAIメンション応答と同じ生成中プレースホルダ方式でsender_type='ai'の発言として投稿され、依頼した本人だけでなく参加者全員に見えることを明記した（基本設計書6.2節「設計判断」）。thread_id指定時はそのスレッド全体（上限なし）、省略時はチャンネル本体の直近100件が対象。AI未設定・チャンネルAI無効時は400を返すことを明記した。基本設計書v1.28を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.21</td><td>2026-08-31</td><td>A-42（AI利用状況の月次集計）・A-43（上限設定）のリクエスト/レスポンス例を新規追加した（従来はA-42のみ簡略な例があり、A-43は未記載だった抜けをbackfill）。A-42はby_userを追加し、8.6節「月次・チャンネル別・利用者別に集計して表示する」の記載に実装を合わせた。A-43はT-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象に洗い替えること、しきい値到達時の通知メール送信・応答停止は実装しないことを明記した。基本設計書v1.29を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.22</td><td>2026-09-01</td><td>A-44（監査ログ一覧）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。event_type='login'はA-02・dev-loginの成功時、'channel_ai_setting_change'はA-24〜A-27の成功時（A-45は未実装のため対象外）にそれぞれ記録することを明記した。event_type・channel_id・actor_user_id・after/beforeによる絞り込みを1ページ50件で提供する。基本設計書v1.30・詳細設計書DB設計（T-16のON DELETE SET NULL、v1.7）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -381,6 +382,19 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 { "scope": "global", "channel_id": null, "monthly_limit_yen": 20000,
   "notify_threshold_pct": 80, "notify_email": "admin@kogasoftware.com" }</code></pre>
   <p class="muted diff-new">T-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象にして洗い替える。scope='global'は常に1行、scope='channel'はchannel_idごとに1行のみ存在する（同じscope+channel_idへのPUTは新規行を増やさず上書き）。<code>scope</code>がglobal/channel以外、または<code>scope='channel'</code>なのに<code>channel_id</code>未指定・存在しないchannel_idの場合はそれぞれ422・404。<strong>しきい値（notify_threshold_pct）到達時の通知メール送信、および上限到達時にAIの応答を止めるかどうかの制御は、このAPIでは実装しない</strong>（要件定義書8.2節のとおり上限到達時の挙動は千田氏との別途協議事項のため、設定の保存とA-42のused_pct表示のみ行う）。</p>
+
+  <p class="diff-new"><strong>A-44 <span class="badge badge-get">GET</span> /api/admin/audit-logs</strong></p>
+  <pre class="diff-new"><code>GET /api/admin/audit-logs?event_type=channel_ai_setting_change&actor_user_id=7&after=2026-08-01&before=2026-09-01
+// response 200
+{ "items": [
+    { "id": "12", "event_type": "channel_ai_setting_change", "actor_user_id": "7", "actor_name": "田中 智子",
+      "target_channel_id": "42", "target_channel_name": "開発相談", "target_field": "behavior_prompt",
+      "summary": "振る舞い定義を更新しました", "created_at": "2026-08-21T01:05:00Z" },
+    { "id": "11", "event_type": "login", "actor_user_id": "7", "actor_name": "田中 智子",
+      "target_channel_id": null, "target_channel_name": null, "target_field": null,
+      "summary": "ログインしました", "created_at": "2026-08-21T00:58:00Z" }
+  ], "has_more": false }</code></pre>
+  <p class="muted diff-new">新しい順、1ページ50件。<code>event_type</code>（login/channel_ai_setting_change）・<code>channel_id</code>（target_channel_idで絞り込み）・<code>actor_user_id</code>・<code>after</code>/<code>before</code>（YYYY-MM-DD、afterは指定日を含む、beforeは指定日を含まない）はいずれも省略可。<code>event_type='login'</code>はA-02（OAuthコールバック）・dev-loginの成功時、<code>'channel_ai_setting_change'</code>はA-24〜A-27（A-45は未実装のため対象外）の成功時に、それぞれの更新と同一トランザクション内で1行記録する。<code>summary</code>は「どの項目が変更されたか」の説明のみで、変更後の実際の値（behavior_promptの本文等）は含めない（05-1 DB設計3.12節「本文差分は保持しない」）。</p>
 
   <h3>4.9 送信予約（A-50〜A-52）</h3>
   <pre><code>// A-50 POST /api/scheduled-messages（channel_id/dm_idはどちらか一方、thread_parent_idは任意）

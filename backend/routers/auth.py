@@ -5,6 +5,7 @@ import os
 import secrets
 import traceback
 
+import audit_log
 import google_auth
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -114,6 +115,10 @@ async def callback(request: Request, code: str | None = None, state: str | None 
 
     # S-08利用者管理の「最終ログイン」表示用（05-3画面設計backfill）
     await pool.execute("UPDATE users SET last_login_at = now() WHERE id = $1", row["id"])
+    # S-08監査ログタブ用（T-16、05-1 DB設計3.12節）
+    await audit_log.record(
+        pool, "login", row["id"], "初回ログイン（新規登録）でログインしました" if is_new else "ログインしました",
+    )
 
     # 6. セッションJWTを HttpOnly Cookie に設定して / へ戻す
     token_jwt = issue_jwt(row["id"], row["role"])
@@ -144,7 +149,10 @@ async def dev_login(body: DevLoginRequest, response: Response):
         raise HTTPException(403, detail="登録されていないユーザーです（seed.py を実行してください）")
     if not row["is_active"]:
         raise HTTPException(403, detail="このアカウントは無効化されています")
-    await get_pool().execute("UPDATE users SET last_login_at = now() WHERE id = $1", row["id"])
+    pool = get_pool()
+    await pool.execute("UPDATE users SET last_login_at = now() WHERE id = $1", row["id"])
+    # 開発用ログインもA-02と同じ流れの簡略版として扱い、同じくaudit_logsへ記録する（S-08監査ログタブ）
+    await audit_log.record(pool, "login", row["id"], "ログインしました")
     token = issue_jwt(row["id"], row["role"])
     response.set_cookie(
         SESSION_COOKIE, token, httponly=True, samesite="lax", path="/", secure=COOKIE_SECURE

@@ -1,7 +1,6 @@
-# A-36〜A-43（詳細設計書 API設計4.8節、基本設計書3.3節・S-08管理コンソール）。
+# A-36〜A-44（詳細設計書 API設計4.8節、基本設計書3.3節・S-08管理コンソール）。
 # 利用者管理（A-36/A-37）・ドキュメント参照範囲のフォルダ登録（A-38〜A-40、F-22）・
-# AI利用状況・コスト（A-42/A-43、F-29）を実装。監査ログタブ（A-44、T-16）は書き込み先が
-# まだ無いため対象外（CLAUDE.md 実装状況節）。
+# AI利用状況・コスト（A-42/A-43、F-29）・監査ログ（A-44、T-16）を実装。
 import re
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
@@ -317,4 +316,83 @@ async def update_usage_limit(body: UpdateUsageLimitRequest, user: CurrentUser = 
         "monthly_limit_yen": float(row["monthly_limit_yen"]),
         "notify_threshold_pct": row["notify_threshold_pct"],
         "notify_email": row["notify_email"],
+    }
+
+
+AUDIT_PAGE_SIZE = 50
+
+
+def _parse_date_param(value: str, field_name: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(422, detail=f"{field_name}はYYYY-MM-DD形式です")
+
+
+@router.get("/audit-logs")
+async def list_audit_logs(
+    event_type: str | None = None,
+    channel_id: str | None = None,
+    actor_user_id: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    page: int = 1,
+    user: CurrentUser = Depends(require_roles("admin")),
+):
+    """A-44: 監査ログ一覧（種別・期間・対象者で絞り込み。T-16、要件定義書7章「監査」）。
+    afterは指定日を含む、beforeは指定日を含まない（当日いっぱいを対象にするにはbeforeへ翌日を
+    指定する）。変更内容そのもの（過去バージョン・差分）は保持しないため、summaryは種類の説明のみ。"""
+    conditions: list[str] = []
+    params: list = []
+    if event_type:
+        if event_type not in ("login", "channel_ai_setting_change"):
+            raise HTTPException(422, detail="event_typeはlogin/channel_ai_setting_changeのいずれかです")
+        params.append(event_type)
+        conditions.append(f"l.event_type = ${len(params)}")
+    if channel_id:
+        if not channel_id.isdigit():
+            raise HTTPException(422, detail="channel_idは数値のIDです")
+        params.append(int(channel_id))
+        conditions.append(f"l.target_channel_id = ${len(params)}")
+    if actor_user_id:
+        if not actor_user_id.isdigit():
+            raise HTTPException(422, detail="actor_user_idは数値のIDです")
+        params.append(int(actor_user_id))
+        conditions.append(f"l.actor_user_id = ${len(params)}")
+    if after:
+        params.append(datetime.combine(_parse_date_param(after, "after"), time.min, tzinfo=JST))
+        conditions.append(f"l.created_at >= ${len(params)}")
+    if before:
+        params.append(datetime.combine(_parse_date_param(before, "before"), time.min, tzinfo=JST))
+        conditions.append(f"l.created_at < ${len(params)}")
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    offset = max(page, 1) - 1
+    rows = await get_pool().fetch(
+        f"""SELECT l.id, l.event_type, l.actor_user_id, u.name AS actor_name,
+                   l.target_channel_id, c.name AS target_channel_name, l.target_field, l.summary, l.created_at
+            FROM audit_logs l
+            JOIN users u ON u.id = l.actor_user_id
+            LEFT JOIN channels c ON c.id = l.target_channel_id
+            {where}
+            ORDER BY l.created_at DESC
+            LIMIT {AUDIT_PAGE_SIZE} OFFSET {offset * AUDIT_PAGE_SIZE}""",
+        *params,
+    )
+    return {
+        "items": [
+            {
+                "id": str(r["id"]),
+                "event_type": r["event_type"],
+                "actor_user_id": str(r["actor_user_id"]),
+                "actor_name": r["actor_name"],
+                "target_channel_id": str(r["target_channel_id"]) if r["target_channel_id"] is not None else None,
+                "target_channel_name": r["target_channel_name"],
+                "target_field": r["target_field"],
+                "summary": r["summary"],
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ],
+        "has_more": len(rows) == AUDIT_PAGE_SIZE,
     }

@@ -183,6 +183,11 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   <span className="text-sm">💰</span>AI利用状況・コスト
                 </Link>
               </li>
+              <li>
+                <Link to="/admin?tab=audit" className={navItemClass(adminTab === 'audit')}>
+                  <span className="text-sm">📋</span>監査ログ
+                </Link>
+              </li>
             </ul>
           </div>
         ) : (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAdminUsers } from '../hooks/useAdminUsers'
+import { useAuditLogs } from '../hooks/useAuditLogs'
 import { useDocFolders } from '../hooks/useDocFolders'
 import { useUsageStats } from '../hooks/useUsageStats'
 import { useMe } from '../hooks/useMe'
@@ -8,7 +9,7 @@ import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import type { DocFolder, Me, Role, UsageLimit, UsageStats } from '../types'
+import type { AdminUser, DocFolder, Me, Role, UsageLimit, UsageStats } from '../types'
 
 function formatDateTime(iso: string | null) {
   if (!iso) return '—'
@@ -27,9 +28,8 @@ function currentMonthStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-// S-08 管理コンソール。このスライスは「利用者管理」「ドキュメント参照範囲」「AI利用状況・コスト」の
-// 3タブを実装。監査ログタブ（A-44、T-16）は書き込み先が無く対象外（CLAUDE.md実装状況節）。
-// タブ切替はS-06 ChannelSettingsと同じ?tab=クエリパラメータで行う（Layout.tsxと共有）。
+// S-08 管理コンソール。「利用者管理」「ドキュメント参照範囲」「AI利用状況・コスト」「監査ログ」の
+// 4タブを実装。タブ切替はS-06 ChannelSettingsと同じ?tab=クエリパラメータで行う（Layout.tsxと共有）。
 export default function AdminConsole() {
   const navigate = useNavigate()
   const { me } = useMe()
@@ -48,7 +48,15 @@ export default function AdminConsole() {
 
   return (
     <div className="flex h-full flex-col">
-      {tab === 'docs' ? <DocFoldersTab /> : tab === 'usage' ? <UsageTab /> : <UsersTab me={me} />}
+      {tab === 'docs' ? (
+        <DocFoldersTab />
+      ) : tab === 'usage' ? (
+        <UsageTab />
+      ) : tab === 'audit' ? (
+        <AuditLogTab />
+      ) : (
+        <UsersTab me={me} />
+      )}
     </div>
   )
 }
@@ -606,6 +614,124 @@ function GlobalLimitForm({ limit, mutate }: { limit: UsageLimit | null; mutate: 
       >
         保存
       </button>
+    </div>
+  )
+}
+
+const EVENT_TYPE_LABEL: Record<string, string> = { login: 'ログイン', channel_ai_setting_change: 'チャンネルAI設定変更' }
+
+// A-44: 監査ログタブ本体（要件定義書7章「監査」）。種別・実行者・期間で絞り込む。対象チャンネルでの
+// 絞り込みはバックエンドは対応済み（channel_id）だが、全チャンネル一覧を返す管理者向けAPIが無いため
+// このスライスでは選択式の絞り込みUIは設けず、一覧の「対象」列に表示するのみに留めた。
+function AuditLogTab() {
+  const { users } = useAdminUsers()
+  const [eventType, setEventType] = useState('')
+  const [actorUserId, setActorUserId] = useState('')
+  const [after, setAfter] = useState('')
+  const [before, setBefore] = useState('')
+  const { logs, hasMore } = useAuditLogs({
+    event_type: eventType || undefined,
+    actor_user_id: actorUserId || undefined,
+    after: after || undefined,
+    before: before || undefined,
+  })
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex-none border-b border-line bg-surface px-7 py-4">
+        <Link to="/" className="text-xs text-accent-700 hover:underline">
+          ← ワークスペースに戻る
+        </Link>
+        <div className="mt-1 text-[16px] font-bold text-ink">監査ログ</div>
+        <p className="mt-1.5 max-w-[640px] text-[12.5px] leading-relaxed text-ink-muted">
+          ログイン・チャンネルAI設定の変更を記録します（要件定義書7章）。いつ・誰が・どの項目を変更したかのみを記録し、変更内容そのもの（差分）は保持しません。
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-7 py-5">
+        <div className="mb-3.5 flex flex-wrap items-center gap-2">
+          <select
+            value={eventType}
+            onChange={(e) => setEventType(e.target.value)}
+            className="rounded-lg border border-line-strong px-2.5 py-1.5 text-[12.5px] text-ink outline-none focus:border-accent-600"
+          >
+            <option value="">すべての種別</option>
+            <option value="login">ログイン</option>
+            <option value="channel_ai_setting_change">チャンネルAI設定変更</option>
+          </select>
+          <select
+            value={actorUserId}
+            onChange={(e) => setActorUserId(e.target.value)}
+            className="rounded-lg border border-line-strong px-2.5 py-1.5 text-[12.5px] text-ink outline-none focus:border-accent-600"
+          >
+            <option value="">すべての実行者</option>
+            {users.map((u: AdminUser) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+          <label className="flex items-center gap-1.5 text-[12px] text-ink-muted">
+            期間
+            <input
+              type="date"
+              value={after}
+              onChange={(e) => setAfter(e.target.value)}
+              className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] text-ink outline-none focus:border-accent-600"
+            />
+            〜
+            <input
+              type="date"
+              value={before}
+              onChange={(e) => setBefore(e.target.value)}
+              className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] text-ink outline-none focus:border-accent-600"
+            />
+          </label>
+        </div>
+
+        <table className="w-full border-collapse text-left text-[12.5px]">
+          <thead>
+            <tr>
+              {['日時', '種別', '対象', '実行者', '詳細'].map((h) => (
+                <th key={h} className="border-b border-line-strong px-2.5 py-1.5 text-[11px] font-bold text-ink-subtle">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((l) => (
+              <tr key={l.id} className="border-b border-line">
+                <td className="whitespace-nowrap px-2.5 py-2 text-ink-subtle">{formatDateTime(l.created_at)}</td>
+                <td className="px-2.5 py-2">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10.5px] font-bold ${
+                      l.event_type === 'login' ? 'bg-member-bg text-member-text' : 'bg-accent-50 text-accent-700'
+                    }`}
+                  >
+                    {EVENT_TYPE_LABEL[l.event_type] ?? l.event_type}
+                  </span>
+                </td>
+                <td className="px-2.5 py-2 text-ink-muted">{l.target_channel_name ? `# ${l.target_channel_name}` : '—'}</td>
+                <td className="px-2.5 py-2 font-semibold text-ink">{l.actor_name}</td>
+                <td className="px-2.5 py-2 text-ink-muted">{l.summary}</td>
+              </tr>
+            ))}
+            {logs.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-2.5 py-8 text-center text-ink-subtle">
+                  該当する記録がありません。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        {hasMore && (
+          <p className="mt-3 text-center text-[11px] text-ink-subtle">
+            50件まで表示しています。絞り込み条件を指定すると対象を絞り込めます。
+          </p>
+        )}
+      </div>
     </div>
   )
 }

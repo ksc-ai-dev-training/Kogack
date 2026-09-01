@@ -4,6 +4,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+import audit_log
 from auth_helpers import CurrentUser, require_channel_admin
 from database import get_pool
 
@@ -62,10 +63,16 @@ async def update_general(
     """A-24: AI有効/無効の切り替え。反応モード（reaction_mode）の変更UIはこのスライスでは
     対象外（常に既定のmention_onlyのまま。基本設計書8.1節「投稿に自ら反応」は次スライス以降）"""
     await _get_or_create(channel_id)
-    row = await get_pool().fetchrow(
+    pool = get_pool()
+    row = await pool.fetchrow(
         """UPDATE channel_ai_settings SET is_ai_enabled = $2, updated_by = $3, updated_at = now()
            WHERE channel_id = $1 RETURNING *""",
         channel_id, body.is_ai_enabled, user.id,
+    )
+    await audit_log.record(
+        pool, "channel_ai_setting_change", user.id,
+        f"AIを{'有効' if body.is_ai_enabled else '無効'}にしました",
+        target_channel_id=channel_id, target_field="is_ai_enabled",
     )
     return _out(row, await _folder_ids(channel_id))
 
@@ -83,12 +90,17 @@ async def update_character(
     """A-25: キャラクタ（名前・アイコン・口調）更新。アイコンはA-61でアップロード済みのURLを
     persona_icon_urlとして指定する（F-10）"""
     await _get_or_create(channel_id)
-    row = await get_pool().fetchrow(
+    pool = get_pool()
+    row = await pool.fetchrow(
         """UPDATE channel_ai_settings
            SET persona_name = $2, persona_icon_url = $3, persona_tone = $4,
                updated_by = $5, updated_at = now()
            WHERE channel_id = $1 RETURNING *""",
         channel_id, body.persona_name, body.persona_icon_url, body.persona_tone, user.id,
+    )
+    await audit_log.record(
+        pool, "channel_ai_setting_change", user.id, "キャラクタ設定を更新しました",
+        target_channel_id=channel_id, target_field="character",
     )
     return _out(row, await _folder_ids(channel_id))
 
@@ -101,13 +113,18 @@ class UpdatePromptRequest(BaseModel):
 async def update_prompt(
     channel_id: int, body: UpdatePromptRequest, user: CurrentUser = Depends(require_channel_admin),
 ):
-    """A-26: 振る舞い定義の更新（上書き保存、過去バージョンは持たない）。監査ログへの記録
-    （基本設計書8.3節）はT-16 audit_logs・S-08監査ログタブが未実装のためこのスライスでは対象外"""
+    """A-26: 振る舞い定義の更新（上書き保存、過去バージョンは持たない）。T-16 audit_logsへ記録する
+    （基本設計書8.3節、S-08監査ログタブ）。本文差分は保持せず、更新があったことのみ記録する"""
     await _get_or_create(channel_id)
-    row = await get_pool().fetchrow(
+    pool = get_pool()
+    row = await pool.fetchrow(
         """UPDATE channel_ai_settings SET behavior_prompt = $2, updated_by = $3, updated_at = now()
            WHERE channel_id = $1 RETURNING *""",
         channel_id, body.behavior_prompt, user.id,
+    )
+    await audit_log.record(
+        pool, "channel_ai_setting_change", user.id, "振る舞い定義を更新しました",
+        target_channel_id=channel_id, target_field="behavior_prompt",
     )
     return _out(row, await _folder_ids(channel_id))
 
@@ -148,5 +165,9 @@ async def update_doc_scope(
             """UPDATE channel_ai_settings SET out_of_scope_policy = $2, updated_by = $3, updated_at = now()
                WHERE channel_id = $1 RETURNING *""",
             channel_id, body.out_of_scope_policy, user.id,
+        )
+        await audit_log.record(
+            conn, "channel_ai_setting_change", user.id, "参照ドキュメント範囲を更新しました",
+            target_channel_id=channel_id, target_field="doc_scope",
         )
     return _out(row, await _folder_ids(channel_id))
