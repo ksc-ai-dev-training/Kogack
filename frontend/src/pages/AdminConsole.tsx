@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAdminUsers } from '../hooks/useAdminUsers'
 import { useAuditLogs } from '../hooks/useAuditLogs'
@@ -9,7 +9,7 @@ import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import type { AdminUser, DocFolder, Me, Role, UsageLimit, UsageStats } from '../types'
+import type { AdminUser, DocFolder, Me, Role, UsageByChannel, UsageChannelLimit, UsageLimit, UsageStats } from '../types'
 
 function formatDateTime(iso: string | null) {
   if (!iso) return '—'
@@ -381,9 +381,8 @@ function DocFoldersTab() {
 }
 
 // A-42/A-43: AI利用状況・コストタブ本体（F-29）。基本設計書8.6節「T-13を月次・チャンネル別・
-// 利用者別に集計して表示する」のとおりチャンネル別・利用者別の内訳テーブルを表示する。上限設定は
-// 全体（scope='global'）のみこのスライスで編集UIを設け、チャンネル別上限（scope='channel'）は
-// バックエンドは対応済みだが編集UIは対象外とした（既存の値があれば参考表示のみ）。80%到達時の
+// 利用者別に集計して表示する」のとおりチャンネル別・利用者別の内訳テーブルを表示する。全体
+// （scope='global'）・チャンネル別（scope='channel'）いずれも編集UIを持つ。80%到達時の
 // 通知メール送信・上限到達時の応答停止は未実装（上限到達時の挙動は要件定義書8.2節のとおり
 // 千田氏との別途協議事項のため、このスライスは設定の保存とused_pct表示のみ行う）
 function UsageTab() {
@@ -497,24 +496,62 @@ function UsageTabBody({ usage, mutate }: { usage: UsageStats; mutate: () => Prom
         </table>
       </div>
 
-      {usage.limits.channels.length > 0 && (
-        <div className="mb-6">
-          <div className="mb-1.5 text-[12.5px] font-bold text-ink">チャンネル別上限（参考表示）</div>
-          <ul className="space-y-1.5">
-            {usage.limits.channels.map((l) => (
-              <li key={l.channel_id} className="rounded-[8px] border border-line px-3 py-2 text-[12px] text-ink-muted">
-                # {l.channel_name ?? '(削除済み)'}: {formatYen(l.monthly_limit_yen)} 中 {l.used_pct}% 使用（通知先: {l.notify_email}）
-              </li>
-            ))}
-          </ul>
-          <p className="mt-1.5 text-[11px] text-ink-subtle">
-            チャンネル別上限の追加・編集UIはこのスライスでは対象外です（バックエンドAPIは対応済み）。
-          </p>
-        </div>
-      )}
+      <ChannelLimitsSection usage={usage} mutate={mutate} />
 
       <GlobalLimitForm limit={usage.limits.global} mutate={mutate} />
     </div>
+  )
+}
+
+// A-43の3項目（月次上限額・通知しきい値・通知先）の入力欄。GlobalLimitForm・
+// ChannelLimitAddPanel・ChannelLimitEditModalの3箇所で共有する表示専用コンポーネント
+// （ChannelSettings.tsxのRecurringPostFormFields等と同じ考え方）
+function UsageLimitFormFields({
+  monthlyLimitYen, onMonthlyLimitYenChange,
+  notifyThresholdPct, onNotifyThresholdPctChange,
+  notifyEmail, onNotifyEmailChange,
+}: {
+  monthlyLimitYen: string
+  onMonthlyLimitYenChange: (v: string) => void
+  notifyThresholdPct: string
+  onNotifyThresholdPctChange: (v: string) => void
+  notifyEmail: string
+  onNotifyEmailChange: (v: string) => void
+}) {
+  return (
+    <>
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">月次上限額（円）</label>
+        <input
+          type="number"
+          min="1"
+          value={monthlyLimitYen}
+          onChange={(e) => onMonthlyLimitYenChange(e.target.value)}
+          placeholder="例: 20000"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">通知しきい値（%）</label>
+        <input
+          type="number"
+          min="1"
+          max="100"
+          value={notifyThresholdPct}
+          onChange={(e) => onNotifyThresholdPctChange(e.target.value)}
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+      <div className="mb-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">通知先メールアドレス</label>
+        <input
+          value={notifyEmail}
+          onChange={(e) => onNotifyEmailChange(e.target.value)}
+          placeholder="admin@kogasoftware.com"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
+    </>
   )
 }
 
@@ -572,37 +609,14 @@ function GlobalLimitForm({ limit, mutate }: { limit: UsageLimit | null; mutate: 
           </div>
         </div>
       )}
-      <div className="mb-3.5">
-        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">月次上限額（円）</label>
-        <input
-          type="number"
-          min="1"
-          value={limitYen}
-          onChange={(e) => setLimitYen(e.target.value)}
-          placeholder="例: 20000"
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
-      </div>
-      <div className="mb-3.5">
-        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">通知しきい値（%）</label>
-        <input
-          type="number"
-          min="1"
-          max="100"
-          value={thresholdPct}
-          onChange={(e) => setThresholdPct(e.target.value)}
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
-      </div>
-      <div className="mb-3.5">
-        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">通知先メールアドレス</label>
-        <input
-          value={notifyEmail}
-          onChange={(e) => setNotifyEmail(e.target.value)}
-          placeholder="admin@kogasoftware.com"
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
-      </div>
+      <UsageLimitFormFields
+        monthlyLimitYen={limitYen}
+        onMonthlyLimitYenChange={setLimitYen}
+        notifyThresholdPct={thresholdPct}
+        onNotifyThresholdPctChange={setThresholdPct}
+        notifyEmail={notifyEmail}
+        onNotifyEmailChange={setNotifyEmail}
+      />
       <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
         しきい値到達時の通知メール送信・上限到達時の応答停止は未実装です（挙動は別途協議事項のため、現時点では使用率の表示のみ行います）。
       </div>
@@ -618,23 +632,274 @@ function GlobalLimitForm({ limit, mutate }: { limit: UsageLimit | null; mutate: 
   )
 }
 
+// F-29 チャンネル別上限（scope='channel'）。全体上限（GlobalLimitForm）に続けて、既存の
+// チャンネル別上限一覧（編集ボタン付き）と新規追加パネルを表示する。追加候補は当月usage.by_channel
+// のうち未設定のチャンネルに限定する（全チャンネル一覧を返す管理者向けAPIが無いため。月を変えれば
+// 候補も変わる）。編集はモーダル、追加は常設パネルと画面を分け、既存項目の編集画面と新規追加画面が
+// 見分けにくいというユーザー指摘（S-06定期投稿/トリガー）と同じ考え方を踏襲した。
+function ChannelLimitsSection({ usage, mutate }: { usage: UsageStats; mutate: () => Promise<unknown> }) {
+  const [editingLimit, setEditingLimit] = useState<UsageChannelLimit | null>(null)
+  const limitedChannelIds = new Set(usage.limits.channels.map((l) => l.channel_id))
+  const candidates = usage.by_channel.filter((c) => !limitedChannelIds.has(c.channel_id))
+
+  return (
+    <div className="mb-6 max-w-[420px]">
+      <div className="mb-1.5 text-[12.5px] font-bold text-ink">チャンネル別上限</div>
+      {usage.limits.channels.length === 0 ? (
+        <p className="mb-2.5 text-[12px] text-ink-subtle">設定済みのチャンネル別上限はありません。</p>
+      ) : (
+        <ul className="mb-2.5 space-y-1.5">
+          {usage.limits.channels.map((l) => (
+            <li
+              key={l.channel_id}
+              className="flex items-center gap-2.5 rounded-[8px] border border-line px-3 py-2 text-[12px]"
+            >
+              <span className="flex-1 text-ink-muted">
+                # {l.channel_name ?? '(削除済み)'}: {formatYen(l.monthly_limit_yen)} 中 {l.used_pct}% 使用（通知先: {l.notify_email}）
+              </span>
+              <button
+                type="button"
+                onClick={() => setEditingLimit(l)}
+                className="flex-none rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+              >
+                編集
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ChannelLimitAddPanel candidates={candidates} mutate={mutate} />
+
+      {editingLimit && (
+        <ChannelLimitEditModal limit={editingLimit} mutate={mutate} onClose={() => setEditingLimit(null)} />
+      )}
+    </div>
+  )
+}
+
+function ChannelLimitAddPanel({
+  candidates,
+  mutate,
+}: {
+  candidates: UsageByChannel[]
+  mutate: () => Promise<unknown>
+}) {
+  const toast = useToast()
+  const [channelId, setChannelId] = useState('')
+  const [limitYen, setLimitYen] = useState('')
+  const [thresholdPct, setThresholdPct] = useState('80')
+  const [notifyEmail, setNotifyEmail] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const add = async () => {
+    if (!channelId) {
+      toast('チャンネルを選択してください', 'error')
+      return
+    }
+    const yen = Number(limitYen)
+    if (!yen || yen <= 0) {
+      toast('上限額は0より大きい数値で入力してください', 'error')
+      return
+    }
+    if (!notifyEmail.trim()) {
+      toast('通知先メールアドレスを入力してください', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch('/api/admin/usage/limits', {
+        method: 'PUT',
+        body: JSON.stringify({
+          scope: 'channel',
+          channel_id: channelId,
+          monthly_limit_yen: yen,
+          notify_threshold_pct: Number(thresholdPct) || 80,
+          notify_email: notifyEmail.trim(),
+        }),
+      })
+      await mutate()
+      toast('チャンネル別上限を追加しました')
+      setChannelId('')
+      setLimitYen('')
+      setThresholdPct('80')
+      setNotifyEmail('')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '追加に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
+      <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ チャンネル別上限を追加</div>
+      {candidates.length === 0 ? (
+        <p className="text-[12px] text-ink-subtle">
+          追加できるチャンネルがありません（当月AIを利用したチャンネルの中で、まだ上限が未設定のものが候補になります。上部の月を変えると候補も変わります）。
+        </p>
+      ) : (
+        <>
+          <div className="mb-3.5">
+            <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">チャンネル</label>
+            <select
+              value={channelId}
+              onChange={(e) => setChannelId(e.target.value)}
+              className="w-full rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+            >
+              <option value="">選択してください</option>
+              {candidates.map((c) => (
+                <option key={c.channel_id} value={c.channel_id}>
+                  # {c.channel_name ?? c.channel_id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <UsageLimitFormFields
+            monthlyLimitYen={limitYen}
+            onMonthlyLimitYenChange={setLimitYen}
+            notifyThresholdPct={thresholdPct}
+            onNotifyThresholdPctChange={setThresholdPct}
+            notifyEmail={notifyEmail}
+            onNotifyEmailChange={setNotifyEmail}
+          />
+          <button
+            type="button"
+            disabled={saving}
+            onClick={add}
+            className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+          >
+            ＋ 追加
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ChannelLimitEditModal({
+  limit,
+  mutate,
+  onClose,
+}: {
+  limit: UsageChannelLimit
+  mutate: () => Promise<unknown>
+  onClose: () => void
+}) {
+  const toast = useToast()
+  const [limitYen, setLimitYen] = useState(String(limit.monthly_limit_yen))
+  const [thresholdPct, setThresholdPct] = useState(String(limit.notify_threshold_pct))
+  const [notifyEmail, setNotifyEmail] = useState(limit.notify_email)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const yen = Number(limitYen)
+    if (!yen || yen <= 0) {
+      toast('上限額は0より大きい数値で入力してください', 'error')
+      return
+    }
+    if (!notifyEmail.trim()) {
+      toast('通知先メールアドレスを入力してください', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch('/api/admin/usage/limits', {
+        method: 'PUT',
+        body: JSON.stringify({
+          scope: 'channel',
+          channel_id: limit.channel_id,
+          monthly_limit_yen: yen,
+          notify_threshold_pct: Number(thresholdPct) || 80,
+          notify_email: notifyEmail.trim(),
+        }),
+      })
+      await mutate()
+      toast('チャンネル別上限を更新しました')
+      onClose()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+      <div
+        className="flex w-full max-w-[420px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 px-[22px] pb-1 pt-4.5">
+          <h2 className="flex-1 text-[15.5px] font-bold text-ink"># {limit.channel_name ?? '(削除済み)'} の上限を編集</h2>
+          <button type="button" onClick={onClose} className="text-ink-subtle hover:text-ink-muted">
+            ✕
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto px-[22px] pb-1 pt-4.5">
+          <UsageLimitFormFields
+            monthlyLimitYen={limitYen}
+            onMonthlyLimitYenChange={setLimitYen}
+            notifyThresholdPct={thresholdPct}
+            onNotifyThresholdPctChange={setThresholdPct}
+            notifyEmail={notifyEmail}
+            onNotifyEmailChange={setNotifyEmail}
+          />
+        </div>
+        <div className="px-[22px] pb-5 pt-4">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink-muted"
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={save}
+              className="flex-1 rounded-lg bg-accent-600 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+            >
+              更新する
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const EVENT_TYPE_LABEL: Record<string, string> = { login: 'ログイン', channel_ai_setting_change: 'チャンネルAI設定変更' }
 
-// A-44: 監査ログタブ本体（要件定義書7章「監査」）。種別・実行者・期間で絞り込む。対象チャンネルでの
-// 絞り込みはバックエンドは対応済み（channel_id）だが、全チャンネル一覧を返す管理者向けAPIが無いため
-// このスライスでは選択式の絞り込みUIは設けず、一覧の「対象」列に表示するのみに留めた。
+// A-44: 監査ログタブ本体（要件定義書7章「監査」）。種別・実行者・対象チャンネル・期間で絞り込む。
+// 対象チャンネルの選択肢を返す管理者向けAPI（全チャンネル一覧）は無いため、絞り込み無しで
+// 取得した直近ログに含まれるtarget_channel_idからプルダウンの選択肢を作る（channelIdで
+// 絞り込み中でも選択肢自体は消えないよう、表示用の一覧とは別に取得する）。
 function AuditLogTab() {
   const { users } = useAdminUsers()
   const [eventType, setEventType] = useState('')
   const [actorUserId, setActorUserId] = useState('')
+  const [channelId, setChannelId] = useState('')
   const [after, setAfter] = useState('')
   const [before, setBefore] = useState('')
   const { logs, hasMore } = useAuditLogs({
     event_type: eventType || undefined,
     actor_user_id: actorUserId || undefined,
+    channel_id: channelId || undefined,
     after: after || undefined,
     before: before || undefined,
   })
+  const { logs: recentLogs } = useAuditLogs({})
+  const channelOptions = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const l of recentLogs) {
+      if (l.target_channel_id && !seen.has(l.target_channel_id)) {
+        seen.set(l.target_channel_id, l.target_channel_name ?? `#${l.target_channel_id}`)
+      }
+    }
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1], 'ja'))
+  }, [recentLogs])
 
   return (
     <div className="flex h-full flex-col">
@@ -668,6 +933,18 @@ function AuditLogTab() {
             {users.map((u: AdminUser) => (
               <option key={u.id} value={u.id}>
                 {u.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={channelId}
+            onChange={(e) => setChannelId(e.target.value)}
+            className="rounded-lg border border-line-strong px-2.5 py-1.5 text-[12.5px] text-ink outline-none focus:border-accent-600"
+          >
+            <option value="">すべての対象チャンネル</option>
+            {channelOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                # {name}
               </option>
             ))}
           </select>
