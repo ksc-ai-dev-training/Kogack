@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useChannels } from '../hooks/useChannels'
-import { useSearch } from '../hooks/useSearch'
+import { useSearch, searchParamsFor, type SearchQuery } from '../hooks/useSearch'
 import { apiFetch } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
+import { useToast } from '../components/Toast'
 import type { SearchResponse, SearchResultItem, UserSearchResult } from '../types'
 
 type ModifierType = 'in' | 'from' | 'with'
@@ -112,7 +113,8 @@ function formatBytes(bytes: number): string {
 }
 
 // S-05 横断検索（F-06/F-07メッセージ・ファイル検索、F-42検索条件モディファイア、
-// タブ切替UIを実装。ドキュメント根拠検索（層2）は未実装のためタブは常時無効表示）
+// タブ切替UI・1タブ20件超の「もっと見る」を実装。ドキュメント根拠検索（層2）は
+// 未実装のためタブは常時無効表示）
 export default function SearchView() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { joined: channels } = useChannels()
@@ -393,8 +395,13 @@ export default function SearchView() {
       <div className="mt-2 flex-1 overflow-y-auto pb-6">
         {!hasQuery && <p className="px-7 pt-4 text-sm text-ink-subtle">検索語を入力してください。</p>}
         {hasQuery && isLoading && <p className="px-7 pt-4 text-sm text-ink-subtle">検索中...</p>}
-        {hasQuery && result && (
-          <SearchResultsTabs key={searchParams.toString()} result={result} onOpenResult={openResult} />
+        {hasQuery && result && query && (
+          <SearchResultsTabs
+            key={searchParams.toString()}
+            result={result}
+            query={query}
+            onOpenResult={openResult}
+          />
         )}
       </div>
     </div>
@@ -402,27 +409,59 @@ export default function SearchView() {
 }
 
 type TabKey = 'all' | 'message' | 'file'
+type PagedType = 'message' | 'file'
 
 // タブ切替UI（F-06、詳細設計書API設計6.4節）。「初回検索でtype=allとして3種すべてを取得し、
-// タブ切替のたびに再検索はしない」設計どおり、A-20は1回だけ呼び、タブはresult.itemsを
-// クライアント側でtypeによって絞り込むだけの表示切替にとどめる（1タブあたり最大20件の
-// 「もっと見る」による追加取得は未実装。CLAUDE.md実装状況節）。ドキュメント根拠タブは
-// 層2検索が未実装のため常に無効表示とする。keyにsearchParamsを使って新しい検索のたびに
-// マウントし直すことで、activeTabを「すべて」へ戻す（useEffectでの同期を避ける）。
+// タブ切替のたびに再検索はしない」設計どおり、A-20は初回の1回だけ呼び、タブはresult.itemsを
+// クライアント側でtypeによって絞り込むだけの表示切替にとどめる。1タブ最大20件を超える分は
+// 「もっと見る」でtype・page指定の追加リクエストを行い、結果をextraItemsへ積み増す
+// （6.4節「超過分は「もっと見る」でtype指定の追加リクエスト（type=message&page=2等）を行う」）。
+// ドキュメント根拠タブは層2検索が未実装のため常に無効表示とする。keyにsearchParamsを使って
+// 新しい検索のたびにマウントし直すことで、activeTab・もっと見るの状態を初期化する
+// （useEffectでの同期を避ける、Reactの「keyで状態をリセットする」公式パターン）。
 function SearchResultsTabs({
   result,
+  query,
   onOpenResult,
 }: {
   result: SearchResponse
+  query: SearchQuery
   onOpenResult: (item: SearchResultItem) => void
 }) {
+  const toast = useToast()
   const [activeTab, setActiveTab] = useState<TabKey>('all')
+  const [extraItems, setExtraItems] = useState<SearchResultItem[]>([])
+  const [loadedPages, setLoadedPages] = useState<{ message: number; file: number }>({ message: 1, file: 1 })
+  const [loadingMore, setLoadingMore] = useState<PagedType | null>(null)
+
   const tabs: { key: TabKey; label: string; count: number }[] = [
     { key: 'all', label: 'すべて', count: result.counts.message + result.counts.file },
     { key: 'message', label: 'メッセージ', count: result.counts.message },
     { key: 'file', label: 'ファイル', count: result.counts.file },
   ]
-  const visibleItems = result.items.filter((item) => activeTab === 'all' || item.type === activeTab)
+
+  const allItems = [...result.items, ...extraItems]
+  const messageItems = allItems.filter((item) => item.type === 'message')
+  const fileItems = allItems.filter((item) => item.type === 'file')
+  const hasMoreMessages = messageItems.length < result.counts.message
+  const hasMoreFiles = fileItems.length < result.counts.file
+  const visibleCount =
+    activeTab === 'all' ? allItems.length : activeTab === 'message' ? messageItems.length : fileItems.length
+
+  const loadMore = async (type: PagedType) => {
+    setLoadingMore(type)
+    try {
+      const nextPage = loadedPages[type] + 1
+      const params = searchParamsFor(query, { type, page: String(nextPage) })
+      const res = await apiFetch<SearchResponse>(`/api/search?${params.toString()}`)
+      setExtraItems((prev) => [...prev, ...res.items])
+      setLoadedPages((prev) => ({ ...prev, [type]: nextPage }))
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '読み込みに失敗しました', 'error')
+    } finally {
+      setLoadingMore(null)
+    }
+  }
 
   return (
     <>
@@ -451,77 +490,103 @@ function SearchResultsTabs({
         </span>
       </div>
 
-      {visibleItems.length === 0 && (
-        <p className="px-7 pt-4 text-sm text-ink-subtle">該当する結果がありません。</p>
-      )}
+      {visibleCount === 0 && <p className="px-7 pt-4 text-sm text-ink-subtle">該当する結果がありません。</p>}
 
-      {activeTab === 'all' && result.counts.message > 0 && (
-        <div className="mx-7 mt-3 text-[11px] font-bold tracking-wide text-ink-subtle">
-          メッセージ（{result.counts.message}件）
-        </div>
-      )}
-      {visibleItems
-        .filter((item) => item.type === 'message')
-        .map((item) => (
-          <button
-            key={item.message_id}
-            type="button"
-            onClick={() => onOpenResult(item)}
-            className="flex w-full gap-3 border-b border-surface-muted px-7 py-2.5 text-left hover:bg-surface-subtle"
-          >
-            <div className="w-[150px] flex-none pt-px text-[11.5px] font-semibold text-ink">
-              {item.channel_name ? `# ${item.channel_name}` : (item.dm_label ?? 'DM')}
+      {(activeTab === 'all' || activeTab === 'message') && messageItems.length > 0 && (
+        <>
+          {activeTab === 'all' && (
+            <div className="mx-7 mt-3 text-[11px] font-bold tracking-wide text-ink-subtle">
+              メッセージ（{result.counts.message}件）
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline gap-[7px]">
-                <span className="text-[13px] font-bold text-ink">{item.sender_display_name ?? '(不明)'}</span>
-                <span className="text-[11px] text-ink-subtle">{formatDateTime(item.posted_at)}</span>
-              </div>
-              <div className="mt-0.5 text-[13px] leading-[1.7] text-ink">{item.excerpt}</div>
-            </div>
-          </button>
-        ))}
-
-      {activeTab === 'all' && result.counts.file > 0 && (
-        <div className="mx-7 mt-3 text-[11px] font-bold tracking-wide text-ink-subtle">
-          ファイル（{result.counts.file}件）
-        </div>
-      )}
-      {visibleItems
-        .filter((item) => item.type === 'file')
-        .map((item) => (
-          <div
-            key={item.attachment_id}
-            className="flex w-full items-center gap-3 border-b border-surface-muted px-7 py-2.5 hover:bg-surface-subtle"
-          >
+          )}
+          {messageItems.map((item) => (
             <button
+              key={item.message_id}
               type="button"
               onClick={() => onOpenResult(item)}
-              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              className="flex w-full gap-3 border-b border-surface-muted px-7 py-2.5 text-left hover:bg-surface-subtle"
             >
-              <div className="w-[150px] flex-none text-[11.5px] font-semibold text-ink">
+              <div className="w-[150px] flex-none pt-px text-[11.5px] font-semibold text-ink">
                 {item.channel_name ? `# ${item.channel_name}` : (item.dm_label ?? 'DM')}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-[7px]">
-                  <span className="truncate text-[13px] font-bold text-ink">📎 {item.file_name}</span>
-                  <span className="text-[11px] text-ink-subtle">
-                    {item.byte_size !== undefined ? formatBytes(item.byte_size) : ''}
-                  </span>
+                  <span className="text-[13px] font-bold text-ink">{item.sender_display_name ?? '(不明)'}</span>
+                  <span className="text-[11px] text-ink-subtle">{formatDateTime(item.posted_at)}</span>
                 </div>
-                <div className="mt-0.5 text-[11.5px] text-ink-subtle">
-                  {item.sender_display_name ?? '(不明)'} ・ {formatDateTime(item.posted_at)}
-                </div>
+                <div className="mt-0.5 text-[13px] leading-[1.7] text-ink">{item.excerpt}</div>
               </div>
             </button>
-            <a
-              href={`/api/attachments/${item.attachment_id}`}
-              className="flex-none rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-accent-700 hover:bg-accent-50"
+          ))}
+          {hasMoreMessages && (
+            <div className="border-b border-surface-muted px-7 py-2.5">
+              <button
+                type="button"
+                disabled={loadingMore === 'message'}
+                onClick={() => loadMore('message')}
+                className="rounded-md border border-line-strong px-3 py-1.5 text-[12px] font-semibold text-accent-700 hover:bg-accent-50 disabled:opacity-40"
+              >
+                {loadingMore === 'message' ? '読み込み中...' : `もっと見る（残り${result.counts.message - messageItems.length}件）`}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {(activeTab === 'all' || activeTab === 'file') && fileItems.length > 0 && (
+        <>
+          {activeTab === 'all' && (
+            <div className="mx-7 mt-3 text-[11px] font-bold tracking-wide text-ink-subtle">
+              ファイル（{result.counts.file}件）
+            </div>
+          )}
+          {fileItems.map((item) => (
+            <div
+              key={item.attachment_id}
+              className="flex w-full items-center gap-3 border-b border-surface-muted px-7 py-2.5 hover:bg-surface-subtle"
             >
-              ダウンロード
-            </a>
-          </div>
-        ))}
+              <button
+                type="button"
+                onClick={() => onOpenResult(item)}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              >
+                <div className="w-[150px] flex-none text-[11.5px] font-semibold text-ink">
+                  {item.channel_name ? `# ${item.channel_name}` : (item.dm_label ?? 'DM')}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-[7px]">
+                    <span className="truncate text-[13px] font-bold text-ink">📎 {item.file_name}</span>
+                    <span className="text-[11px] text-ink-subtle">
+                      {item.byte_size !== undefined ? formatBytes(item.byte_size) : ''}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-ink-subtle">
+                    {item.sender_display_name ?? '(不明)'} ・ {formatDateTime(item.posted_at)}
+                  </div>
+                </div>
+              </button>
+              <a
+                href={`/api/attachments/${item.attachment_id}`}
+                className="flex-none rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-accent-700 hover:bg-accent-50"
+              >
+                ダウンロード
+              </a>
+            </div>
+          ))}
+          {hasMoreFiles && (
+            <div className="px-7 py-2.5">
+              <button
+                type="button"
+                disabled={loadingMore === 'file'}
+                onClick={() => loadMore('file')}
+                className="rounded-md border border-line-strong px-3 py-1.5 text-[12px] font-semibold text-accent-700 hover:bg-accent-50 disabled:opacity-40"
+              >
+                {loadingMore === 'file' ? '読み込み中...' : `もっと見る（残り${result.counts.file - fileItems.length}件）`}
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </>
   )
 }
