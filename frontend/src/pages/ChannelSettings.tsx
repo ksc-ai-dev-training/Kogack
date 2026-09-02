@@ -11,14 +11,13 @@ import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import type { AiSettings, ChannelDetail, RecurringPost, Skill, TriggerRule } from '../types'
+import type { AiSettings, AutoResponseRule, ChannelDetail, RecurringPost, Skill, TriggerRule } from '../types'
 
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_ICON_BYTES = 5 * 1024 * 1024
 
-// S-06 チャンネル設定。このスライスは9タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
-// 参照ドキュメント範囲・スキル・反応モード・定期投稿・自動応答トリガー）を実装。「自動対応範囲」
-// タブは自動対応分類（層3）が未実装のため対象外（CLAUDE.md 実装状況節）。
+// S-06 チャンネル設定。このスライスは10タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
+// 参照ドキュメント範囲・スキル・反応モード・自動対応範囲・定期投稿・自動応答トリガー）を実装。
 // タブ切替はLayout.tsxと共有する?tab=クエリパラメータで行う。
 export default function ChannelSettings() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -70,6 +69,9 @@ export default function ChannelSettings() {
         )}
         {tab === 'reaction' && channelId && settings && (
           <ReactionTab channelId={channelId} settings={settings} mutate={mutateAi} />
+        )}
+        {tab === 'auto' && channelId && settings && (
+          <AutoResponseTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
         {tab === 'admin' && channelId && <AdminTab channelId={channelId} />}
         {tab === 'recurring' && channelId && <RecurringPostsTab channelId={channelId} />}
@@ -820,6 +822,237 @@ function ReactionTab({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+const AUTO_RESPONSE_LEVELS: { value: AutoResponseRule['response_level']; label: string }[] = [
+  { value: 'auto', label: '自動対応可' },
+  { value: 'confirm', label: '確認のうえ対応' },
+  { value: 'human', label: '人が対応' },
+]
+
+// 自動対応範囲タブ（A-31、F-16）。「人が対応」区分の判定方法は設計書が規定していない（グレー）ため、
+// ユーザーに確認のうえ、区分一覧をシステムプロンプトに含めてAI自身に判断・引き継ぎさせる方式を
+// 採用した（追加の分類LLM呼び出しはしない。services/ai_agent.py _build_auto_response_sectionを参照）。
+// request_category（依頼内容）はチャンネル管理者が自由に追加・削除できる（画面モックアップの6例は
+// 固定候補ではなく記入例）。DocScopeTabと同じ「ローカルで編集→まとめて保存」方式（1回のPUTで
+// 洗い替え）とし、行の追加・削除・区分変更のたびに個別リクエストを発生させない
+function AutoResponseTab({
+  channelId,
+  settings,
+  mutate,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+}) {
+  const toast = useToast()
+  const [rules, setRules] = useState<AutoResponseRule[]>(settings.auto_response_rules)
+  const [newCategory, setNewCategory] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [editingCategory, setEditingCategory] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState('')
+
+  const setLevel = (category: string, level: AutoResponseRule['response_level']) => {
+    setRules((prev) => prev.map((r) => (r.request_category === category ? { ...r, response_level: level } : r)))
+  }
+
+  const removeRule = (category: string) => {
+    setRules((prev) => prev.filter((r) => r.request_category !== category))
+    if (editingCategory === category) setEditingCategory(null)
+  }
+
+  const addRule = () => {
+    const trimmed = newCategory.trim()
+    if (!trimmed) return
+    if (rules.some((r) => r.request_category === trimmed)) {
+      toast('同じ依頼内容が既に登録されています', 'error')
+      return
+    }
+    setRules((prev) => [...prev, { request_category: trimmed, response_level: 'auto' }])
+    setNewCategory('')
+  }
+
+  const startEdit = (category: string) => {
+    setEditingCategory(category)
+    setEditingValue(category)
+  }
+
+  const confirmEdit = () => {
+    if (editingCategory === null) return
+    const trimmed = editingValue.trim()
+    if (!trimmed) {
+      toast('依頼内容を入力してください', 'error')
+      return
+    }
+    if (trimmed !== editingCategory && rules.some((r) => r.request_category === trimmed)) {
+      toast('同じ依頼内容が既に登録されています', 'error')
+      return
+    }
+    setRules((prev) =>
+      prev.map((r) => (r.request_category === editingCategory ? { ...r, request_category: trimmed } : r)),
+    )
+    setEditingCategory(null)
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/auto-response`, {
+        method: 'PUT',
+        body: JSON.stringify({ rules }),
+      })
+      await mutate()
+      toast('自動対応範囲を保存しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const levelClass = (level: AutoResponseRule['response_level']) => {
+    if (level === 'auto') return 'border-transparent bg-ok-bg text-ok-text'
+    if (level === 'confirm') return 'border-transparent bg-bot-bg text-bot-text'
+    return 'border-danger-border bg-danger-bg text-danger-text'
+  }
+
+  return (
+    <div className="max-w-[700px]">
+      <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
+        依頼内容ごとに、AIが自動で対応してよい範囲を区分します（F-16）。
+      </p>
+
+      {rules.length === 0 ? (
+        <p className="mb-5 text-[12px] text-ink-subtle">依頼内容の区分はまだ登録されていません。</p>
+      ) : (
+        <div className="mb-5 overflow-hidden rounded-[10px] border border-line">
+          <table className="w-full text-left text-[12.5px]">
+            <thead className="bg-surface-subtle text-[11px] text-ink-subtle">
+              <tr>
+                <th className="px-3.5 py-2 font-bold">依頼内容</th>
+                <th className="px-3.5 py-2 font-bold">対応区分</th>
+                <th className="px-3.5 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {rules.map((r) => {
+                const isEditing = editingCategory === r.request_category
+                return (
+                  <tr key={r.request_category}>
+                    <td className="px-3.5 py-2.5 text-ink">
+                      {isEditing ? (
+                        <input
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') confirmEdit()
+                            if (e.key === 'Escape') setEditingCategory(null)
+                          }}
+                          maxLength={100}
+                          autoFocus
+                          className="w-full rounded-md border border-accent-600 px-2 py-1 text-[12.5px] text-ink outline-none focus:ring-4 focus:ring-accent-50"
+                        />
+                      ) : (
+                        r.request_category
+                      )}
+                    </td>
+                    <td className="px-3.5 py-2.5">
+                      <div className="flex gap-1.5">
+                        {AUTO_RESPONSE_LEVELS.map((lv) => (
+                          <button
+                            key={lv.value}
+                            type="button"
+                            onClick={() => setLevel(r.request_category, lv.value)}
+                            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                              r.response_level === lv.value
+                                ? levelClass(lv.value)
+                                : 'border-line-strong text-ink-subtle hover:border-accent-600 hover:text-accent-700'
+                            }`}
+                          >
+                            {lv.label}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right">
+                      {isEditing ? (
+                        <div className="flex justify-end gap-2.5">
+                          <button
+                            type="button"
+                            onClick={confirmEdit}
+                            className="text-[11px] font-semibold text-accent-700 hover:underline"
+                          >
+                            確定
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingCategory(null)}
+                            className="text-[11px] font-semibold text-ink-subtle hover:underline"
+                          >
+                            キャンセル
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex justify-end gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => startEdit(r.request_category)}
+                            className="text-[11px] font-semibold text-ink-muted hover:text-accent-700 hover:underline"
+                          >
+                            編集
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeRule(r.request_category)}
+                            className="text-[11px] font-semibold text-danger-text hover:underline"
+                          >
+                            削除
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="mb-5 flex gap-2">
+        <input
+          value={newCategory}
+          onChange={(e) => setNewCategory(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') addRule()
+          }}
+          placeholder="例: 経費精算に関する相談"
+          maxLength={100}
+          className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+        <button
+          type="button"
+          onClick={addRule}
+          className="flex-none rounded-lg border border-line-strong px-3.5 py-2 text-[12.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+        >
+          ＋ 追加
+        </button>
+      </div>
+
+      <div className="mb-5 text-[11px] leading-relaxed text-ink-subtle">
+        「人が対応」に区分された依頼は、AIが同一チャンネル内で引き継ぎ先にメンションして案内します（F-17。DMは使いません）。「確認のうえ対応」は実行前確認の仕組み（座席予約等の書き込み操作）が未実装のため、現時点では「自動対応可」と同じ扱いです。
+      </div>
+
+      <button
+        type="button"
+        disabled={saving}
+        onClick={save}
+        className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+      >
+        保存
+      </button>
     </div>
   )
 }

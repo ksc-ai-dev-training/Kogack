@@ -51,7 +51,15 @@ export interface AiSettings {
   out_of_scope_policy: 'strict' | 'general'
   folder_ids: string[]
   skills: Skill[]
+  auto_response_rules: AutoResponseRule[]
   fallback_handoff_user_id: string | null
+}
+
+/** T-12 channel_auto_response_rules（A-31, F-16）。request_categoryはチャンネル管理者が
+ * 自由に追加・削除できる（固定候補ではない） */
+export interface AutoResponseRule {
+  request_category: string
+  response_level: 'auto' | 'confirm' | 'human'
 }
 
 /** T-11 channel_skills（A-28〜A-30, F-12） */

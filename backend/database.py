@@ -390,6 +390,23 @@ CREATE TABLE IF NOT EXISTS channel_skills (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE channel_skills ENABLE ROW LEVEL SECURITY;
+
+-- T-12 channel_auto_response_rules（自動対応範囲、F-16。05-1_詳細設計書_DB設計.html 3.10節）。
+-- 依頼内容カテゴリ（request_category）ごとに対応区分（response_level: auto/confirm/human）を
+-- チャンネルAIへ割り当てる。services/ai_agent.pyのシステムプロンプト「# あなたが対応してよい
+-- 依頼の目安」節で列挙する（詳細設計書AIサポート10.2節）。request_categoryはチャンネル管理者が
+-- 自由に追加・削除できる（REQ-F-15「担当部署が自ら決められる」を優先し、モックアップの6例は
+-- 固定の候補ではなく単なる記入例として扱う）。
+CREATE TABLE IF NOT EXISTS channel_auto_response_rules (
+    id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id        BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    request_category  TEXT NOT NULL,
+    response_level    TEXT NOT NULL CHECK (response_level IN ('auto', 'confirm', 'human')),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (channel_id, request_category)
+);
+ALTER TABLE channel_auto_response_rules ENABLE ROW LEVEL SECURITY;
 """
 
 

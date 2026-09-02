@@ -1,6 +1,6 @@
-# A-23〜A-30, A-45（詳細設計書 API設計4.6節、基本設計書8.3節）。S-06 AI設定タブのうち「基本設定」
-# 「キャラクタ」「振る舞い定義」「参照ドキュメント範囲」「スキル」の5タブに対応する。A-31
-# （自動対応範囲）は自動対応分類（層3）が未実装のため対象外（CLAUDE.md実装状況節）。
+# A-23〜A-31, A-45（詳細設計書 API設計4.6節、基本設計書8.3節）。S-06 AI設定タブのうち「基本設定」
+# 「キャラクタ」「振る舞い定義」「参照ドキュメント範囲」「スキル」「反応モード」「自動対応範囲」の
+# 7タブに対応する。
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -11,7 +11,7 @@ from database import get_pool
 router = APIRouter(prefix="/api/channels", tags=["ai-settings"])
 
 
-def _out(row, folder_ids: list[str], skills: list[dict]) -> dict:
+def _out(row, folder_ids: list[str], skills: list[dict], auto_response_rules: list[dict]) -> dict:
     return {
         "channel_id": str(row["channel_id"]),
         "is_ai_enabled": row["is_ai_enabled"],
@@ -23,6 +23,7 @@ def _out(row, folder_ids: list[str], skills: list[dict]) -> dict:
         "out_of_scope_policy": row["out_of_scope_policy"],
         "folder_ids": folder_ids,
         "skills": skills,
+        "auto_response_rules": auto_response_rules,
         "fallback_handoff_user_id": (
             str(row["fallback_handoff_user_id"]) if row["fallback_handoff_user_id"] is not None else None
         ),
@@ -55,11 +56,20 @@ async def _skills(channel_id: int) -> list[dict]:
     return [{"id": str(r["id"]), "title": r["title"], "instructions": r["instructions"]} for r in rows]
 
 
+async def _auto_response_rules(channel_id: int) -> list[dict]:
+    rows = await get_pool().fetch(
+        """SELECT request_category, response_level FROM channel_auto_response_rules
+           WHERE channel_id = $1 ORDER BY created_at""",
+        channel_id,
+    )
+    return [{"request_category": r["request_category"], "response_level": r["response_level"]} for r in rows]
+
+
 @router.get("/{channel_id}/ai-settings")
 async def get_ai_settings(channel_id: int, user: CurrentUser = Depends(require_channel_admin)):
     """A-23: AI設定一括取得（S-06）"""
     settings = await _get_or_create(channel_id)
-    return _out(settings, await _folder_ids(channel_id), await _skills(channel_id))
+    return _out(settings, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
 
 
 class UpdateGeneralRequest(BaseModel):
@@ -90,7 +100,7 @@ async def update_general(
         f"AIを{'有効' if body.is_ai_enabled else '無効'}にし、反応モードを「{mode_label}」にしました",
         target_channel_id=channel_id, target_field="general",
     )
-    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
 
 
 class UpdateCharacterRequest(BaseModel):
@@ -118,7 +128,7 @@ async def update_character(
         pool, "channel_ai_setting_change", user.id, "キャラクタ設定を更新しました",
         target_channel_id=channel_id, target_field="character",
     )
-    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
 
 
 class UpdatePromptRequest(BaseModel):
@@ -142,7 +152,7 @@ async def update_prompt(
         pool, "channel_ai_setting_change", user.id, "振る舞い定義を更新しました",
         target_channel_id=channel_id, target_field="behavior_prompt",
     )
-    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
 
 
 class UpdateDocScopeRequest(BaseModel):
@@ -186,7 +196,7 @@ async def update_doc_scope(
             conn, "channel_ai_setting_change", user.id, "参照ドキュメント範囲を更新しました",
             target_channel_id=channel_id, target_field="doc_scope",
         )
-    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
 
 
 class CreateSkillRequest(BaseModel):
@@ -293,4 +303,45 @@ async def update_handoff(
         pool, "channel_ai_setting_change", user.id, "スキルの引き継ぎ先を更新しました",
         target_channel_id=channel_id, target_field="fallback_handoff_user_id",
     )
-    return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
+
+
+class AutoResponseRuleInput(BaseModel):
+    request_category: str = Field(min_length=1, max_length=100)
+    response_level: str
+
+
+class UpdateAutoResponseRequest(BaseModel):
+    rules: list[AutoResponseRuleInput] = Field(default_factory=list)
+
+
+@router.put("/{channel_id}/ai-settings/auto-response")
+async def update_auto_response(
+    channel_id: int, body: UpdateAutoResponseRequest, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-31: 自動対応範囲（F-16）。送信されたルール集合でT-12を洗い替える（A-27参照ドキュメント範囲と
+    同じ「差分計算をしないDELETE→INSERT」パターン）。request_categoryはチャンネル管理者が自由に
+    追加・削除できる（REQ-F-15「担当部署が自ら決められる」を優先。画面モックアップの6例は固定候補では
+    なく記入例。基本設計書6.2節に設計判断を追記）。同じrequest_categoryが複数送られた場合は最後の
+    指定を採用する（Pythonのdictでキー重複を解決し、DBのUNIQUE制約違反を避ける）"""
+    for r in body.rules:
+        if r.response_level not in ("auto", "confirm", "human"):
+            raise HTTPException(422, detail="response_levelはauto/confirm/humanのいずれかです")
+    deduped = {r.request_category.strip(): r.response_level for r in body.rules if r.request_category.strip()}
+
+    await _get_or_create(channel_id)
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("DELETE FROM channel_auto_response_rules WHERE channel_id = $1", channel_id)
+        if deduped:
+            await conn.executemany(
+                """INSERT INTO channel_auto_response_rules (channel_id, request_category, response_level)
+                   VALUES ($1, $2, $3)""",
+                [(channel_id, category, level) for category, level in deduped.items()],
+            )
+        row = await conn.fetchrow("SELECT * FROM channel_ai_settings WHERE channel_id = $1", channel_id)
+        await audit_log.record(
+            conn, "channel_ai_setting_change", user.id, "自動対応範囲を更新しました",
+            target_channel_id=channel_id, target_field="auto_response",
+        )
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))

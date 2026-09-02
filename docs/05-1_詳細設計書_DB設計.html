@@ -37,6 +37,7 @@
       <tr class="diff-new"><td>1.6</td><td>2026-08-31</td><td>T-14 ai_usage_limits（F-29上限設定、A-43）を実装した。定義済みのカラム構成はそのままに、scope='global'の行を最大1行、scope='channel'の行をchannel_idごとに最大1行へ制約する部分ユニークインデックス（A-43のON CONFLICT対象）を追記した（従来の定義には無かった実装詳細のbackfill）。</td></tr>
       <tr class="diff-new"><td>1.7</td><td>2026-09-01</td><td>T-16 audit_logs（監査ログ、A-44）を実装した。定義済みのカラム構成はそのままに、target_channel_idをON DELETE SET NULLとする設計判断を追記した（他の多くのFKはCASCADEだが、監査ログはチャンネル削除後も記録自体を残す目的のため）。</td></tr>
       <tr class="diff-new"><td>1.8</td><td>2026-09-01</td><td>T-11 channel_skills（F-12スキル登録・F-17引き継ぎ先、A-28〜A-30・A-45）を実装した。定義済みのカラム構成はそのままに、channel_idをON DELETE CASCADEとする実装詳細を追記した（大半のFKと同じ「チャンネル削除で連動削除」の考え方。監査ログ・送信済みBOT発言のようにチャンネル削除後も記録を残す性質のテーブルではないため、T-16やmessages.recurring_post_idのSET NULL方針とは異なる）。</td></tr>
+      <tr class="diff-new"><td>1.9</td><td>2026-09-02</td><td>T-12 channel_auto_response_rules（F-16自動対応範囲、A-31）を実装した。定義済みのカラム構成・UNIQUE(channel_id, request_category)制約はそのままに、channel_idをT-11と同じくON DELETE CASCADEとする実装詳細を追記した。request_categoryは列挙型やCHECK制約を持たない自由なTEXTのままとし、チャンネル管理者が任意の名称を追加・削除できることを明記した（基本設計書8.1節の設計判断コラム、REQ-F-15「担当部署が自ら決められる」を優先）。</td></tr>
     </tbody>
   </table>
 

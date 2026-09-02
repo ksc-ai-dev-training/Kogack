@@ -8,10 +8,17 @@
 #   - Function Calling（search_documents / get_seat_availability）は対象外。ドキュメント索引
 #     （T-09/T-10のGoogle Drive連携）・座席予約システム連携のいずれも未実装のため、
 #     プレーンな会話応答のみを行う
-#   - スキル（T-11・F-12）とその引き継ぎ先（fallback_handoff_user_id・F-17）はこのスライスで
-#     システムプロンプトへ配線した（_build_skills_section）。自動対応範囲分類（T-12）・実行前確認
-#     （F-25）は引き続き対象外。T-08.out_of_scope_policyは層2ドキュメントQ&A関連のためこのスライスでは
-#     プロンプトに反映されない（値は保存できるが未使用。ドキュメントQ&A実装時に使う）
+#   - スキル（T-11・F-12）とその引き継ぎ先（fallback_handoff_user_id・F-17）、自動対応範囲分類
+#     （T-12・F-16）はいずれもシステムプロンプトへ配線した（_build_skills_section・
+#     _build_auto_response_section）。自動対応範囲の「人が対応」区分は、基本設計書8.1節が
+#     「AI呼び出しを行わず引き継ぎメッセージを直接投稿する」と規定する一方、依頼文をどのカテゴリに
+#     分類するかのアルゴリズムは規定していない（グレー）。ユーザー確認のうえ、専用の分類LLM呼び出しは
+#     追加せず、この区分一覧を通常の応答生成プロンプトに含めてAI自身に判断・引き継ぎ案内をさせる
+#     方式を採用した（F-12スキルの「対応できない依頼は引き継ぐ」と同じ考え方、追加コストなし）。
+#     'confirm'（確認のうえ対応）は実行前確認（F-25・pending_actions）が未実装で書き込み系ツール
+#     自体が存在しないため、現状は'auto'と同じ「通常どおり応答してよい」扱いとし区別しない。
+#     実行前確認（F-25）自体は引き続き対象外。T-08.out_of_scope_policyは層2ドキュメントQ&A関連の
+#     ためこのスライスではプロンプトに反映されない（値は保存できるが未使用。ドキュメントQ&A実装時に使う）
 #   - AI利用コストの上限判定・通知（T-14、F-29後半）は対象外。T-13への記録のみ行う
 #   - チャンネル本体の投稿（A-11）のみが起動対象。スレッド返信（A-14）内の@メンションはこの
 #     スライスでは対象外（次スライスでA-14にも同じ配線を追加する）
@@ -54,13 +61,15 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 - 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない"""
 
 
-def _build_system_prompt(settings: dict, skills_section: str = "") -> str:
+def _build_system_prompt(settings: dict, auto_response_section: str = "", skills_section: str = "") -> str:
     persona_name = settings["persona_name"] or "AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
     behavior = (settings["behavior_prompt"] or "").strip()
     lines = [f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}']
     if behavior:
         lines.append(behavior)
+    if auto_response_section:
+        lines.append(auto_response_section)
     if skills_section:
         lines.append(skills_section)
     lines.append("")
@@ -68,9 +77,21 @@ def _build_system_prompt(settings: dict, skills_section: str = "") -> str:
     return "\n".join(lines)
 
 
+async def _resolve_handoff_label(pool, settings: dict) -> str:
+    """fallback_handoff_user_id（F-17）を表示名に解決する。未指定・退出済み等で名前が引けない
+    場合は「このチャンネルの管理者」という汎用ラベルにフォールバックする
+    （_build_skills_section・_build_auto_response_sectionで共有）"""
+    handoff_id = settings["fallback_handoff_user_id"]
+    if handoff_id is not None:
+        name = await pool.fetchval("SELECT name FROM users WHERE id = $1", handoff_id)
+        if name:
+            return name
+    return "このチャンネルの管理者"
+
+
 async def _build_skills_section(channel_id: int, settings: dict) -> str:
     """T-11 channel_skillsを「# あなたのスキル」節として列挙し、どのスキルにも当てはまらない
-    業務依頼を受けた場合の引き継ぎ案内（F-17・fallback_handoff_user_id）もあわせて指示する
+    業務依頼を受けた場合の引き継ぎ案内(F-17・fallback_handoff_user_id)もあわせて指示する
     （詳細設計書AIサポート10.2節）。スキルが1件も登録されていないチャンネルではこの節自体を
     省略する（FIXED_RULESの「できない」案内で足りるため）。メンション応答（_generate_and_post）
     専用で、要約（_build_summary_prompt）には使わない（要約は業務依頼への対応ではないため）。
@@ -84,12 +105,7 @@ async def _build_skills_section(channel_id: int, settings: dict) -> str:
     )
     if not skills:
         return ""
-    handoff_id = settings["fallback_handoff_user_id"]
-    handoff_label = "このチャンネルの管理者"
-    if handoff_id is not None:
-        name = await pool.fetchval("SELECT name FROM users WHERE id = $1", handoff_id)
-        if name:
-            handoff_label = name
+    handoff_label = await _resolve_handoff_label(pool, settings)
     lines = ["", "# あなたのスキル", "依頼を受けたときは、次の手順に従って進めること。"]
     for s in skills:
         lines.append(f"## {s['title']}")
@@ -98,6 +114,41 @@ async def _build_skills_section(channel_id: int, settings: dict) -> str:
     lines.append(
         f"上記のいずれにも当てはまらない業務依頼を受けた場合は、正直に「その依頼には対応できません」と"
         f"伝えた上で、{handoff_label}へ相談するよう案内すること（存在しない対応ができるかのように答えないこと）"
+    )
+    return "\n".join(lines)
+
+
+_AUTO_RESPONSE_LEVEL_LABEL = {
+    "auto": "自動対応可",
+    "confirm": "確認のうえ対応（現状は自動対応可と同じ扱いでよい。実行前確認の仕組み自体が未実装のため）",
+    "human": "人が対応",
+}
+
+
+async def _build_auto_response_section(channel_id: int, settings: dict) -> str:
+    """T-12 channel_auto_response_rulesを「# あなたが対応してよい依頼の目安」節として列挙する
+    （F-16、詳細設計書AIサポート10.2節）。基本設計書8.1節は「人が対応」区分の依頼をAI呼び出し無しで
+    直接引き継ぐと規定するが、依頼文をどのカテゴリに分類するかのアルゴリズムは規定していない
+    （モジュール冒頭コメント参照）。ここでは専用の分類LLM呼び出しを追加せず、区分一覧をそのまま
+    プロンプトへ渡し、通常の応答生成（1回のLLM呼び出し）の中でAI自身に「人が対応」該当を判断させ、
+    該当する場合は回答本文で引き継ぎ案内をさせる。ルールが1件も登録されていないチャンネルでは
+    この節自体を省略する。スキル同様、メンション応答専用で要約生成には使わない"""
+    pool = get_pool()
+    rules = await pool.fetch(
+        """SELECT request_category, response_level FROM channel_auto_response_rules
+           WHERE channel_id = $1 ORDER BY created_at""",
+        channel_id,
+    )
+    if not rules:
+        return ""
+    handoff_label = await _resolve_handoff_label(pool, settings)
+    lines = ["", "# あなたが対応してよい依頼の目安"]
+    for r in rules:
+        lines.append(f"- {r['request_category']}: {_AUTO_RESPONSE_LEVEL_LABEL[r['response_level']]}")
+    lines.append("")
+    lines.append(
+        f"「人が対応」に区分される依頼を受けた場合は、あなた自身で回答を作成せず、正直に「担当者への"
+        f"確認が必要な内容です」と伝えた上で、{handoff_label}へ相談するよう案内すること"
     )
     return "\n".join(lines)
 
@@ -188,8 +239,11 @@ async def _generate_and_post(channel_id: int, settings: dict, requested_by: int)
         )
         history_rows = list(reversed(rows))
         names = await _resolve_sender_names(history_rows)
+        auto_response_section = await _build_auto_response_section(channel_id, settings)
         skills_section = await _build_skills_section(channel_id, settings)
-        messages: list[dict] = [{"role": "system", "content": _build_system_prompt(settings, skills_section)}]
+        messages: list[dict] = [
+            {"role": "system", "content": _build_system_prompt(settings, auto_response_section, skills_section)}
+        ]
         messages += _rows_to_chat_messages(history_rows, names)
 
         client = ai_client.get_client()
