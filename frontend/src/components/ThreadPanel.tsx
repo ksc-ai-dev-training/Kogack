@@ -15,6 +15,7 @@ export default function ThreadPanel({
   parentMessage,
   headerSub,
   members,
+  aiPersonaName,
   onClose,
   onReplyPosted,
   onReplyDeleted,
@@ -24,6 +25,8 @@ export default function ThreadPanel({
   headerSub: string
   /** F-41 @メンション用（チャンネルのスレッドのみ渡す。DMのスレッドでは渡さない） */
   members?: ChannelMember[]
+  /** AIメンションのハイライト用（チャンネルのスレッドのみ渡す。DMのスレッドでは渡さない） */
+  aiPersonaName?: string
   onClose: () => void
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
@@ -129,7 +132,7 @@ export default function ThreadPanel({
                 <span className="text-[11px] text-ink-subtle">{formatTime(parentMessage.created_at)}</span>
               </div>
               <div className="whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
-                {renderMessageBody(parentMessage.body, parentMessage.blocks, members)}
+                {renderMessageBody(parentMessage.body, parentMessage.blocks, members, aiPersonaName)}
               </div>
             </div>
             {parentProfileOpen && parentMessage.sender_user_id && (
@@ -148,6 +151,7 @@ export default function ThreadPanel({
           messages={replies}
           showDaySeparators={false}
           members={members}
+          aiPersonaName={aiPersonaName}
           onDeleted={() => {
             mutateReplies()
             onReplyDeleted?.()

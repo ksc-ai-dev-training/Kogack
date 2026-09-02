@@ -116,9 +116,16 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
         "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
         channel_id, user.id,
     )
+    # AIメンションのハイライト表示用（F-41同様の見た目にする、フロント側の要望）。A-23と異なり
+    # 参加者全員がA-06を呼べるため、ここでpersona_nameだけ軽量に返す
+    # （services/ai_agent.detect_mentionと同じ「@ペルソナ名」文字列一致をフロントでも再現するために必要）
+    ai_persona_name = await pool.fetchval(
+        "SELECT persona_name FROM channel_ai_settings WHERE channel_id = $1", channel_id
+    )
     return {
         **_channel_out(row), "member_count": member_count,
         "is_channel_admin": bool(is_admin), "is_member": bool(is_member),
+        "ai_persona_name": ai_persona_name or "AI",
     }
 
 
@@ -445,8 +452,10 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "channel_id": str(row["channel_id"]),
         "sender_type": row["sender_type"],
         "sender_user_id": str(row["sender_user_id"]) if row["sender_user_id"] is not None else None,
-        # BOT発言（sender_user_id無し）はbot_display_nameを表示名として使う（F-36/F-38/F-43）
-        "sender_name": row["bot_display_name"] if row["sender_type"] == "bot" else row["sender_name"],
+        # BOT/AI発言（いずれもsender_user_id無し）はbot_display_nameを表示名として使う（F-36/F-38/F-43、
+        # AI発言はservices/ai_agent.pyがペルソナ名をこの列にスナップショットする）。この分岐にAI発言が
+        # 抜けていたため、これまでAI発言のsender_nameが常にnull（表示は「(不明)」）になっていたバグを修正
+        "sender_name": row["bot_display_name"] if row["sender_type"] in ("bot", "ai") else row["sender_name"],
         # AI発言・BOT発言はいずれもbot_icon_urlにアイコンのスナップショットを持つ（services/ai_agent.py、
         # F-36/F-38の送り主アイコン）。BOT発言はsender_user_idが無いためJOIN結果が自然にNULLになる
         "sender_picture_url": row["bot_icon_url"] if row["sender_type"] in ("ai", "bot") else row["sender_picture_url"],

@@ -53,12 +53,16 @@ function UnreadDivider() {
 // 3.7節「表示時はtarget_user_idを解決して現在の表示名・アイコンを描画」）。A-62プロフィール編集の
 // 実装（F-39）により、対象者が後から表示名を変更した場合はdisplay_name_snapshotと現在名が食い違う
 // ことがあり、この場合も現在名の方で描画し直す（本文中の静的テキストは検索の起点にのみ使う）。
-export function renderMessageBody(body: string, blocks: Message['blocks'], members?: ChannelMember[]): ReactNode {
+export function renderMessageBody(
+  body: string,
+  blocks: Message['blocks'],
+  members?: ChannelMember[],
+  aiPersonaName?: string,
+): ReactNode {
   const mentions = (blocks ?? []).filter(
     (b): b is { block_type: 'mention'; payload: { target_user_id: string; display_name_snapshot: string }; sort_order: number } =>
       b.block_type === 'mention',
   )
-  if (mentions.length === 0) return body
 
   const matches: { start: number; end: number; label: string }[] = []
   for (const block of mentions) {
@@ -67,6 +71,18 @@ export function renderMessageBody(body: string, blocks: Message['blocks'], membe
     const idx = body.indexOf(`@${block.payload.display_name_snapshot}`)
     if (idx !== -1) matches.push({ start: idx, end: idx + block.payload.display_name_snapshot.length + 1, label })
   }
+  // AIメンションはF-41と異なりID参照化されずmessage_blocksに残らない（基本設計書5.22節の設計判断、
+  // services/ai_agent.detect_mentionと同じ本文中「@ペルソナ名」の文字列一致）ため、blocksとは別に
+  // ここで直接検出する。画面モックアップでは人間へのメンションと同じ見た目でハイライトされる
+  if (aiPersonaName) {
+    const needle = `@${aiPersonaName}`
+    let idx = body.indexOf(needle)
+    while (idx !== -1) {
+      matches.push({ start: idx, end: idx + needle.length, label: needle })
+      idx = body.indexOf(needle, idx + needle.length)
+    }
+  }
+  if (matches.length === 0) return body
   matches.sort((a, b) => a.start - b.start)
 
   const nodes: ReactNode[] = []
@@ -174,6 +190,7 @@ export default function MessageList({
   showDaySeparators = true,
   members,
   unreadDividerMessageId,
+  aiPersonaName,
 }: {
   messages: Message[]
   emptyMessage?: string
@@ -186,6 +203,9 @@ export default function MessageList({
   members?: ChannelMember[]
   /** このメッセージの直前に「ここから未読メッセージ」区切り線を表示する（useUnreadDivider） */
   unreadDividerMessageId?: string | null
+  /** AIメンション（本文中の「@ペルソナ名」）のハイライトに使う（チャンネルAIのpersona_name。
+   * DM会話では渡さない。channel.ai_persona_nameを参照） */
+  aiPersonaName?: string
 }) {
   const { me } = useMe()
   const confirm = useConfirm()
@@ -278,7 +298,7 @@ export default function MessageList({
                   </div>
                 ) : (
                   <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
-                    {renderMessageBody(m.body, m.blocks, members)}
+                    {renderMessageBody(m.body, m.blocks, members, aiPersonaName)}
                   </div>
                 )}
                 <AttachmentList attachments={m.attachments} />

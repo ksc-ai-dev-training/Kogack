@@ -21,8 +21,10 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "thread_parent_id": str(row["thread_parent_id"]) if row["thread_parent_id"] is not None else None,
         "sender_type": row["sender_type"],
         "sender_user_id": str(row["sender_user_id"]) if row["sender_user_id"] is not None else None,
-        # BOT発言（sender_user_id無し）はbot_display_nameを表示名として使う（F-36/F-38/F-43）
-        "sender_name": row["bot_display_name"] if row["sender_type"] == "bot" else row["sender_name"],
+        # BOT/AI発言（いずれもsender_user_id無し）はbot_display_nameを表示名として使う（F-36/F-38/F-43、
+        # AI発言はservices/ai_agent.pyがペルソナ名をこの列にスナップショットする）。この分岐にAI発言が
+        # 抜けていたため、これまでAI発言のsender_nameが常にnull（表示は「(不明)」）になっていたバグを修正
+        "sender_name": row["bot_display_name"] if row["sender_type"] in ("bot", "ai") else row["sender_name"],
         # AI発言・BOT発言はいずれもbot_icon_urlにアイコンのスナップショットを持つ（services/ai_agent.py、
         # F-36/F-38の送り主アイコン）。BOT発言はsender_user_idが無いためJOIN結果が自然にNULLになる
         "sender_picture_url": row["bot_icon_url"] if row["sender_type"] in ("ai", "bot") else row["sender_picture_url"],

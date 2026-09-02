@@ -163,6 +163,7 @@ export default function ChannelView() {
             onDeleted={removeMessage}
             members={members}
             unreadDividerMessageId={unreadDividerMessageId}
+            aiPersonaName={channel?.ai_persona_name}
           />
         </div>
 
@@ -189,6 +190,7 @@ export default function ChannelView() {
           parentMessage={messages.find((m) => m.id === threadId) ?? null}
           headerSub={`# ${channel?.name ?? ''}`}
           members={members}
+          aiPersonaName={channel?.ai_persona_name}
           onClose={closeThread}
           onReplyPosted={() => bumpThreadReplyCount(threadId)}
           onReplyDeleted={() => decrementThreadReplyCount(threadId)}

@@ -11,9 +11,14 @@ from database import ROOT_ENV
 DEFAULT_MODEL = "gpt-4o-mini"
 
 # 1000トークンあたりの単価（円）。実際の契約プランに応じて調整する想定（10.5節の例をそのまま採用）。
-# 未知のモデルは既定モデルの単価で概算する
+# 未知のモデルは既定モデルの単価で概算する。各行はOpenAI公表のUSD単価（1Mトークンあたり）を
+# gpt-4o-miniの行と同じ換算レート（約153.33円/USD、既存の0.023円/0.092円から逆算した値）で
+# 円/1000トークンへ換算している（レートを行ごとに変えると単価表内で整合しなくなるため統一する）
 MODEL_COSTS = {
     "gpt-4o-mini": {"input": 0.023, "output": 0.092},
+    # gpt-5-nano: $0.05/$0.40（1Mトークン、USD）。ローカル動作確認用に最安のテキスト生成モデルとして採用
+    # （2026-09-02時点のOpenAI公式単価、developers.openai.com/api/docs/pricing）
+    "gpt-5-nano": {"input": 0.0077, "output": 0.0613},
 }
 
 
@@ -29,6 +34,18 @@ def is_configured() -> bool:
 
 def get_model() -> str:
     return _env("AI_MODEL", DEFAULT_MODEL)
+
+
+# reasoning系モデル（gpt-5-nano等）はChat Completions APIで`reasoning_effort`を指定しないと、
+# 内部の思考にreasoning_tokensを使い切ってmax_completion_tokensに達し、応答本文が空のまま
+# finish_reason='length'で返ってくることを実機検証で確認した（トークンはreasoning_tokensとして
+# 消費済みのため課金は発生する）。逆に非reasoningモデル（gpt-4o-mini等）に`reasoning_effort`を
+# 渡すと「Unrecognized request argument」で400エラーになるため、無条件には指定できない
+REASONING_MODELS = {"gpt-5-nano"}
+
+
+def is_reasoning_model(model: str) -> bool:
+    return model in REASONING_MODELS
 
 
 def get_client() -> AsyncOpenAI:

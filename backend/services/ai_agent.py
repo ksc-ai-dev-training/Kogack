@@ -39,10 +39,13 @@ import traceback
 from database import get_pool
 from services import ai_client
 
-MAX_HISTORY_MESSAGES = 200
+MAX_HISTORY_MESSAGES = 20  # AI API手順書の目安「直近10往復まで」（human+aiであわせて概ね20件。bot発言混在のため厳密な往復数ではない）
 MAX_SUMMARY_CHANNEL_MESSAGES = 100  # F-14: チャンネル本体を要約する場合の対象件数上限（スレッド全体は上限なし）
-TEMPERATURE = 0.5
 MAX_OUTPUT_TOKENS = 1000
+# temperatureは意図的に指定しない（APIの既定値=1を使う）。実際にgpt-5-nanoで検証したところ
+# 「'temperature'はこのモデルでは既定値(1)以外をサポートしない」という400エラーになった
+# （openai.BadRequestError: Unsupported value）。AI_MODELは環境変数で自由に差し替える設計のため、
+# モデルごとに対応パラメータが異なる可能性のある値は指定しないのが最も頑健
 
 
 class SummaryUnavailable(Exception):
@@ -153,6 +156,13 @@ async def _build_auto_response_section(channel_id: int, settings: dict) -> str:
     return "\n".join(lines)
 
 
+def _completion_extra_kwargs(model: str) -> dict:
+    """reasoning系モデルには`reasoning_effort='minimal'`を指定する（ai_client.is_reasoning_model・
+    REASONING_MODELSを参照）。Kogackはリアルタイムチャットの応答生成であり複雑な多段階推論は
+    不要なため、レイテンシ・コストを抑える最小値を使う（_generate_and_post・要約生成で共有）"""
+    return {"reasoning_effort": "minimal"} if ai_client.is_reasoning_model(model) else {}
+
+
 def detect_mention(body: str, persona_name: str) -> bool:
     """AIメンションの検知は本文中の「@ペルソナ名」の文字列一致のみ（ID参照化しない。
     基本設計書5.22節「設計判断」）。F-41のメンションピッカーの候補にはチャンネルAIを含めていない
@@ -250,7 +260,8 @@ async def _generate_and_post(channel_id: int, settings: dict, requested_by: int)
         model = ai_client.get_model()
         res = await client.chat.completions.create(
             model=model, messages=messages,
-            temperature=TEMPERATURE, max_completion_tokens=MAX_OUTPUT_TOKENS,
+            max_completion_tokens=MAX_OUTPUT_TOKENS,
+            **_completion_extra_kwargs(model),
         )
         reply = (res.choices[0].message.content or "").strip() or "（回答を生成できませんでした）"
 
@@ -369,7 +380,8 @@ async def _generate_summary_and_post(
         model = ai_client.get_model()
         res = await client.chat.completions.create(
             model=model, messages=messages,
-            temperature=TEMPERATURE, max_completion_tokens=MAX_OUTPUT_TOKENS,
+            max_completion_tokens=MAX_OUTPUT_TOKENS,
+            **_completion_extra_kwargs(model),
         )
         reply = (res.choices[0].message.content or "").strip() or "（要約を生成できませんでした）"
 

@@ -34,6 +34,9 @@ export interface ChannelDetail extends Channel {
   /** 呼び出し元が実際の参加者かどうか。システム管理者は非参加の非公開チャンネルでもA-06自体は
    * 取得できる（S-06用）ため、S-03（会話画面）側でこれを見て参加者以外を締め出す必要がある */
   is_member: boolean
+  /** F-41相当の見た目でAIメンション（本文中の「@ペルソナ名」）をハイライトするための表示名。
+   * A-23と異なり参加者全員が取得できる（未設定でも既定値"AI"が入る） */
+  ai_persona_name: string
 }
 
 export interface ChannelsResponse {
