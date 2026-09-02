@@ -37,16 +37,15 @@ function defaultScheduleDateTime(): { date: string; time: string } {
 }
 
 // 「@」（全角「＠」も同様に扱う。IME入力時に全角になりやすいため）の直後、空白を挟まずカーソルまで
-// 続く文字列をメンション候補の絞り込みクエリとして検出する（F-41）。「@」の直前が空白または本文の
-// 先頭でない場合はメンションの開始とみなさない。
+// 続く文字列をメンション候補の絞り込みクエリとして検出する（F-41）。入力欄の冒頭や直前の文字に
+// 関わらず、「@」を入力した瞬間に候補を表示する（ユーザーからの要望。以前は直前が空白または
+// 本文の先頭のときのみ検出していたが、文中の任意の位置でもメンションできるよう緩和した）。
 function detectMentionQuery(text: string, cursor: number): { atIndex: number; query: string } | null {
   const uptoCursor = text.slice(0, cursor)
   const atIndex = Math.max(uptoCursor.lastIndexOf('@'), uptoCursor.lastIndexOf('＠'))
   if (atIndex === -1) return null
   const query = uptoCursor.slice(atIndex + 1)
   if (/[\s\n]/.test(query)) return null
-  const before = uptoCursor[atIndex - 1]
-  if (before !== undefined && !/\s/.test(before)) return null
   return { atIndex, query }
 }
 
