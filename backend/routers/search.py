@@ -158,6 +158,7 @@ async def search(
     if type in ("all", "message"):
         rows = await pool.fetch(
             f"""SELECT m.id, m.channel_id, m.dm_id, m.body, m.created_at,
+                       m.sender_type, m.bot_display_name,
                        c.name AS channel_name, u.name AS sender_name
                 {joins}
                 LEFT JOIN channels c ON c.id = m.channel_id
@@ -177,7 +178,10 @@ async def search(
                 "channel_name": r["channel_name"],
                 "dm_id": str(r["dm_id"]) if r["dm_id"] is not None else None,
                 "dm_label": dm_labels.get(r["dm_id"]) if r["dm_id"] is not None else None,
-                "sender_display_name": r["sender_name"],
+                # BOT/AI発言（いずれもsender_user_id無し）はbot_display_nameを表示名として使う
+                # （channels.py等の_message_outと同じ分岐。従来この分岐が無く、検索結果のAI/BOT発言の
+                # 発言者名が常にnull＝「(不明)」表示になっていたバグをbackfill）
+                "sender_display_name": r["bot_display_name"] if r["sender_type"] in ("bot", "ai") else r["sender_name"],
                 "excerpt": _excerpt(r["body"]),
                 "posted_at": r["created_at"].isoformat(),
             }
@@ -197,7 +201,8 @@ async def search(
     if type in ("all", "file"):
         rows = await pool.fetch(
             f"""SELECT ma.id AS attachment_id, ma.file_name, ma.byte_size,
-                       m.channel_id, m.dm_id, m.created_at, c.name AS channel_name, u.name AS sender_name
+                       m.channel_id, m.dm_id, m.created_at, m.sender_type, m.bot_display_name,
+                       c.name AS channel_name, u.name AS sender_name
                 {file_joins}
                 LEFT JOIN channels c ON c.id = m.channel_id
                 LEFT JOIN users u ON u.id = m.sender_user_id
@@ -218,7 +223,9 @@ async def search(
                 "channel_name": r["channel_name"],
                 "dm_id": str(r["dm_id"]) if r["dm_id"] is not None else None,
                 "dm_label": dm_labels.get(r["dm_id"]) if r["dm_id"] is not None else None,
-                "sender_display_name": r["sender_name"],
+                # メッセージ検索と同じ理由（BOT/AI発言のsender_display_nameがnullになるバグのbackfill）。
+                # 実際には現状BOT/AI発言に添付ファイルが付くことは無いが、他の検索結果と分岐を揃える
+                "sender_display_name": r["bot_display_name"] if r["sender_type"] in ("bot", "ai") else r["sender_name"],
                 "posted_at": r["created_at"].isoformat(),
             }
             for r in rows
