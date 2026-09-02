@@ -148,10 +148,13 @@ export interface DmMember {
   picture_url: string | null
 }
 
-/** members には自分自身は含まれない（サイドバー・ヘッダー表示用に相手のみ解決済み） */
+/** members には自分自身は含まれない（サイドバー・ヘッダー表示用に相手のみ解決済み）。
+ * ただしis_self=true（F-05自分専用DM、メモ・下書き・To-do用途）の場合だけは例外で、
+ * 除外すると空になってしまうためmembersに自分自身（1件）が入る */
 export interface Dm {
   id: string
   members: DmMember[]
+  is_self: boolean
   created_at: string
   unread_count: number
 }

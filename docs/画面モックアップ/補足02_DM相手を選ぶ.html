@@ -169,6 +169,7 @@
     <nav class="sidebar">
       <div class="sidebar-section-head"><span class="label">ダイレクトメッセージ</span><button class="add-btn" type="button">＋</button></div>
       <ul class="nav-list">
+        <li class="nav-item">📝<span class="dm-avatar" style="background:#cbd5f5;color:#1e3a8a;">山</span>自分（メモ）</li>
         <li class="nav-item"><span class="dm-avatar" style="background:#64748b;">3</span>佐藤花子・鈴木一郎・高橋美咲</li>
         <li class="nav-item"><span class="dm-avatar" style="background:#f97316;">佐</span>佐藤 花子</li>
         <li class="nav-item"><span class="dm-avatar" style="background:#0ea5e9;">鈴</span>鈴木 一郎</li>
@@ -184,12 +185,17 @@
         <h2>DMの相手を選ぶ</h2>
         <button class="modal-close" type="button">✕</button>
       </div>
-      <p class="modal-sub">氏名またはメールアドレスで検索してください。1人選べば一対一のDM、2人以上選べばグループDMになります。</p>
+      <p class="modal-sub">氏名またはメールアドレスで検索してください。1人選べば一対一のDM、2人以上選べばグループDMになります。「自分」を選ぶと、メモや下書きの保管に使える自分専用のDMになります。</p>
       <div class="search-mini">
         <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="#1e40af" stroke-width="1.6"/><path d="M17 17l-3.6-3.6" stroke="#1e40af" stroke-width="1.6" stroke-linecap="round"/></svg>
         田中
       </div>
       <div class="user-list">
+        <div class="u-row">
+          <div class="check"></div>
+          <div class="av" style="background:#cbd5f5;color:#1e3a8a;">山</div>
+          <div class="info"><div class="uname2">自分（山田 太郎）</div><div class="uemail">メモ・下書き・To-doなどを保管する自分専用のスペース</div></div>
+        </div>
         <div class="u-row selected">
           <div class="check">✓</div>
           <div class="av" style="background:#f97316;">佐</div>
@@ -236,7 +242,8 @@
     <button class="mock-note-close" type="button" onclick="document.getElementById('mockNote').classList.remove('open')">✕ 閉じる</button>
 
     <strong>補足モックアップ</strong>（要件定義書4.1節の画面一覧S-01〜S-08には含まれない）<br>
-    サイドバー「ダイレクトメッセージ」見出し横の「＋」から開く想定。<code>F-05</code>（DM。<span style="color:#fbbf24;">1.7版でグループDMに対応</span>）の相手選択UI。行はチェックボックスで複数選択可能とし、1人選べば一対一のDM、2人以上選べばグループDMとして「DMを開始」で作成する。選んだ参加者の集合と完全に一致する既存DMがある場合はタグで区別表示し、新規作成せず既存のDMを開く（一対一の例のみ図示。グループDMでも同じ扱い）。一覧は同一許可ドメイン内の利用者（アカウント自動登録済み）。無効化されたアカウント（5.2節・退職者等）は選択不可とし、新規DM開始の対象外とした。参加者は開始時点で固定し、開始後の追加・削除はできない。<a href="../02_要件定義書.html#sec3">要件定義書F-05</a>参照。
+    サイドバー「ダイレクトメッセージ」見出し横の「＋」から開く想定。<code>F-05</code>（DM。<span style="color:#fbbf24;">1.7版でグループDMに対応</span>）の相手選択UI。行はチェックボックスで複数選択可能とし、1人選べば一対一のDM、2人以上選べばグループDMとして「DMを開始」で作成する。選んだ参加者の集合と完全に一致する既存DMがある場合はタグで区別表示し、新規作成せず既存のDMを開く（一対一の例のみ図示。グループDMでも同じ扱い）。一覧は同一許可ドメイン内の利用者（アカウント自動登録済み）。無効化されたアカウント（5.2節・退職者等）は選択不可とし、新規DM開始の対象外とした。参加者は開始時点で固定し、開始後の追加・削除はできない。<a href="../02_要件定義書.html#sec3">要件定義書F-05</a>参照。<br>
+    <span style="color:#fbbf24;">1.25版で追加:</span> 検索結果とは別に「自分」の固定枠を一覧の先頭に常時表示するようにした（<code>F-05</code>の自分専用DM）。選ぶとメモ・下書き・To-do・リンクやファイルの保管に使える自分専用のDMを開始・再利用する。他の相手との組み合わせ選択はできない（「自分」を選ぶと他の選択が外れ、他の相手を選ぶと「自分」の選択が外れる）。新規テーブル・新規APIは追加せず、既存のDM開始（A-17）へ自分自身のidのみを渡す形で実現している。<a href="../02_要件定義書.html#sec3">要件定義書F-05</a>参照。
   </div>
 
 </body>

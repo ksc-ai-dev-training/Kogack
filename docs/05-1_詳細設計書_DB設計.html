@@ -38,6 +38,7 @@
       <tr class="diff-new"><td>1.7</td><td>2026-09-01</td><td>T-16 audit_logs（監査ログ、A-44）を実装した。定義済みのカラム構成はそのままに、target_channel_idをON DELETE SET NULLとする設計判断を追記した（他の多くのFKはCASCADEだが、監査ログはチャンネル削除後も記録自体を残す目的のため）。</td></tr>
       <tr class="diff-new"><td>1.8</td><td>2026-09-01</td><td>T-11 channel_skills（F-12スキル登録・F-17引き継ぎ先、A-28〜A-30・A-45）を実装した。定義済みのカラム構成はそのままに、channel_idをON DELETE CASCADEとする実装詳細を追記した（大半のFKと同じ「チャンネル削除で連動削除」の考え方。監査ログ・送信済みBOT発言のようにチャンネル削除後も記録を残す性質のテーブルではないため、T-16やmessages.recurring_post_idのSET NULL方針とは異なる）。</td></tr>
       <tr class="diff-new"><td>1.9</td><td>2026-09-02</td><td>T-12 channel_auto_response_rules（F-16自動対応範囲、A-31）を実装した。定義済みのカラム構成・UNIQUE(channel_id, request_category)制約はそのままに、channel_idをT-11と同じくON DELETE CASCADEとする実装詳細を追記した。request_categoryは列挙型やCHECK制約を持たない自由なTEXTのままとし、チャンネル管理者が任意の名称を追加・削除できることを明記した（基本設計書8.1節の設計判断コラム、REQ-F-15「担当部署が自ら決められる」を優先）。</td></tr>
+      <tr class="diff-new"><td>1.10</td><td>2026-09-02</td><td>T-17 direct_message_membersに自分専用DM（F-05、A-16/A-17のis_self）の例外を追記した。DM相手として自分自身のみを指定した場合はT-17の行が1件（自分のみ）となり、「1件のDMにつき2行以上」という既存の記述の例外にあたる。新規カラム・制約変更は無い。</td></tr>
     </tbody>
   </table>
 
@@ -115,7 +116,7 @@
       <tr><td>T-17</td><td>joined_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
   </table>
-  <p class="muted">1件のDMにつきT-17は2行以上（一対一なら2行、グループDMなら3行以上）。既存DM再利用（A-17）は「参加者の集合が完全一致するT-04を検索する」処理としてAPI側（<code>dms.py</code>）で実装し、DB制約では表現しない（基本設計書6.2節「設計判断」）。</p>
+  <p class="muted">1件のDMにつきT-17は2行以上（一対一なら2行、グループDMなら3行以上）<span class="diff-new">。ただし自分専用DM（F-05、DM相手として自分自身のみを指定した場合。メモ・下書き・To-do等の保管用途）は例外で1行のみとなる（基本設計書5.3節「設計判断」）</span>。既存DM再利用（A-17）は「参加者の集合が完全一致するT-04を検索する」処理としてAPI側（<code>dms.py</code>）で実装し、DB制約では表現しない（基本設計書6.2節「設計判断」）。</p>
 
   <h3>3.5 T-05 messages（発言）</h3>
   <table>

@@ -264,11 +264,14 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </div>
             <ul>
               {dms.map((d) => {
-                const label = d.members.map((m) => m.name).join('、')
+                // 自分専用DM（F-05、is_self）はmembersに自分自身が入るため、そのまま氏名を出すと
+                // 紛らわしい（DmView.tsxのタイトル表記と揃える）
+                const label = d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、')
                 const firstMember = d.members[0]
                 return (
                   <li key={d.id} className="my-px">
                     <NavLink to={`/dms/${d.id}`} className={({ isActive }) => navItemClass(isActive)}>
+                      {d.is_self && <span className="flex-none text-[13px]">📝</span>}
                       {firstMember?.picture_url ? (
                         <img
                           src={firstMember.picture_url}

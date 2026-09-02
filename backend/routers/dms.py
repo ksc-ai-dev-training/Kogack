@@ -1,5 +1,6 @@
 # A-16〜A-19（詳細設計書 API設計4.4節、総論5.1節）
-# グループDM対応。参加者は開始時に固定（開始後の追加・削除は対象外、05-1_詳細設計書_DB設計.html 3.17節）
+# グループDM対応。参加者は開始時に固定（開始後の追加・削除は対象外、05-1_詳細設計書_DB設計.html 3.17節）。
+# 自分専用DM（F-05、direct_message_membersが自分1行のみ）にも対応する
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,17 +14,24 @@ router = APIRouter(prefix="/api/dms", tags=["dms"])
 
 
 async def _dm_out(pool, dm_id: int, created_at, self_user_id: int, unread_count: int = 0) -> dict:
+    all_member_ids = {
+        r["user_id"]
+        for r in await pool.fetch("SELECT user_id FROM direct_message_members WHERE dm_id = $1", dm_id)
+    }
+    is_self = all_member_ids == {self_user_id}
+    # 通常は表示用に「自分以外の相手」を返すが、自分専用DM（F-05、参加者が自分1人だけ）は
+    # 除外すると空になってしまうため、その場合のみ自分自身をmembersに含める
+    target_ids = all_member_ids - {self_user_id} if not is_self else all_member_ids
     members = await pool.fetch(
-        """SELECT u.id, u.name, u.picture_url FROM direct_message_members m
-           JOIN users u ON u.id = m.user_id
-           WHERE m.dm_id = $1 AND u.id <> $2 ORDER BY u.name""",
-        dm_id, self_user_id,
+        "SELECT id, name, picture_url FROM users WHERE id = ANY($1::bigint[]) ORDER BY name",
+        list(target_ids),
     )
     return {
         "id": str(dm_id),
         "members": [
             {"id": str(r["id"]), "name": r["name"], "picture_url": r["picture_url"]} for r in members
         ],
+        "is_self": is_self,
         "created_at": created_at.isoformat(),
         "unread_count": unread_count,
     }
@@ -60,15 +68,16 @@ class CreateDmRequest(BaseModel):
 
 @router.post("", status_code=201)
 async def create_dm(body: CreateDmRequest, user: CurrentUser = Depends(require_auth)):
-    """A-17: DM開始。呼び出し元を加えた参加者集合が既存DMと完全一致すればそれを返す（200相当だがcreatedで判別）"""
+    """A-17: DM開始。呼び出し元を加えた参加者集合が既存DMと完全一致すればそれを返す（200相当だがcreatedで判別）。
+    member_user_idsが自分のidのみ（＝自分を除いた集合が空）の場合は自分専用DM（F-05、メモ・下書き・
+    To-do用途）として扱う。member_user_ids自体はField(min_length=1)で必ず1件以上のため、
+    「自分以外を1件も指定しなかった」＝「明示的に自分だけを指定した」と解釈できる"""
     pool = get_pool()
     try:
         other_ids = {int(v) for v in body.member_user_ids}
     except ValueError:
         raise HTTPException(422, detail="不正なuser_idです")
     other_ids.discard(user.id)
-    if not other_ids:
-        raise HTTPException(422, detail="相手を1名以上指定してください")
 
     valid_count = await pool.fetchval(
         "SELECT count(*) FROM users WHERE id = ANY($1::bigint[]) AND is_active", list(other_ids)
