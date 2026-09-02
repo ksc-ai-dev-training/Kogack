@@ -39,6 +39,7 @@
       <tr class="diff-new"><td>1.8</td><td>2026-09-01</td><td>T-11 channel_skills（F-12スキル登録・F-17引き継ぎ先、A-28〜A-30・A-45）を実装した。定義済みのカラム構成はそのままに、channel_idをON DELETE CASCADEとする実装詳細を追記した（大半のFKと同じ「チャンネル削除で連動削除」の考え方。監査ログ・送信済みBOT発言のようにチャンネル削除後も記録を残す性質のテーブルではないため、T-16やmessages.recurring_post_idのSET NULL方針とは異なる）。</td></tr>
       <tr class="diff-new"><td>1.9</td><td>2026-09-02</td><td>T-12 channel_auto_response_rules（F-16自動対応範囲、A-31）を実装した。定義済みのカラム構成・UNIQUE(channel_id, request_category)制約はそのままに、channel_idをT-11と同じくON DELETE CASCADEとする実装詳細を追記した。request_categoryは列挙型やCHECK制約を持たない自由なTEXTのままとし、チャンネル管理者が任意の名称を追加・削除できることを明記した（基本設計書8.1節の設計判断コラム、REQ-F-15「担当部署が自ら決められる」を優先）。</td></tr>
       <tr class="diff-new"><td>1.10</td><td>2026-09-02</td><td>T-17 direct_message_membersに自分専用DM（F-05、A-16/A-17のis_self）の例外を追記した。DM相手として自分自身のみを指定した場合はT-17の行が1件（自分のみ）となり、「1件のDMにつき2行以上」という既存の記述の例外にあたる。新規カラム・制約変更は無い。</td></tr>
+      <tr class="diff-new"><td>1.11</td><td>2026-09-02</td><td>T-08 channel_ai_settings.persona_nameの既定値を'AI'から'Kogack AI'へ変更した（ユーザーからの明示的な要望。実機検証で実際にAIと会話した際、発言者名が「AI」だけでは製品名との結びつきが弱いと判断）。カラム定義・制約自体の変更は無い。</td></tr>
     </tbody>
   </table>
 
@@ -194,7 +195,7 @@
       <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
       <tr><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id、UNIQUE</td></tr>
       <tr><td>is_ai_enabled</td><td>BOOLEAN</td><td>NOT NULL</td><td>true</td><td>F-08</td></tr>
-      <tr><td>persona_name</td><td>TEXT</td><td>NULL可</td><td>'AI'</td><td>F-10</td></tr>
+      <tr><td>persona_name</td><td>TEXT</td><td>NULL可</td><td>'Kogack AI'</td><td>F-10</td></tr>
       <tr><td>persona_icon_url</td><td>TEXT</td><td>NULL可</td><td>-</td><td>未設定時は「AI」の2文字アバターで代替</td></tr>
       <tr><td>persona_tone</td><td>TEXT</td><td>NULL可</td><td>-</td><td>F-10</td></tr>
       <tr><td>behavior_prompt</td><td>TEXT</td><td>NULL可</td><td>''</td><td>F-09。上書き保存、過去バージョンは持たない</td></tr>

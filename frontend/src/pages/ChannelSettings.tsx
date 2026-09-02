@@ -442,7 +442,7 @@ function CharacterTab({
   mutate: () => Promise<AiSettings | undefined>
 }) {
   const toast = useToast()
-  const [name, setName] = useState(settings.persona_name ?? 'AI')
+  const [name, setName] = useState(settings.persona_name ?? 'Kogack AI')
   const [tone, setTone] = useState(settings.persona_tone ?? '')
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
@@ -808,7 +808,7 @@ function ReactionTab({
     }
   }
 
-  const personaName = settings.persona_name || 'AI'
+  const personaName = settings.persona_name || 'Kogack AI'
   const reactionOptions: { value: 'mention_only' | 'proactive'; title: string; sub: string }[] = [
     {
       value: 'mention_only',

@@ -65,7 +65,7 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 
 
 def _build_system_prompt(settings: dict, auto_response_section: str = "", skills_section: str = "") -> str:
-    persona_name = settings["persona_name"] or "AI"
+    persona_name = settings["persona_name"] or "Kogack AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
     behavior = (settings["behavior_prompt"] or "").strip()
     lines = [f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}']
@@ -216,7 +216,7 @@ async def maybe_trigger(channel_id: int, body: str, requested_by: int) -> None:
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         return
-    persona_name = settings["persona_name"] or "AI"
+    persona_name = settings["persona_name"] or "Kogack AI"
     if settings["reaction_mode"] != "proactive" and not detect_mention(body, persona_name):
         return
     asyncio.create_task(_generate_and_post(channel_id, settings, requested_by))
@@ -224,7 +224,7 @@ async def maybe_trigger(channel_id: int, body: str, requested_by: int) -> None:
 
 async def _generate_and_post(channel_id: int, settings: dict, requested_by: int) -> None:
     pool = get_pool()
-    persona_name = settings["persona_name"] or "AI"
+    persona_name = settings["persona_name"] or "Kogack AI"
     persona_icon_url = settings["persona_icon_url"]
 
     # 生成中プレースホルダ（詳細設計書10.3節で確定した方式）。bot_display_name/bot_icon_urlを
@@ -295,7 +295,7 @@ SUMMARY_INSTRUCTION = "ここまでのやりとりを要約してください。
 
 
 def _build_summary_prompt(settings: dict) -> str:
-    persona_name = settings["persona_name"] or "AI"
+    persona_name = settings["persona_name"] or "Kogack AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
     return (
         f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}\n'
@@ -345,7 +345,7 @@ async def start_summary(channel_id: int, thread_id: int | None, requested_by: in
         raise SummaryUnavailable("このチャンネルのAIは無効になっています")
 
     pool = get_pool()
-    persona_name = settings["persona_name"] or "AI"
+    persona_name = settings["persona_name"] or "Kogack AI"
     persona_icon_url = settings["persona_icon_url"]
     placeholder = await pool.fetchrow(
         """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body, generation_status,

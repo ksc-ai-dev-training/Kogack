@@ -125,7 +125,7 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
     return {
         **_channel_out(row), "member_count": member_count,
         "is_channel_admin": bool(is_admin), "is_member": bool(is_member),
-        "ai_persona_name": ai_persona_name or "AI",
+        "ai_persona_name": ai_persona_name or "Kogack AI",
     }
 
 

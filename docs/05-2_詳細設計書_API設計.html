@@ -57,6 +57,7 @@
       <tr class="diff-new"><td>1.26</td><td>2026-09-02</td><td>F-05に自分専用DM（メモ・下書き・To-do等の保管用途）を追加した。A-16・A-17のレスポンスに<code>is_self</code>を追加し、自分専用DMのときだけmembersに自分自身を含めることを明記した。A-17は<code>member_user_ids</code>に呼び出し元自身のidのみを指定した場合を自分専用DMの開始として扱う（新規パラメータ・新規エンドポイントは追加していない）。あわせてA-16/A-17のリクエスト/レスポンス例が実装（<code>member_user_ids</code>）と食い違っていた抜け（従来の例は<code>user_ids</code>という旧い名称のままだった）をbackfillした。基本設計書（5.3節、v1.35）・詳細設計書DB設計（T-17、v1.10）を一貫して更新した。要件定義書（v1.25）・画面モックアップ（補足02）も同じコミットで更新した。</td></tr>
       <tr class="diff-new"><td>1.27</td><td>2026-09-02</td><td>A-46のガード関数をrequire_channel_memberから新規require_channel_member_or_admin（総論5.1節）へ切り替え、システムadminは非参加の非公開チャンネルでも参加者一覧を取得できることを明記した（2026-08-26付のCLAUDE.md既知の制約の解消。総論5.9節「設計判断」参照）。あわせてA-06のレスポンスに新規is_memberを追加した（呼び出し元が実際の参加者かどうか。A-06自体も同じくrequire_channel_member_or_adminへ切り替えたため、フロントエンドがS-03会話画面で参加者以外を締め出す判定に使う）。発言本文を扱うA-10〜A-15等は変更なし（adminバイパス無しのまま）。総論（5.1・5.2・5.9節、v1.5）を一貫して更新した。要件定義書・基本設計書は元々「チャンネル管理系操作はadmin全チャンネル可」としていた記載どおりで変更なし。</td></tr>
       <tr class="diff-new"><td>1.28</td><td>2026-09-02</td><td>A-36のレスポンスのchadmin_channelsを、チャンネル名の文字列配列からid・nameのオブジェクト配列に変更した。S-08「利用者管理」タブがフロントエンドで各チャンネル名をS-06（チャンネル設定）へのリンクにするため（非参加の非公開チャンネルへシステムadminがたどり着く導線の追加。1.27版の続き）。A-42（AI利用状況の月次集計）のlimits.channelsは元々channel_id・channel_nameの両方を返していたため変更なし（S-08「AI利用状況・コスト」タブのチャンネル別上限にも同じ考え方でリンクを追加した）。</td></tr>
+      <tr class="diff-new"><td>1.29</td><td>2026-09-02</td><td>A-23のレスポンス例のpersona_nameを"AI"から"Kogack AI"に修正した（T-08.persona_nameの既定値変更、詳細設計書DB設計v1.11と一貫）。API仕様・エンドポイント自体の変更は無い。</td></tr>
     </tbody>
   </table>
 
@@ -293,7 +294,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <h3>4.6 チャンネルAI設定（A-23〜A-31, A-45〜A-48）</h3>
   <p><strong>A-23 <span class="badge badge-get">GET</span> /api/channels/{id}/ai-settings</strong></p>
   <pre><code>// response 200
-{ "channel_id": "42", "is_ai_enabled": true, "persona_name": "AI", "persona_icon_url": null,
+{ "channel_id": "42", "is_ai_enabled": true, "persona_name": "Kogack AI", "persona_icon_url": null,
   "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only",
   "out_of_scope_policy": "strict", "folder_ids": ["3", "5"],
   "skills": [ { "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し..." } ],

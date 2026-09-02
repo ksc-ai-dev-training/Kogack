@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS channel_ai_settings (
     id                        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     channel_id                BIGINT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
     is_ai_enabled             BOOLEAN NOT NULL DEFAULT true,
-    persona_name              TEXT DEFAULT 'AI',
+    persona_name              TEXT DEFAULT 'Kogack AI',
     persona_icon_url          TEXT,
     persona_tone              TEXT,
     behavior_prompt           TEXT DEFAULT '',
@@ -231,6 +231,10 @@ CREATE TABLE IF NOT EXISTS channel_ai_settings (
     updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE channel_ai_settings ENABLE ROW LEVEL SECURITY;
+-- persona_nameの既定値を「AI」から「Kogack AI」へ変更した際のbackfill（CREATE TABLE IF NOT EXISTSは
+-- 既存DBのテーブルには効かないため、既存DBの以後のINSERT分にも新しい既定値を反映させる。
+-- 既にAI発言済みの行のpersona_name自体の書き換えは対象外＝一度きりの手動UPDATEで対応する）
+ALTER TABLE channel_ai_settings ALTER COLUMN persona_name SET DEFAULT 'Kogack AI';
 
 -- T-13 ai_usage_logs（05-1_詳細設計書_DB設計.html 3.11節）。質問文・回答文そのものは記録しない
 -- （発言本文はT-05に既に保存されているため。基本設計書8.6節）。dm_idはDMでのAI応答が未実装のため
