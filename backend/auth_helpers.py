@@ -98,6 +98,38 @@ async def require_channel_member(channel_id: int, user: CurrentUser = Depends(re
     raise HTTPException(404, detail="見つかりません")
 
 
+async def require_channel_member_or_admin(channel_id: int, user: CurrentUser = Depends(require_auth)) -> CurrentUser:
+    """A-06（チャンネル詳細）・A-46（参加者一覧）専用。require_channel_memberと同じ判定に、
+    require_channel_adminと同じシステムadminバイパスを加えたもの（既知の制約の解消。
+    CLAUDE.md実装状況節を参照）。
+
+    要件定義書の権限マトリクスは「非公開チャンネルの一覧表示・検索・閲覧」（＝会話内容の閲覧）を
+    admin含め参加者限定のまま維持する一方、「担当外チャンネルのAI設定編集」はadminに無条件で
+    許可しており、この2つは別の行として区別されている。S-06チャンネル設定（A-09・A-23〜A-31・
+    A-45・A-47〜A-49・A-71・A-73）は既にrequire_channel_adminでadminバイパス済みだが、画面自体が
+    ヘッダー表示・チャンネル管理者タブのためにA-06・A-46を呼んでおり、そちらは非参加adminを404で
+    弾いていたためS-06自体を開けなかった。A-06・A-46はいずれも会話内容（発言本文）を一切含まない
+    メタデータ専用エンドポイントのため、この2つに限ってバイパスを与えても上記の区別は崩れない。
+    A-10/A-11/A-14/A-15/A-18/A-19等、発言本文を返す・書き込むエンドポイントは引き続き
+    require_channel_member（バイパス無し）のままとし、非参加者（admin含む）には404/403を返す。
+    """
+    pool = get_pool()
+    channel = await pool.fetchrow("SELECT is_public FROM channels WHERE id = $1", channel_id)
+    if channel is None:
+        raise HTTPException(404, detail="見つかりません")
+    if user.role == "admin":
+        return user
+    is_member = await pool.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+        channel_id, user.id,
+    )
+    if is_member:
+        return user
+    if channel["is_public"]:
+        raise HTTPException(403, detail="権限がありません")
+    raise HTTPException(404, detail="見つかりません")
+
+
 async def require_channel_admin(channel_id: int, user: CurrentUser = Depends(require_auth)) -> CurrentUser:
     """S-06チャンネル設定用（基本設計書4.2節「設計判断」）。当該chadminまたはシステムadminのみ許可。
 

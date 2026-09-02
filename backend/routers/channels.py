@@ -12,7 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
-from auth_helpers import CurrentUser, require_auth, require_channel_admin, require_channel_member
+from auth_helpers import (
+    CurrentUser, require_auth, require_channel_admin, require_channel_member, require_channel_member_or_admin,
+)
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from services import ai_agent, trigger_matcher
@@ -94,8 +96,13 @@ async def create_channel(body: CreateChannelRequest, user: CurrentUser = Depends
 
 
 @router.get("/{channel_id}")
-async def get_channel(channel_id: int, user: CurrentUser = Depends(require_channel_member)):
-    """A-06: チャンネル詳細"""
+async def get_channel(channel_id: int, user: CurrentUser = Depends(require_channel_member_or_admin)):
+    """A-06: チャンネル詳細。システムadminは非参加の非公開チャンネルでもメタデータのみ取得できる
+    （S-06チャンネル設定を開くために必要。auth_helpers.require_channel_member_or_adminを参照）。
+    非参加adminにも200が返るようになったため、レスポンスに`is_member`（呼び出し元が実際の参加者か）
+    を追加した。フロント（ChannelView.tsx）はこれを見て、非参加adminがS-03（会話画面。発言本文は
+    A-10が引き続き参加者限定でブロックする）を誤って開いたままにならないよう、S-06以外では
+    従来どおりワークスペースへリダイレクトする"""
     pool = get_pool()
     row = await pool.fetchrow("SELECT * FROM channels WHERE id = $1", channel_id)
     member_count = await pool.fetchval(
@@ -105,7 +112,14 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
         "SELECT is_channel_admin FROM channel_members WHERE channel_id = $1 AND user_id = $2",
         channel_id, user.id,
     )
-    return {**_channel_out(row), "member_count": member_count, "is_channel_admin": bool(is_admin)}
+    is_member = await pool.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+        channel_id, user.id,
+    )
+    return {
+        **_channel_out(row), "member_count": member_count,
+        "is_channel_admin": bool(is_admin), "is_member": bool(is_member),
+    }
 
 
 class UpdateChannelRequest(BaseModel):
@@ -320,9 +334,9 @@ async def remove_channel_member(
 
 
 @router.get("/{channel_id}/members")
-async def list_channel_members(channel_id: int, user: CurrentUser = Depends(require_channel_member)):
+async def list_channel_members(channel_id: int, user: CurrentUser = Depends(require_channel_member_or_admin)):
     """A-46: 参加者一覧（chadmin/adminバッジ表示・補足03メンバー一覧、S-06チャンネル管理者タブでの
-    追加候補選定に使用）"""
+    追加候補選定に使用）。システムadminは非参加の非公開チャンネルでも取得できる（A-06と同じ理由）"""
     pool = get_pool()
     rows = await pool.fetch(
         """SELECT u.id, u.name, u.email, u.picture_url, u.role, u.is_active,

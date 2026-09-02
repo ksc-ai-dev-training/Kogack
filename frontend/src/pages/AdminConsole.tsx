@@ -195,7 +195,18 @@ function UsersTab({ me }: { me: Me | null }) {
                   </select>
                 </td>
                 <td className="px-3 py-2.5 text-ink-subtle">
-                  {u.chadmin_channels.length > 0 ? u.chadmin_channels.map((c) => `# ${c}`).join('、') : '—'}
+                  {u.chadmin_channels.length > 0 ? (
+                    u.chadmin_channels.map((c, i) => (
+                      <span key={c.id}>
+                        {i > 0 && '、'}
+                        <Link to={`/channels/${c.id}/settings`} className="text-accent-700 hover:underline">
+                          # {c.name}
+                        </Link>
+                      </span>
+                    ))
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   <span
@@ -655,7 +666,14 @@ function ChannelLimitsSection({ usage, mutate }: { usage: UsageStats; mutate: ()
               className="flex items-center gap-2.5 rounded-[8px] border border-line px-3 py-2 text-[12px]"
             >
               <span className="flex-1 text-ink-muted">
-                # {l.channel_name ?? '(削除済み)'}: {formatYen(l.monthly_limit_yen)} 中 {l.used_pct}% 使用（通知先: {l.notify_email}）
+                {l.channel_name ? (
+                  <Link to={`/channels/${l.channel_id}/settings`} className="font-semibold text-accent-700 hover:underline">
+                    # {l.channel_name}
+                  </Link>
+                ) : (
+                  '(削除済み)'
+                )}
+                : {formatYen(l.monthly_limit_yen)} 中 {l.used_pct}% 使用（通知先: {l.notify_email}）
               </span>
               <button
                 type="button"
@@ -989,7 +1007,20 @@ function AuditLogTab() {
                     {EVENT_TYPE_LABEL[l.event_type] ?? l.event_type}
                   </span>
                 </td>
-                <td className="px-2.5 py-2 text-ink-muted">{l.target_channel_name ? `# ${l.target_channel_name}` : '—'}</td>
+                <td className="px-2.5 py-2 text-ink-muted">
+                  {l.target_channel_name && l.target_channel_id ? (
+                    <Link
+                      to={`/channels/${l.target_channel_id}/settings`}
+                      className="text-accent-700 hover:underline"
+                    >
+                      # {l.target_channel_name}
+                    </Link>
+                  ) : l.target_channel_name ? (
+                    `# ${l.target_channel_name}`
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td className="px-2.5 py-2 font-semibold text-ink">{l.actor_name}</td>
                 <td className="px-2.5 py-2 text-ink-muted">{l.summary}</td>
               </tr>

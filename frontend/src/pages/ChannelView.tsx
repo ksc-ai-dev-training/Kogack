@@ -53,6 +53,32 @@ export default function ChannelView() {
     // 総論5.9節: 参加していないチャンネルへの直接アクセスはワークスペースへ無言で戻す
     return null
   }
+  if (channel && !channel.is_member) {
+    // A-06はシステム管理者に限り非参加の非公開チャンネルでもメタデータを返す（S-06用の
+    // 特例、auth_helpers.require_channel_member_or_adminを参照）が、発言本文を返すA-10は
+    // 引き続き参加者限定のまま。この画面（S-03）自体は開けても会話内容だけが見えない
+    // 中途半端な状態になる。上のchannelError（404/403、F-34「存在を伏せる」対象）とは異なり、
+    // ここに来る時点でA-06自体は成功しておりチャンネルの存在・名前は既にadminへ開示済み
+    // （S-08管理コンソールのリンク経由等）なので、伏せる理由が無い。単に空白のメイン画面に
+    // なるだけでは「何が起きたか分かりづらい」というユーザー指摘を受け、参加していない旨を
+    // 明示するメッセージに差し替えた（無言リダイレクトにはしない）
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2.5 px-6 text-center">
+        <div className="text-[15px] font-bold text-ink">
+          {channel.is_public ? '#' : '🔒'} {channel.name} には参加していません
+        </div>
+        <p className="max-w-[420px] text-[12.5px] leading-relaxed text-ink-subtle">
+          このチャンネルの参加者ではないため、会話内容は表示できません。閲覧するには、このチャンネルの参加者に追加してもらう必要があります。
+        </p>
+        <Link
+          to={`/channels/${channelId}/settings`}
+          className="mt-1.5 rounded-lg border border-line-strong px-3.5 py-1.5 text-[12.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+        >
+          ⚙ チャンネル設定を開く
+        </Link>
+      </div>
+    )
+  }
 
   const openThread = (messageId: string) => {
     setSearchParams((prev) => {

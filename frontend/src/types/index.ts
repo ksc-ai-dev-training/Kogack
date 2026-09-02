@@ -31,6 +31,9 @@ export interface Channel {
 export interface ChannelDetail extends Channel {
   member_count: number
   is_channel_admin: boolean
+  /** 呼び出し元が実際の参加者かどうか。システム管理者は非参加の非公開チャンネルでもA-06自体は
+   * 取得できる（S-06用）ため、S-03（会話画面）側でこれを見て参加者以外を締め出す必要がある */
+  is_member: boolean
 }
 
 export interface ChannelsResponse {
@@ -268,7 +271,8 @@ export interface UserProfile {
   role: Role
 }
 
-/** S-08利用者管理（A-36）。chadmin_channelsは参考表示のみ（変更はS-06から行う） */
+/** S-08利用者管理（A-36）。chadmin_channelsは参考表示のみ（変更はS-06から行う）だが、
+ * 各チャンネルのidはS-06へのリンクを組み立てるために使う */
 export interface AdminUser {
   id: string
   name: string
@@ -277,7 +281,7 @@ export interface AdminUser {
   role: Role
   is_active: boolean
   last_login_at: string | null
-  chadmin_channels: string[]
+  chadmin_channels: { id: string; name: string }[]
 }
 
 export interface AdminUsersResponse {

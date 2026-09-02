@@ -55,6 +55,8 @@
       <tr class="diff-new"><td>1.24</td><td>2026-09-02</td><td>F-15（反応モード設定）を実装した。A-24のリクエストにreaction_mode（'mention_only'/'proactive'、必須）を追加し、is_ai_enabledと同じAPIで扱うことを明記した（従来「UIからの編集自体が未実装」としていた記述を更新）。基本設定タブ・反応モードタブがA-24を共用し、互いに変更しない側のフィールドも現在値のまま一緒に送る運用を明記した（A-27と同じ束ね送信の考え方）。基本設計書v1.32を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.25</td><td>2026-09-02</td><td>F-16（自動対応範囲の設定）を実装し、A-31のリクエスト/レスポンス例を新規追加した（1.9版から「未実装のため対象外」のままだった抜けをbackfill）。request_categoryはチャンネル管理者が自由に決められる文字列（固定の列挙値ではない）であること、洗い替え方式（A-27と同じDELETE→INSERT）、response_level不正値は422であることを明記した。「人が対応」区分の判定は事前の分類APIコールではなく、チャンネルAIの応答生成の中でAI自身が行うことも明記した（基本設計書8.1節の設計判断）。基本設計書（8.1節、v1.33）・詳細設計書DB設計（T-12、v1.9）・AIサポート（10.2節、v1.2）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.26</td><td>2026-09-02</td><td>F-05に自分専用DM（メモ・下書き・To-do等の保管用途）を追加した。A-16・A-17のレスポンスに<code>is_self</code>を追加し、自分専用DMのときだけmembersに自分自身を含めることを明記した。A-17は<code>member_user_ids</code>に呼び出し元自身のidのみを指定した場合を自分専用DMの開始として扱う（新規パラメータ・新規エンドポイントは追加していない）。あわせてA-16/A-17のリクエスト/レスポンス例が実装（<code>member_user_ids</code>）と食い違っていた抜け（従来の例は<code>user_ids</code>という旧い名称のままだった）をbackfillした。基本設計書（5.3節、v1.35）・詳細設計書DB設計（T-17、v1.10）を一貫して更新した。要件定義書（v1.25）・画面モックアップ（補足02）も同じコミットで更新した。</td></tr>
+      <tr class="diff-new"><td>1.27</td><td>2026-09-02</td><td>A-46のガード関数をrequire_channel_memberから新規require_channel_member_or_admin（総論5.1節）へ切り替え、システムadminは非参加の非公開チャンネルでも参加者一覧を取得できることを明記した（2026-08-26付のCLAUDE.md既知の制約の解消。総論5.9節「設計判断」参照）。あわせてA-06のレスポンスに新規is_memberを追加した（呼び出し元が実際の参加者かどうか。A-06自体も同じくrequire_channel_member_or_adminへ切り替えたため、フロントエンドがS-03会話画面で参加者以外を締め出す判定に使う）。発言本文を扱うA-10〜A-15等は変更なし（adminバイパス無しのまま）。総論（5.1・5.2・5.9節、v1.5）を一貫して更新した。要件定義書・基本設計書は元々「チャンネル管理系操作はadmin全チャンネル可」としていた記載どおりで変更なし。</td></tr>
+      <tr class="diff-new"><td>1.28</td><td>2026-09-02</td><td>A-36のレスポンスのchadmin_channelsを、チャンネル名の文字列配列からid・nameのオブジェクト配列に変更した。S-08「利用者管理」タブがフロントエンドで各チャンネル名をS-06（チャンネル設定）へのリンクにするため（非参加の非公開チャンネルへシステムadminがたどり着く導線の追加。1.27版の続き）。A-42（AI利用状況の月次集計）のlimits.channelsは元々channel_id・channel_nameの両方を返していたため変更なし（S-08「AI利用状況・コスト」タブのチャンネル別上限にも同じ考え方でリンクを追加した）。</td></tr>
     </tbody>
   </table>
 
@@ -161,7 +163,7 @@ POST /api/channels/42/members
     { "id": "15", "name": "田中 智子", "email": "tanaka@kogasoftware.com", "picture_url": null,
       "role": "member", "is_active": true, "is_channel_admin": true, "joined_at": "2026-08-19T01:00:00Z" }
   ] }</code></pre>
-  <p class="muted">対象はチャンネル参加者全員（<code>require_channel_member</code>で保護。無効化されたアカウントも一覧に残り、<code>is_active:false</code>で示す）。<code>role</code>はグローバルなロール（システムadminバッジ表示用）、<code>is_channel_admin</code>はこのチャンネルのchadminかどうか。補足03メンバー一覧のほかS-06チャンネル管理者タブの追加候補選定、F-39の同姓同名判定でも共有する。</p>
+  <p class="muted">対象はチャンネル参加者全員（<span class="diff-new"><code>require_channel_member_or_admin</code>で保護（総論5.1節）。呼び出し元がチャンネル参加者でなくても、システムadminであれば非公開チャンネルでも取得できる（S-06チャンネル管理者タブをadminが開けるようにするため。総論5.9節「設計判断」）</span>。無効化されたアカウントも一覧に残り、<code>is_active:false</code>で示す）。<code>role</code>はグローバルなロール（システムadminバッジ表示用）、<code>is_channel_admin</code>はこのチャンネルのchadminかどうか。補足03メンバー一覧のほかS-06チャンネル管理者タブの追加候補選定、F-39の同姓同名判定でも共有する。</p>
 
   <p><strong>A-11 <span class="badge badge-post">POST</span> /api/channels/{id}/messages（メッセージ投稿）</strong></p>
   <pre><code>// request（@田中 智子をF-41のオートコンプリートで選択し、A-21アップロード済みのファイルを添付した例）
@@ -362,9 +364,9 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 { "items": [
     { "id": "15", "name": "田中 智子", "email": "tanaka@kogasoftware.com", "role": "member",
       "is_active": true, "last_login_at": "2026-08-19T01:15:00Z",
-      "chadmin_channels": ["開発相談"] }
+      "chadmin_channels": [ { "id": "42", "name": "開発相談" } ] }
   ] }</code></pre>
-  <p class="muted"><code>chadmin_channels</code>はこの利用者がchadminであるチャンネル名の一覧（参考表示のみ。変更は各チャンネルのS-06「チャンネル管理者」タブから行う）。<code>last_login_at</code>はA-02（OAuthコールバック）・dev-loginのログイン成功時にT-01へ記録する（05-3画面設計「最終ログイン」列に対応。未ログインならnull）。</p>
+  <p class="muted"><code>chadmin_channels</code>はこの利用者がchadminであるチャンネルの一覧（参考表示のみ。変更は各チャンネルのS-06「チャンネル管理者」タブから行う）。<span class="diff-new">各要素は<code>id</code>・<code>name</code>のオブジェクト（従来は名称の文字列配列のみだったが、フロントエンドが各チャンネルをS-06へのリンクにするためidを追加した）。</span><code>last_login_at</code>はA-02（OAuthコールバック）・dev-loginのログイン成功時にT-01へ記録する（05-3画面設計「最終ログイン」列に対応。未ログインならnull）。</p>
 
   <p><strong>A-37 <span class="badge badge-put">PUT</span> /api/admin/users/{id}</strong></p>
   <pre><code>{ "role": "admin", "is_active": true }

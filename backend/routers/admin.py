@@ -17,11 +17,18 @@ JST = ZoneInfo("Asia/Tokyo")
 
 @router.get("/users")
 async def list_users(user: CurrentUser = Depends(require_roles("admin"))):
-    """A-36: 利用者一覧。chadmin_channelsは参考表示のみ（変更はS-06チャンネル管理者タブで行う）"""
+    """A-36: 利用者一覧。chadmin_channelsは参考表示のみ（変更はS-06チャンネル管理者タブで行う）。
+    id・nameの両方を返すのは、フロントがそれぞれのチャンネル名をS-06（チャンネル設定）への
+    リンクにするため（システムadminが未参加の非公開チャンネルへたどり着く導線の1つ、
+    require_channel_member_or_adminによりS-06自体は開ける。CLAUDE.md実装状況節を参照）"""
     rows = await get_pool().fetch(
         """SELECT u.id, u.name, u.email, u.picture_url, u.role, u.is_active, u.last_login_at,
-               COALESCE(array_agg(c.name ORDER BY c.name) FILTER (WHERE cm.is_channel_admin), '{}')
-                   AS chadmin_channels
+               COALESCE(
+                   array_agg(c.id ORDER BY c.name) FILTER (WHERE cm.is_channel_admin), '{}'
+               ) AS chadmin_channel_ids,
+               COALESCE(
+                   array_agg(c.name ORDER BY c.name) FILTER (WHERE cm.is_channel_admin), '{}'
+               ) AS chadmin_channel_names
            FROM users u
            LEFT JOIN channel_members cm ON cm.user_id = u.id AND cm.is_channel_admin
            LEFT JOIN channels c ON c.id = cm.channel_id
@@ -35,7 +42,10 @@ async def list_users(user: CurrentUser = Depends(require_roles("admin"))):
                 "picture_url": r["picture_url"], "role": r["role"],
                 "is_active": r["is_active"],
                 "last_login_at": r["last_login_at"].isoformat() if r["last_login_at"] else None,
-                "chadmin_channels": list(r["chadmin_channels"]),
+                "chadmin_channels": [
+                    {"id": str(cid), "name": cname}
+                    for cid, cname in zip(r["chadmin_channel_ids"], r["chadmin_channel_names"])
+                ],
             }
             for r in rows
         ]
