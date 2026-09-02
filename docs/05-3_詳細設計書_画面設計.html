@@ -33,6 +33,7 @@
       <tr><td>1.2</td><td>2026-08-28</td><td>補足03「メンバー一覧」を「チャンネル情報」「メンバー」の2タブ構成にした。「チャンネル情報」タブは説明・公開範囲・作成者・作成日時（A-06, A-67）と退出操作（A-72、新規）を提供する。MembersModalに<code>initialTab</code>プロパティを追加し、S-03ヘッダーのチャンネル名クリックと参加人数クリックで異なるタブを初期表示するようにした。</td></tr>
       <tr><td>1.3</td><td>2026-08-28</td><td>補足03「メンバー」タブの各行に、当該chadmin/adminのみ表示される「退出させる」ボタン（A-73、新規）を追加した。</td></tr>
       <tr class="diff-new"><td>1.4</td><td>2026-08-28</td><td>補足03「メンバー」タブの「＋メンバーを追加」を非公開チャンネル限定から全チャンネル表示に変更した（A-08拡張。公開チャンネルでも既存参加者が他の利用者を招待できるようになったため）。</td></tr>
+      <tr class="diff-new"><td>1.5</td><td>2026-09-02</td><td>ProfileCard（F-40）に「DMを送る」ボタン（A-16, A-17）を追加した。userIdが自分自身以外のときのみ表示し、既存の一対一DMがあれば再利用、無ければA-17で新規開始してから遷移する。S-03項目表・ProfileCardコンポーネント定義（8.5節・11章）を更新した。</td></tr>
     </tbody>
   </table>
 
@@ -77,7 +78,7 @@
       <tr><td>参加人数（クリック）</td><td>リンク</td><td>-</td><td>補足03を「メンバー」タブで開く（A-46）</td></tr>
       <tr><td>チャンネル設定</td><td>ボタン</td><td>-</td><td>S-06を開く（chadmin/adminのみ表示）</td></tr>
       <tr><td>要約</td><td>ボタン</td><td>-</td><td>A-15</td></tr>
-      <tr><td>発言者アイコン・表示名（クリック）</td><td>リンク</td><td>-</td><td>プロフィールカードをポップオーバー表示（A-67、F-40）</td></tr>
+      <tr><td>発言者アイコン・表示名（クリック）</td><td>リンク</td><td>-</td><td>プロフィールカードをポップオーバー表示（A-67、F-40）。<span class="diff-new">カード内の「DMを送る」ボタンはA-16・A-17</span></td></tr>
       <tr><td>投稿本文</td><td>テキストエリア</td><td>必須（1〜4000文字）</td><td>A-11 / A-14</td></tr>
       <tr><td>「@」入力時のメンション候補</td><td>オートコンプリート・ポップオーバー</td><td>-</td><td>A-46（チャンネル参加者）＋チャンネルAI。選択でmentions配列に追加（F-41）</td></tr>
       <tr><td>ファイルを添付</td><td>アイコンボタン</td><td>任意（20MBまで）</td><td>A-21</td></tr>
@@ -223,7 +224,7 @@
       <tr><td>Layout<br>Shared / S-02〜S-08</td><td>me: Me, children</td><td>なし<br>→ <code>useChannels</code>（A-05）, <code>useDms</code>（A-16）, <code>useScheduledMessages</code>（A-51）, A-03（ログアウト）</td><td>ヘッダー（検索欄・予約中バッジ・ユーザーメニュー）とサイドバー（参加中チャンネル・DM一覧、＋ボタン）。adminには管理コンソールへの導線を表示。起動時の初期表示チャンネルは<code>localStorage</code>の最終チャンネルIDを参照（11.5節）</td></tr>
       <tr><td>ChannelView<br>Page / S-03</td><td>なし（<code>useParams().channelId</code>）</td><td>なし<br>→ <code>useChannel</code>（A-06）, <code>useChannelMembers</code>（A-46）</td><td>ヘッダー（チャンネル名・参加人数・要約ボタン・chadmin/adminのみチャンネル設定ボタン）とMessageList/Composerの配置。遷移時に<code>localStorage</code>へ最終チャンネルIDを保存</td></tr>
       <tr><td>MessageList / MessageItem<br>Local / S-03・S-04</td><td>messages: Message[], members: Member[]</td><td>openProfileCardId<br>→ なし</td><td>発言の時系列表示。<code>generation_status</code>が<code>"generating"</code>の行はプレースホルダ表示（AIサポート10.3節）。表示名が完全一致する参加者が複数いる場合はmembersを突き合わせてメールアドレスを併記（F-39）。アイコン/表示名クリックでProfileCardを開く（F-40）</td></tr>
-      <tr><td>ProfileCard<br>Local / S-03</td><td>userId, anchorRef, onClose</td><td>なし<br>→ <code>useUserProfile(userId)</code>（A-67）</td><td>ui/Popoverの上に構築。アイコン・表示名・メールアドレス・ロールを表示（F-40。所属チャンネル等は表示しない、基本設計書5.21節「設計判断」）</td></tr>
+      <tr><td>ProfileCard<br>Local / S-03</td><td>userId, anchorRef, onClose</td><td>なし<br>→ <code>useUserProfile(userId)</code>（A-67）<span class="diff-new">, <code>useDms()</code>（A-16）</span></td><td>ui/Popoverの上に構築。アイコン・表示名・メールアドレス・ロールを表示（F-40。所属チャンネル等は表示しない、基本設計書5.21節「設計判断」）。<span class="diff-new">userIdが自分自身以外のとき「DMを送る」ボタンを表示し、押下時にuseDms()のキャッシュから一対一DMを検索、無ければA-17（DM開始）を呼んでから<code>/dms/{id}</code>へ遷移する</span></td></tr>
       <tr><td>Composer<br>Local / S-03・S-04</td><td>channelId, threadParentId?, onPosted</td><td>body, attachments, mentions: {targetUserId,displayNameSnapshot}[]<br>→ A-11 / A-14, A-21</td><td>投稿欄本体。「@」検知でMentionPickerを開き、選択結果を<code>mentions</code>配列に蓄積してA-11送信時に添える（F-41）。送信予約ボタンでSchedulePopoverを開閉</td></tr>
       <tr><td>MentionPicker<br>Local / S-03・S-04</td><td>channelId, query, onSelect, onClose</td><td>なし（活性行のみ）<br>→ <code>useChannelMembers</code>（A-46、Composerと共有）</td><td>ui/Popover＋ui/UserPickerの組み合わせ。当該チャンネルの参加者＋チャンネルAIを候補表示し、選択でuser_idを確定する（自由入力の氏名一致に頼らない、F-41）</td></tr>
       <tr><td>SchedulePopover<br>Local / S-03・S-04</td><td>onConfirm(date), onClose</td><td>date, time<br>→ A-50</td><td>ui/Popover。日時入力と「予約する」ボタンのみ（F-35）</td></tr>

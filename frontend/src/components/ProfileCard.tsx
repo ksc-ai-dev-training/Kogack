@@ -1,7 +1,12 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router'
 import { useUserProfile } from '../hooks/useUserProfile'
+import { useMe } from '../hooks/useMe'
+import { useDms } from '../hooks/useDms'
+import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
+import { useToast } from './Toast'
 
 const ROLE_LABELS: Record<string, string> = { admin: 'システム管理者', member: '一般' }
 const ROLE_BADGE_CLASS: Record<string, string> = {
@@ -10,7 +15,7 @@ const ROLE_BADGE_CLASS: Record<string, string> = {
 }
 
 const CARD_WIDTH = 250
-const CARD_HEIGHT_ESTIMATE = 200 // 実測前の見積もり（下開き/上開きの判定用途のみ、描画内容の高さとは独立）
+const CARD_HEIGHT_ESTIMATE = 240 // 実測前の見積もり（下開き/上開きの判定用途のみ、描画内容の高さとは独立。DMボタン分を含む）
 
 // S-03発言者アイコン・表示名クリックで開くプロフィールカード（F-40、A-67）。
 // アイコン・表示名・メールアドレス・ロールのみ表示し、所属チャンネル等は含めない
@@ -32,7 +37,12 @@ export default function ProfileCard({
   anchor?: DOMRect
 }) {
   const { profile, error } = useUserProfile(userId)
+  const { me } = useMe()
+  const { dms, mutate: mutateDms } = useDms()
+  const navigate = useNavigate()
+  const toast = useToast()
   const ref = useRef<HTMLDivElement>(null)
+  const [startingDm, setStartingDm] = useState(false)
 
   useEffect(() => {
     const onDocMouseDown = (e: MouseEvent) => {
@@ -41,6 +51,33 @@ export default function ProfileCard({
     document.addEventListener('mousedown', onDocMouseDown)
     return () => document.removeEventListener('mousedown', onDocMouseDown)
   }, [onClose])
+
+  // 既存の一対一DMがあればA-17がそのまま再利用するが（参加者集合の完全一致判定）、
+  // 先にサイドバーのキャッシュ（useDms）から見つかればAPI呼び出し自体を省略して即遷移する
+  // （DmPickerModalのexistingDmWithと同じ考え方。新規開始のみAPIを呼ぶ）
+  const goToDm = async () => {
+    if (!profile) return
+    const existing = dms.find((d) => d.members.length === 1 && d.members[0].id === profile.id)
+    if (existing) {
+      onClose()
+      navigate(`/dms/${existing.id}`)
+      return
+    }
+    setStartingDm(true)
+    try {
+      const dm = await apiFetch<{ id: string }>('/api/dms', {
+        method: 'POST',
+        body: JSON.stringify({ member_user_ids: [profile.id] }),
+      })
+      await mutateDms()
+      onClose()
+      navigate(`/dms/${dm.id}`)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'DMの開始に失敗しました', 'error')
+    } finally {
+      setStartingDm(false)
+    }
+  }
 
   const content = (
     <>
@@ -80,6 +117,16 @@ export default function ProfileCard({
               {ROLE_LABELS[profile.role]}
             </span>
           </div>
+          {me && profile.id !== me.id && (
+            <button
+              type="button"
+              disabled={startingDm}
+              onClick={goToDm}
+              className="mt-3 w-full rounded-lg border border-line-strong px-3 py-1.5 text-xs font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700 disabled:opacity-50"
+            >
+              💬 DMを送る
+            </button>
+          )}
         </>
       )}
     </>
