@@ -623,6 +623,48 @@ function PromptTab({
   )
 }
 
+// 画面モックアップのカード型ラジオ（タイトル＋説明文＋選択時に塗りつぶされるドット）。
+// DocScopeTab（参照範囲外の質問への対応）・ReactionTab（反応モード）で共有する。選択時の即保存/
+// バッチ保存の違いはonClick側の実装に委ねる（このコンポーネント自体は見た目のみ）
+function RadioCard({
+  title,
+  sub,
+  selected,
+  onClick,
+  disabled,
+}: {
+  title: string
+  sub: string
+  selected: boolean
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex w-full items-start gap-3 rounded-[10px] border px-3.5 py-3 text-left transition-colors disabled:opacity-60 ${
+        selected ? 'border-accent-600 bg-accent-50' : 'border-line bg-surface-subtle hover:border-line-strong'
+      }`}
+    >
+      <span
+        className={`relative mt-0.5 h-[17px] w-[17px] flex-none rounded-full border-2 ${
+          selected ? 'border-accent-600' : 'border-line-strong'
+        }`}
+      >
+        {selected && (
+          <span className="absolute left-1/2 top-1/2 h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-600" />
+        )}
+      </span>
+      <span>
+        <div className="text-[13.5px] font-bold text-ink">{title}</div>
+        <div className="mt-0.5 text-[12px] leading-relaxed text-ink-subtle">{sub}</div>
+      </span>
+    </button>
+  )
+}
+
 // A-27: 参照ドキュメント範囲タブ（F-11・F-22）。候補（doc_folders）はS-08管理コンソールの
 // 「ドキュメント参照範囲」タブで管理者が登録し、ここではチャンネルごとに使用する候補を選ぶ
 // （T-10 channel_doc_foldersの洗い替え）。実際のDrive同期・索引・AI検索（search_documentsツール）
@@ -701,27 +743,22 @@ function DocScopeTab({
 
       <div className="mb-5">
         <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">参照範囲外の質問への対応</label>
-        <div className="space-y-1.5">
-          <label className="flex items-start gap-2 text-[13px] text-ink">
-            <input
-              type="radio"
-              name="out-of-scope-policy"
-              checked={policy === 'strict'}
-              onChange={() => setPolicy('strict')}
-              className="mt-1"
-            />
-            <span>厳格に制限する（根拠文書が無い場合は「担当外のためお答えできません」と回答する）</span>
-          </label>
-          <label className="flex items-start gap-2 text-[13px] text-ink">
-            <input
-              type="radio"
-              name="out-of-scope-policy"
-              checked={policy === 'general'}
-              onChange={() => setPolicy('general')}
-              className="mt-1"
-            />
-            <span>一般回答を許可する（文書根拠が無い旨とAI回答への注意喚起を付記した上で、一般的な知識で回答してよい）</span>
-          </label>
+        <div className="space-y-2.5">
+          <RadioCard
+            title="厳格に制限"
+            sub="登録されたドキュメントや振る舞い定義・スキルの範囲外の質問には対応せず、「担当外のためお答えできません」のようにお断りする。"
+            selected={policy === 'strict'}
+            onClick={() => setPolicy('strict')}
+          />
+          <RadioCard
+            title="一般回答を許可"
+            sub="登録ドキュメントに根拠がない質問でも、AIの一般的な知識を使って回答する。社内ドキュメントを根拠にできる質問については、そちらを優先する。"
+            selected={policy === 'general'}
+            onClick={() => setPolicy('general')}
+          />
+        </div>
+        <div className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+          ⚠ 「一般回答を許可」を選ぶと、社内ドキュメントに基づかない回答が増えます。誤りを含みうる旨の注意喚起（F-30）はどちらの設定でも常時表示されます。
         </div>
       </div>
 
@@ -737,8 +774,6 @@ function DocScopeTab({
   )
 }
 
-// スキルの入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目。
-// 定期投稿・トリガーのFormFieldsコンポーネントと同じ考え方）
 // 反応モードタブ（A-24、F-15）。「投稿に自ら反応」の判定ロジックは設計書が規定していない
 // （04_基本設計書.html 8.1節はグレーのまま）ため、ユーザーに確認のうえ「人間の投稿には必ず応答する」
 // という最もシンプルな方式を採用した（追加のLLM呼び出しによる関連性判定はしない。
@@ -793,34 +828,16 @@ function ReactionTab({
         AIがどのタイミングで応答するかを設定します（F-15）。
       </p>
       <div className="space-y-2.5">
-        {reactionOptions.map((opt) => {
-          const selected = settings.reaction_mode === opt.value
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              disabled={saving}
-              onClick={() => choose(opt.value)}
-              className={`flex w-full items-start gap-3 rounded-[10px] border px-3.5 py-3 text-left transition-colors disabled:opacity-60 ${
-                selected ? 'border-accent-600 bg-accent-50' : 'border-line bg-surface-subtle hover:border-line-strong'
-              }`}
-            >
-              <span
-                className={`relative mt-0.5 h-[17px] w-[17px] flex-none rounded-full border-2 ${
-                  selected ? 'border-accent-600' : 'border-line-strong'
-                }`}
-              >
-                {selected && (
-                  <span className="absolute left-1/2 top-1/2 h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-600" />
-                )}
-              </span>
-              <span>
-                <div className="text-[13.5px] font-bold text-ink">{opt.title}</div>
-                <div className="mt-0.5 text-[12px] leading-relaxed text-ink-subtle">{opt.sub}</div>
-              </span>
-            </button>
-          )
-        })}
+        {reactionOptions.map((opt) => (
+          <RadioCard
+            key={opt.value}
+            title={opt.title}
+            sub={opt.sub}
+            selected={settings.reaction_mode === opt.value}
+            onClick={() => choose(opt.value)}
+            disabled={saving}
+          />
+        ))}
       </div>
     </div>
   )
@@ -1057,6 +1074,8 @@ function AutoResponseTab({
   )
 }
 
+// スキルの入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目。
+// 定期投稿・トリガーのFormFieldsコンポーネントと同じ考え方）
 function SkillFormFields({
   title, onTitleChange,
   instructions, onInstructionsChange,
