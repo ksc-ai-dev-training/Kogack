@@ -40,6 +40,9 @@ export interface ChannelDetail extends Channel {
   /** チャンネルAIが有効かどうか。F-41のメンション候補にチャンネルAIを含めるかの判定に使う
    * （無効なチャンネルでは「@ペルソナ名」と書いてもAIは応答しないため候補に出さない） */
   ai_is_enabled: boolean
+  /** メンション候補一覧のAIアイコンを実際のAI発言（bot_icon_url）と一致させるために使う
+   * （未設定時はnull。S-06「キャラクタ」タブで設定、A-61アップロード） */
+  ai_persona_icon_url: string | null
 }
 
 export interface ChannelsResponse {

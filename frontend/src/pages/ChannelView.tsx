@@ -26,7 +26,10 @@ export default function ChannelView() {
   // メンションポップオーバーどおり。無効なチャンネルでは「@ペルソナ名」と書いてもAIは応答しないため
   // 候補に出さない）。選択してもAIメンションはID参照化しない（Composer.MentionCandidate.isAi参照）
   const mentionCandidatesWithAi: MentionCandidate[] = channel?.ai_is_enabled
-    ? [{ id: 'ai', name: channel.ai_persona_name, isAi: true }, ...members.filter((m) => m.is_active)]
+    ? [
+        { id: 'ai', name: channel.ai_persona_name, isAi: true, picture_url: channel.ai_persona_icon_url },
+        ...members.filter((m) => m.is_active),
+      ]
     : members.filter((m) => m.is_active)
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,

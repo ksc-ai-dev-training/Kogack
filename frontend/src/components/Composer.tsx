@@ -14,6 +14,10 @@ export interface MentionCandidate {
   /** チャンネルAI（F-41、候補一覧の先頭に表示）。AIメンションはF-41の人間宛と異なりID参照化しない
    * （基本設計書5.22節）ため、選択してもmentions配列には追加せず本文への挿入のみ行う */
   isAi?: boolean
+  /** プロフィール画像URL（未設定時はnull/undefined）。実際に発言したときのAvatar（MessageList.tsx）
+   * と同じく画像優先→無ければ色付き頭文字にフォールバックする（ユーザーからの指摘で追加。
+   * 従来は候補一覧が常に色付き頭文字のみで、発言時のアイコンと一致していなかった） */
+  picture_url?: string | null
 }
 
 function pad2(n: number) {
@@ -345,7 +349,17 @@ export default function Composer({
                 i === activeIndex ? 'bg-surface-subtle' : 'hover:bg-surface-subtle'
               }`}
             >
-              {c.isAi ? (
+              {c.picture_url ? (
+                // 実際に発言したときのAvatar（MessageList.tsx）と同じ優先順位（画像優先）・形状
+                // （AIは角丸四角、人間は円形）にする。従来は画像の有無を見ず常に色付き頭文字/AI表示
+                // だったため、発言時のアイコンと一致していなかった（ユーザーからの指摘で修正）
+                <img
+                  src={c.picture_url}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className={`h-7 w-7 flex-none object-cover ${c.isAi ? 'rounded-[8px]' : 'rounded-full'}`}
+                />
+              ) : c.isAi ? (
                 <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] bg-gradient-to-br from-accent-600 to-accent-700 text-[10px] font-bold text-white">
                   AI
                 </span>

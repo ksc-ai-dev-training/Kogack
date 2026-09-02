@@ -119,14 +119,17 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
     # AIメンションのハイライト表示・メンション候補一覧へのAI表示用（いずれもF-41同様の見た目にする、
     # フロント側の要望）。A-23と異なり参加者全員がA-06を呼べるため、ここで軽量に返す
     # （services/ai_agent.detect_mentionと同じ「@ペルソナ名」文字列一致をフロントでも再現するために必要。
-    # ai_is_enabledはComposerがメンション候補にチャンネルAIを含めるかどうかの判定に使う）
+    # ai_is_enabledはComposerがメンション候補にチャンネルAIを含めるかどうかの判定に使う。
+    # ai_persona_icon_urlはメンション候補一覧のAIアイコンを実際のAI発言（bot_icon_url）と一致させるため）
     ai_row = await pool.fetchrow(
-        "SELECT persona_name, is_ai_enabled FROM channel_ai_settings WHERE channel_id = $1", channel_id
+        "SELECT persona_name, is_ai_enabled, persona_icon_url FROM channel_ai_settings WHERE channel_id = $1",
+        channel_id,
     )
     return {
         **_channel_out(row), "member_count": member_count,
         "is_channel_admin": bool(is_admin), "is_member": bool(is_member),
         "ai_persona_name": (ai_row["persona_name"] if ai_row else None) or "Kogack AI",
+        "ai_persona_icon_url": ai_row["persona_icon_url"] if ai_row else None,
         "ai_is_enabled": bool(ai_row["is_ai_enabled"]) if ai_row else False,
     }
 
