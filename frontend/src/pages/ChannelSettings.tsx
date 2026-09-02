@@ -16,8 +16,8 @@ import type { AiSettings, ChannelDetail, RecurringPost, Skill, TriggerRule } fro
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_ICON_BYTES = 5 * 1024 * 1024
 
-// S-06 チャンネル設定。このスライスは8タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
-// 参照ドキュメント範囲・スキル・定期投稿・自動応答トリガー）を実装。「反応モード」「自動対応範囲」
+// S-06 チャンネル設定。このスライスは9タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
+// 参照ドキュメント範囲・スキル・反応モード・定期投稿・自動応答トリガー）を実装。「自動対応範囲」
 // タブは自動対応分類（層3）が未実装のため対象外（CLAUDE.md 実装状況節）。
 // タブ切替はLayout.tsxと共有する?tab=クエリパラメータで行う。
 export default function ChannelSettings() {
@@ -67,6 +67,9 @@ export default function ChannelSettings() {
         )}
         {tab === 'skills' && channelId && settings && (
           <SkillsTab channelId={channelId} settings={settings} mutate={mutateAi} />
+        )}
+        {tab === 'reaction' && channelId && settings && (
+          <ReactionTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
         {tab === 'admin' && channelId && <AdminTab channelId={channelId} />}
         {tab === 'recurring' && channelId && <RecurringPostsTab channelId={channelId} />}
@@ -359,7 +362,8 @@ function AdminTab({ channelId }: { channelId: string }) {
   )
 }
 
-// 基本設定タブ（A-24、F-08）。反応モードの編集UIはこのスライスでは対象外（常にメンション時のみ応答）
+// 基本設定タブ（A-24、F-08）。reaction_modeは反応モードタブ（ReactionTab）が担当するため、
+// ここでは現在値をそのまま一緒に送るだけで変更しない（A-27参照ドキュメント範囲と同じ考え方）
 function GeneralTab({
   channelId,
   channelName,
@@ -379,7 +383,7 @@ function GeneralTab({
     try {
       await apiFetch(`/api/channels/${channelId}/ai-settings/general`, {
         method: 'PUT',
-        body: JSON.stringify({ is_ai_enabled: !settings.is_ai_enabled }),
+        body: JSON.stringify({ is_ai_enabled: !settings.is_ai_enabled, reaction_mode: settings.reaction_mode }),
       })
       await mutate()
       toast(settings.is_ai_enabled ? 'AIを無効にしました' : 'AIを有効にしました')
@@ -733,6 +737,93 @@ function DocScopeTab({
 
 // スキルの入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目。
 // 定期投稿・トリガーのFormFieldsコンポーネントと同じ考え方）
+// 反応モードタブ（A-24、F-15）。「投稿に自ら反応」の判定ロジックは設計書が規定していない
+// （04_基本設計書.html 8.1節はグレーのまま）ため、ユーザーに確認のうえ「人間の投稿には必ず応答する」
+// という最もシンプルな方式を採用した（追加のLLM呼び出しによる関連性判定はしない。
+// services/ai_agent.py maybe_triggerを参照）。画面モックアップのカード型ラジオ（クリックで即選択・
+// 即保存）を再現する。GeneralTabと同じA-24を呼び、自分が変更しない側（is_ai_enabled）は現在値のまま送る
+function ReactionTab({
+  channelId,
+  settings,
+  mutate,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+}) {
+  const toast = useToast()
+  const [saving, setSaving] = useState(false)
+
+  const choose = async (mode: 'mention_only' | 'proactive') => {
+    if (mode === settings.reaction_mode || saving) return
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/general`, {
+        method: 'PUT',
+        body: JSON.stringify({ is_ai_enabled: settings.is_ai_enabled, reaction_mode: mode }),
+      })
+      await mutate()
+      toast('反応モードを更新しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '変更に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const personaName = settings.persona_name || 'AI'
+  const reactionOptions: { value: 'mention_only' | 'proactive'; title: string; sub: string }[] = [
+    {
+      value: 'mention_only',
+      title: 'メンション時のみ応答',
+      sub: `「@${personaName}」と呼びかけられたときだけ応答します。会話に割り込みません。`,
+    },
+    {
+      value: 'proactive',
+      title: '投稿に自ら反応',
+      sub: 'メンションがなくても、チャンネル内の投稿すべてにAIが自発的に反応します。',
+    },
+  ]
+
+  return (
+    <div className="max-w-[700px]">
+      <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
+        AIがどのタイミングで応答するかを設定します（F-15）。
+      </p>
+      <div className="space-y-2.5">
+        {reactionOptions.map((opt) => {
+          const selected = settings.reaction_mode === opt.value
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              disabled={saving}
+              onClick={() => choose(opt.value)}
+              className={`flex w-full items-start gap-3 rounded-[10px] border px-3.5 py-3 text-left transition-colors disabled:opacity-60 ${
+                selected ? 'border-accent-600 bg-accent-50' : 'border-line bg-surface-subtle hover:border-line-strong'
+              }`}
+            >
+              <span
+                className={`relative mt-0.5 h-[17px] w-[17px] flex-none rounded-full border-2 ${
+                  selected ? 'border-accent-600' : 'border-line-strong'
+                }`}
+              >
+                {selected && (
+                  <span className="absolute left-1/2 top-1/2 h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-600" />
+                )}
+              </span>
+              <span>
+                <div className="text-[13.5px] font-bold text-ink">{opt.title}</div>
+                <div className="mt-0.5 text-[12px] leading-relaxed text-ink-subtle">{opt.sub}</div>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function SkillFormFields({
   title, onTitleChange,
   instructions, onInstructionsChange,

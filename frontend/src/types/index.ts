@@ -39,8 +39,7 @@ export interface ChannelsResponse {
 }
 
 /** T-08 channel_ai_settings（A-23〜A-27, A-45）。out_of_scope_policyはドキュメントQ&Aが未実装の
- * ためこのスライスでは編集UIを設けない（値はサーバー側の既定のまま）。reaction_modeも同様に
- * 常に'mention_only'（サーバー側の既定値をそのまま表示するのみ） */
+ * ためこのスライスでは編集UIを設けない（値はサーバー側の既定のまま） */
 export interface AiSettings {
   channel_id: string
   is_ai_enabled: boolean

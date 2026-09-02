@@ -1,8 +1,10 @@
 # チャンネルAIの応答生成（基本設計書8章、詳細設計書AIサポート10章）。AIサポート機能の初回スライス。
 #
 # このスライスのスコープ（今後拡張していく前提）:
-#   - 反応モードはメンション時のみ対応する（T-08.reaction_modeの値自体はUIから編集できず常に既定の
-#     'mention_only'のまま。8.1節「投稿に自ら反応」＝proactiveは次スライス以降）
+#   - 反応モード（F-15、T-08.reaction_mode）はmention_only/proactiveの両方に対応する。proactiveは
+#     判定ロジック自体を設計書が規定していない（グレー）ため、ユーザー確認のうえ「人間の投稿には
+#     必ず応答する」（relevance判定の追加LLM呼び出しをしない、最もシンプルな方式）を採用した
+#     （04_基本設計書.html 8.1節に設計判断を追記）
 #   - Function Calling（search_documents / get_seat_availability）は対象外。ドキュメント索引
 #     （T-09/T-10のGoogle Drive連携）・座席予約システム連携のいずれも未実装のため、
 #     プレーンな会話応答のみを行う
@@ -14,9 +16,10 @@
 #   - チャンネル本体の投稿（A-11）のみが起動対象。スレッド返信（A-14）内の@メンションはこの
 #     スライスでは対象外（次スライスでA-14にも同じ配線を追加する）
 #
-# トリガー: A-11で人間の発言本文に「@{persona_name}」の文字列一致が含まれ、かつ当該チャンネルの
-# is_ai_enabled=trueのとき、非同期タスクとして起動する（8.1節・8.7節、REQ-N-05。A-11自体は
-# 応答を待たずに投稿完了を返す）。AIへのメンションはID参照化の対象外（基本設計書5.22節
+# トリガー: A-11で当該チャンネルのis_ai_enabled=trueのとき、非同期タスクとして起動する（8.1節・
+# 8.7節、REQ-N-05。A-11自体は応答を待たずに投稿完了を返す）。reaction_mode='mention_only'
+# （既定）では人間の発言本文に「@{persona_name}」の文字列一致が含まれるときのみ、'proactive'
+# （F-15）では人間の発言であれば常に起動する。AIへのメンションはID参照化の対象外（基本設計書5.22節
 # 「設計判断」。チャンネルAIは1チャンネルにつき1つしかなく、同姓同名のような曖昧さが生じない）。
 #
 # F-14 やりとりの要約（start_summary/_generate_summary_and_post）はA-15（routers/channels.py）から
@@ -143,14 +146,17 @@ def _rows_to_chat_messages(rows, names: dict[int, str]) -> list[dict]:
 
 async def maybe_trigger(channel_id: int, body: str, requested_by: int) -> None:
     """A-11から呼ばれる。条件を満たせば非同期タスクとしてAI応答生成を起動する（fire-and-forget、
-    REQ-N-05）。OPENAI_API_KEY未設定・AI無効・メンション無しのいずれかであれば何もしない。"""
+    REQ-N-05）。OPENAI_API_KEY未設定・AI無効のいずれかであれば何もしない。reaction_mode='mention_only'
+    （既定）ではメンション無しの場合も何もしない。'proactive'（F-15）ではメンション判定自体を
+    スキップし、人間の発言であれば常に起動する（04_基本設計書.html 8.1節の設計判断どおり、
+    追加のLLM呼び出しによる関連性判定は行わない）。"""
     if not ai_client.is_configured():
         return
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         return
     persona_name = settings["persona_name"] or "AI"
-    if not detect_mention(body, persona_name):
+    if settings["reaction_mode"] != "proactive" and not detect_mention(body, persona_name):
         return
     asyncio.create_task(_generate_and_post(channel_id, settings, requested_by))
 

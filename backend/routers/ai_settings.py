@@ -64,25 +64,31 @@ async def get_ai_settings(channel_id: int, user: CurrentUser = Depends(require_c
 
 class UpdateGeneralRequest(BaseModel):
     is_ai_enabled: bool
+    reaction_mode: str
 
 
 @router.put("/{channel_id}/ai-settings/general")
 async def update_general(
     channel_id: int, body: UpdateGeneralRequest, user: CurrentUser = Depends(require_channel_admin),
 ):
-    """A-24: AI有効/無効の切り替え。反応モード（reaction_mode）の変更UIはこのスライスでは
-    対象外（常に既定のmention_onlyのまま。基本設計書8.1節「投稿に自ら反応」は次スライス以降）"""
+    """A-24: AI有効/無効の切り替え・反応モード（F-15）の変更。基本設定タブ（GeneralTab）と
+    反応モードタブ（ReactionTab）はいずれもこのAPIを呼ぶが、A-27参照ドキュメント範囲と同じく
+    自分が変更しない側のフィールドも現在値のまま一緒に送る（差分計算はしない）"""
+    if body.reaction_mode not in ("mention_only", "proactive"):
+        raise HTTPException(422, detail="reaction_modeはmention_only/proactiveのいずれかです")
     await _get_or_create(channel_id)
     pool = get_pool()
     row = await pool.fetchrow(
-        """UPDATE channel_ai_settings SET is_ai_enabled = $2, updated_by = $3, updated_at = now()
+        """UPDATE channel_ai_settings SET is_ai_enabled = $2, reaction_mode = $3,
+               updated_by = $4, updated_at = now()
            WHERE channel_id = $1 RETURNING *""",
-        channel_id, body.is_ai_enabled, user.id,
+        channel_id, body.is_ai_enabled, body.reaction_mode, user.id,
     )
+    mode_label = "メンション時のみ応答" if body.reaction_mode == "mention_only" else "投稿に自ら反応"
     await audit_log.record(
         pool, "channel_ai_setting_change", user.id,
-        f"AIを{'有効' if body.is_ai_enabled else '無効'}にしました",
-        target_channel_id=channel_id, target_field="is_ai_enabled",
+        f"AIを{'有効' if body.is_ai_enabled else '無効'}にし、反応モードを「{mode_label}」にしました",
+        target_channel_id=channel_id, target_field="general",
     )
     return _out(row, await _folder_ids(channel_id), await _skills(channel_id))
 

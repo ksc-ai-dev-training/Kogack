@@ -41,9 +41,9 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const [scheduledModalOpen, setScheduledModalOpen] = useState(false)
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
-  // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。S-06は8タブ
-  // （チャンネル管理者・基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・定期投稿・
-  // 自動応答トリガー）を実装済み。未実装タブ（反応モード・自動対応範囲）は出さない
+  // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。S-06は9タブ
+  // （チャンネル管理者・基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・
+  // 定期投稿・自動応答トリガー）を実装済み。未実装タブ（自動対応範囲）は出さない
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
   const [searchParams] = useSearchParams()
@@ -147,6 +147,14 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   className={navItemClass(settingsTab === 'skills')}
                 >
                   <span className="text-sm">🛠️</span>スキル
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=reaction`}
+                  className={navItemClass(settingsTab === 'reaction')}
+                >
+                  <span className="text-sm">💬</span>反応モード
                 </Link>
               </li>
             </ul>

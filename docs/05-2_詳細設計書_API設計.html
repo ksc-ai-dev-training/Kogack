@@ -52,6 +52,7 @@
       <tr class="diff-new"><td>1.21</td><td>2026-08-31</td><td>A-42（AI利用状況の月次集計）・A-43（上限設定）のリクエスト/レスポンス例を新規追加した（従来はA-42のみ簡略な例があり、A-43は未記載だった抜けをbackfill）。A-42はby_userを追加し、8.6節「月次・チャンネル別・利用者別に集計して表示する」の記載に実装を合わせた。A-43はT-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象に洗い替えること、しきい値到達時の通知メール送信・応答停止は実装しないことを明記した。基本設計書v1.29を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.22</td><td>2026-09-01</td><td>A-44（監査ログ一覧）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜けをbackfill）。event_type='login'はA-02・dev-loginの成功時、'channel_ai_setting_change'はA-24〜A-27の成功時（A-45は未実装のため対象外）にそれぞれ記録することを明記した。event_type・channel_id・actor_user_id・after/beforeによる絞り込みを1ページ50件で提供する。基本設計書v1.30・詳細設計書DB設計（T-16のON DELETE SET NULL、v1.7）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.23</td><td>2026-09-01</td><td>F-12（スキル登録）・F-17（引き継ぎ先設定）を実装し、A-28（スキル追加）・A-29（スキル更新）・A-30（スキル削除）のリクエスト/レスポンス例を新規追加した（従来テーブル一覧のみで未記載だった抜け）。A-45（引き継ぎ先）は従来の簡略な例を拡充し、指定した利用者が退出・強制退出（A-72/A-73）・無効化（A-37）されたときに自動的にnullへ戻る挙動を明記した。A-23のレスポンス例にskills・fallback_handoff_user_idを追加した。A-44の説明から「A-45は未実装のため対象外」の記述を削除した（A-24〜A-30・A-45すべてがchannel_ai_setting_changeとして監査ログに記録される）。基本設計書v1.31を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.24</td><td>2026-09-02</td><td>F-15（反応モード設定）を実装した。A-24のリクエストにreaction_mode（'mention_only'/'proactive'、必須）を追加し、is_ai_enabledと同じAPIで扱うことを明記した（従来「UIからの編集自体が未実装」としていた記述を更新）。基本設定タブ・反応モードタブがA-24を共用し、互いに変更しない側のフィールドも現在値のまま一緒に送る運用を明記した（A-27と同じ束ね送信の考え方）。基本設計書v1.32を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -291,9 +292,9 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。skills（T-11由来）・fallback_handoff_user_idはF-12実装（1.23版）に伴い追加した。skillsは登録が無ければ空配列、fallback_handoff_user_idは未設定ならnull（既定のチャンネル管理者へ引き継ぐ）。</span></p>
 
   <p><strong>A-24 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/general</strong></p>
-  <pre><code>{ "is_ai_enabled": false }
+  <pre><code>{ "is_ai_enabled": false, "reaction_mode": "mention_only" }
 // response 200: 更新後のT-08該当カラムを返す（A-23と同じ形）</code></pre>
-  <p class="muted">reaction_mode（反応モード）の変更はこのAPIでは受け付けない。UIからの編集自体が未実装で、常に既定値'mention_only'のまま（基本設計書8.1節「投稿に自ら反応」は次スライス以降）。</p>
+  <p class="muted"><code>reaction_mode</code>は<span class="diff-new">F-15実装（1.24版）に伴い必須項目としてこのAPIに追加した</span>。<code>'mention_only'</code>/<code>'proactive'</code>以外は422。基本設定タブ（is_ai_enabledを変更）・反応モードタブ（reaction_modeを変更）はいずれもこのAPIを共用し、自分が変更しない側のフィールドも現在値のまま一緒に送る（A-27参照ドキュメント範囲がfolder_ids・out_of_scope_policyを束ねて送るのと同じ考え方）。<code>'proactive'</code>時の起動条件（人間の投稿には関連性判定を挟まず常に応答する）は基本設計書8.1節の設計判断を参照。</p>
 
   <p><strong>A-25 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/character</strong></p>
   <pre><code>{ "persona_name": "総務サポーター", "persona_icon_url": "https://.../icons/ab12cd34.png",
