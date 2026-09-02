@@ -116,16 +116,18 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
         "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
         channel_id, user.id,
     )
-    # AIメンションのハイライト表示用（F-41同様の見た目にする、フロント側の要望）。A-23と異なり
-    # 参加者全員がA-06を呼べるため、ここでpersona_nameだけ軽量に返す
-    # （services/ai_agent.detect_mentionと同じ「@ペルソナ名」文字列一致をフロントでも再現するために必要）
-    ai_persona_name = await pool.fetchval(
-        "SELECT persona_name FROM channel_ai_settings WHERE channel_id = $1", channel_id
+    # AIメンションのハイライト表示・メンション候補一覧へのAI表示用（いずれもF-41同様の見た目にする、
+    # フロント側の要望）。A-23と異なり参加者全員がA-06を呼べるため、ここで軽量に返す
+    # （services/ai_agent.detect_mentionと同じ「@ペルソナ名」文字列一致をフロントでも再現するために必要。
+    # ai_is_enabledはComposerがメンション候補にチャンネルAIを含めるかどうかの判定に使う）
+    ai_row = await pool.fetchrow(
+        "SELECT persona_name, is_ai_enabled FROM channel_ai_settings WHERE channel_id = $1", channel_id
     )
     return {
         **_channel_out(row), "member_count": member_count,
         "is_channel_admin": bool(is_admin), "is_member": bool(is_member),
-        "ai_persona_name": ai_persona_name or "Kogack AI",
+        "ai_persona_name": (ai_row["persona_name"] if ai_row else None) or "Kogack AI",
+        "ai_is_enabled": bool(ai_row["is_ai_enabled"]) if ai_row else False,
     }
 
 

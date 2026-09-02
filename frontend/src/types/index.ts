@@ -35,8 +35,11 @@ export interface ChannelDetail extends Channel {
    * 取得できる（S-06用）ため、S-03（会話画面）側でこれを見て参加者以外を締め出す必要がある */
   is_member: boolean
   /** F-41相当の見た目でAIメンション（本文中の「@ペルソナ名」）をハイライトするための表示名。
-   * A-23と異なり参加者全員が取得できる（未設定でも既定値"AI"が入る） */
+   * A-23と異なり参加者全員が取得できる（未設定でも既定値"Kogack AI"が入る） */
   ai_persona_name: string
+  /** チャンネルAIが有効かどうか。F-41のメンション候補にチャンネルAIを含めるかの判定に使う
+   * （無効なチャンネルでは「@ペルソナ名」と書いてもAIは応答しないため候補に出さない） */
+  ai_is_enabled: boolean
 }
 
 export interface ChannelsResponse {

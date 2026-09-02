@@ -168,6 +168,7 @@ export default function ThreadPanel({
           placeholder="スレッドに返信"
           onSend={send}
           mentionCandidates={members?.filter((m) => m.is_active)}
+          aiPersonaName={aiPersonaName}
           scheduleTarget={{
             channel_id: parentMessage?.channel_id ?? undefined,
             dm_id: parentMessage?.dm_id ?? undefined,

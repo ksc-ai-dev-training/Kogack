@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { useToast } from './Toast'
@@ -11,6 +11,9 @@ const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024 // 20MB（F-07、05-1_詳細設計
 export interface MentionCandidate {
   id: string
   name: string
+  /** チャンネルAI（F-41、候補一覧の先頭に表示）。AIメンションはF-41の人間宛と異なりID参照化しない
+   * （基本設計書5.22節）ため、選択してもmentions配列には追加せず本文への挿入のみ行う */
+  isAi?: boolean
 }
 
 function pad2(n: number) {
@@ -47,6 +50,34 @@ function detectMentionQuery(text: string, cursor: number): { atIndex: number; qu
   return { atIndex, query }
 }
 
+// 入力中の本文中でメンションを青くハイライトする（ユーザーからの要望。投稿後のMessageList.
+// renderMessageBodyと同じ考え方だが、こちらは確定前のプレーンテキストのため現在の表示名解決は
+// 行わず、選択済みメンション（mentions state）のdisplay_name_snapshotとAIメンション
+// （aiPersonaNameとの文字列一致）をそのまま本文中から検索する。手で削除された分は
+// indexOfが見つからず自然にハイライト対象から外れる（activeMentionsInと同じ考え方）
+function findMentionHighlights(
+  text: string,
+  mentions: MentionPayload[],
+  aiPersonaName?: string,
+): { start: number; end: number }[] {
+  const matches: { start: number; end: number }[] = []
+  for (const m of mentions) {
+    const needle = `@${m.display_name_snapshot}`
+    const idx = text.indexOf(needle)
+    if (idx !== -1) matches.push({ start: idx, end: idx + needle.length })
+  }
+  if (aiPersonaName) {
+    const needle = `@${aiPersonaName}`
+    let idx = text.indexOf(needle)
+    while (idx !== -1) {
+      matches.push({ start: idx, end: idx + needle.length })
+      idx = text.indexOf(needle, idx + needle.length)
+    }
+  }
+  matches.sort((a, b) => a.start - b.start)
+  return matches
+}
+
 // S-03・S-04共通の投稿欄（詳細設計書 画面設計11.3節）。呼び出し元はAPI呼び出し（A-11/A-14/A-19）
 // とmutate()だけを担い、送信中状態・エラートーストはこちらで一元管理する。
 // mentionCandidatesを渡すと「@」入力でF-41のオートコンプリートが有効になる（チャンネル会話のみ。
@@ -62,11 +93,15 @@ export default function Composer({
   placeholder,
   onSend,
   mentionCandidates,
+  aiPersonaName,
   scheduleTarget,
 }: {
   placeholder: string
   onSend: (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => Promise<void>
   mentionCandidates?: MentionCandidate[]
+  /** 入力中のAIメンションのハイライト用（チャンネルAIのpersona_name）。MessageList/ThreadPanelと
+   * 同じ値をそのまま渡す想定 */
+  aiPersonaName?: string
   scheduleTarget?: ScheduleTarget
 }) {
   const [body, setBody] = useState('')
@@ -83,6 +118,7 @@ export default function Composer({
   const toast = useToast()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
@@ -106,6 +142,25 @@ export default function Composer({
     c.name.toLowerCase().includes((pickerQuery ?? '').toLowerCase()),
   )
   const pickerOpen = pickerQuery !== null && filteredCandidates.length > 0
+
+  // 入力中のハイライト表示（透明なtextareaの背後に同じ文字列を重ねて描画する、いわゆる
+  // オーバーレイ方式）。textarea自体はcolor:transparentで文字を見せず、この要素側の
+  // 該当範囲だけ青背景で描画する。パディング・フォント・折り返しをtextareaと完全に一致させないと
+  // ずれるため、ハイライト部分には背景色以外（padding/font-weight等）を一切加えない
+  const highlightMatches = findMentionHighlights(body, mentions, aiPersonaName)
+  const highlightNodes: ReactNode[] = []
+  let highlightCursor = 0
+  highlightMatches.forEach((m, i) => {
+    if (m.start < highlightCursor) return
+    if (m.start > highlightCursor) highlightNodes.push(body.slice(highlightCursor, m.start))
+    highlightNodes.push(
+      <span key={i} className="rounded-[3px] bg-accent-100 text-accent-700">
+        {body.slice(m.start, m.end)}
+      </span>,
+    )
+    highlightCursor = m.end
+  })
+  if (highlightCursor < body.length) highlightNodes.push(body.slice(highlightCursor))
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value
@@ -202,7 +257,9 @@ export default function Composer({
     const after = body.slice(cursor)
     const insertText = `@${candidate.name} `
     setBody(before + insertText + after)
-    setMentions((prev) => [...prev, { target_user_id: candidate.id, display_name_snapshot: candidate.name }])
+    if (!candidate.isAi) {
+      setMentions((prev) => [...prev, { target_user_id: candidate.id, display_name_snapshot: candidate.name }])
+    }
     setPickerQuery(null)
     requestAnimationFrame(() => {
       const pos = before.length + insertText.length
@@ -289,12 +346,18 @@ export default function Composer({
                 i === activeIndex ? 'bg-surface-subtle' : 'hover:bg-surface-subtle'
               }`}
             >
-              <span
-                className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
-                style={{ background: avatarColorFor(c.id) }}
-              >
-                {c.name.slice(0, 1)}
-              </span>
+              {c.isAi ? (
+                <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] bg-gradient-to-br from-accent-600 to-accent-700 text-[10px] font-bold text-white">
+                  AI
+                </span>
+              ) : (
+                <span
+                  className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
+                  style={{ background: avatarColorFor(c.id) }}
+                >
+                  {c.name.slice(0, 1)}
+                </span>
+              )}
               <span className="truncate text-[12.5px] font-bold text-ink">{c.name}</span>
             </button>
           ))}
@@ -339,16 +402,29 @@ export default function Composer({
           </div>
         </div>
       )}
-      <textarea
-        ref={textareaRef}
-        value={body}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        rows={MIN_ROWS}
-        maxLength={4000}
-        className="w-full resize-none border-none text-[13px] text-ink outline-none placeholder:text-ink-subtle"
-      />
+      <div className="relative">
+        <div
+          ref={highlightRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-[13px] text-ink"
+        >
+          {highlightNodes}
+          {'​'}
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={body}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onScroll={(e) => {
+            if (highlightRef.current) highlightRef.current.scrollTop = e.currentTarget.scrollTop
+          }}
+          placeholder={placeholder}
+          rows={MIN_ROWS}
+          maxLength={4000}
+          className="relative w-full resize-none border-none bg-transparent text-[13px] text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+        />
+      </div>
       {(attachments.length > 0 || uploading) && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {attachments.map((a, i) => (

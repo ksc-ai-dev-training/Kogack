@@ -7,7 +7,7 @@ import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError } from '../lib/api'
 import MessageList from '../components/MessageList'
-import Composer from '../components/Composer'
+import Composer, { type MentionCandidate } from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
 import { useToast } from '../components/Toast'
@@ -22,6 +22,12 @@ export default function ChannelView() {
   const { channel, error: channelError } = useChannel(channelId)
   const { joined, mutate: mutateChannelsList } = useChannels()
   const { members } = useChannelMembers(channelId)
+  // F-41 メンション候補。チャンネルAIが有効なときだけ先頭に追加する（画面モックアップS-03の
+  // メンションポップオーバーどおり。無効なチャンネルでは「@ペルソナ名」と書いてもAIは応答しないため
+  // 候補に出さない）。選択してもAIメンションはID参照化しない（Composer.MentionCandidate.isAi参照）
+  const mentionCandidatesWithAi: MentionCandidate[] = channel?.ai_is_enabled
+    ? [{ id: 'ai', name: channel.ai_persona_name, isAi: true }, ...members.filter((m) => m.is_active)]
+    : members.filter((m) => m.is_active)
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined)
@@ -170,7 +176,8 @@ export default function ChannelView() {
         <div className="flex-none border-t border-line px-5 py-2.5">
           <Composer
             placeholder={`# ${channel?.name ?? ''} にメッセージを送る（@でメンション）`}
-            mentionCandidates={members.filter((m) => m.is_active)}
+            mentionCandidates={mentionCandidatesWithAi}
+            aiPersonaName={channel?.ai_persona_name}
             scheduleTarget={{ channel_id: channelId }}
             onSend={async (body, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
               if (!channelId) return
