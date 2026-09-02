@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useChannels } from '../hooks/useChannels'
 import { useSearch, searchParamsFor, type SearchQuery } from '../hooks/useSearch'
@@ -110,6 +110,62 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// 検索欄のフリーテキスト部分（query.q）を検索語に分解する。routers/search.pyの_parse_termsと
+// 同じ規則（"…"はフレーズのまま1語、それ以外は空白区切り）でフロント側でも再現し、
+// バックエンドが実際にILIKE検索で使った語をそのままハイライト対象にする
+function parseHighlightTerms(q: string): string[] {
+  const terms: string[] = []
+  const re = /"([^"]+)"|(\S+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(q))) {
+    const term = m[1] ?? m[2]
+    if (term) terms.push(term)
+  }
+  return terms
+}
+
+// 検索でヒットした部分をオレンジ色（既存のbotトークンを流用）でハイライト表示する
+// （ユーザーからの要望）。ILIKEと同じ大文字小文字を区別しない一致で、excerpt・file_nameの
+// 両方から使う。複数の検索語が重なってヒットする場合は範囲をマージして二重に囲まないようにする
+function highlightTerms(text: string, terms: string[]): ReactNode {
+  if (terms.length === 0) return text
+  const lower = text.toLowerCase()
+  const matches: { start: number; end: number }[] = []
+  for (const term of terms) {
+    const needle = term.toLowerCase()
+    if (!needle) continue
+    let idx = lower.indexOf(needle)
+    while (idx !== -1) {
+      matches.push({ start: idx, end: idx + needle.length })
+      idx = lower.indexOf(needle, idx + needle.length)
+    }
+  }
+  if (matches.length === 0) return text
+  matches.sort((a, b) => a.start - b.start || b.end - a.end)
+  const merged: { start: number; end: number }[] = []
+  for (const m of matches) {
+    const last = merged[merged.length - 1]
+    if (last && m.start <= last.end) {
+      last.end = Math.max(last.end, m.end)
+    } else {
+      merged.push({ ...m })
+    }
+  }
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  merged.forEach((m, i) => {
+    if (m.start > cursor) nodes.push(text.slice(cursor, m.start))
+    nodes.push(
+      <mark key={i} className="rounded-[2px] bg-bot-bg px-0.5 font-semibold text-bot-text">
+        {text.slice(m.start, m.end)}
+      </mark>,
+    )
+    cursor = m.end
+  })
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
 }
 
 // S-05 横断検索（F-06/F-07メッセージ・ファイル検索、F-42検索条件モディファイア、
@@ -433,6 +489,7 @@ function SearchResultsTabs({
   const [extraItems, setExtraItems] = useState<SearchResultItem[]>([])
   const [loadedPages, setLoadedPages] = useState<{ message: number; file: number }>({ message: 1, file: 1 })
   const [loadingMore, setLoadingMore] = useState<PagedType | null>(null)
+  const highlightTermsList = parseHighlightTerms(query.q)
 
   const tabs: { key: TabKey; label: string; count: number }[] = [
     { key: 'all', label: 'すべて', count: result.counts.message + result.counts.file },
@@ -514,7 +571,9 @@ function SearchResultsTabs({
                   <span className="text-[13px] font-bold text-ink">{item.sender_display_name ?? '(不明)'}</span>
                   <span className="text-[11px] text-ink-subtle">{formatDateTime(item.posted_at)}</span>
                 </div>
-                <div className="mt-0.5 text-[13px] leading-[1.7] text-ink">{item.excerpt}</div>
+                <div className="mt-0.5 text-[13px] leading-[1.7] text-ink">
+                  {highlightTerms(item.excerpt ?? '', highlightTermsList)}
+                </div>
               </div>
             </button>
           ))}
@@ -555,7 +614,9 @@ function SearchResultsTabs({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-[7px]">
-                    <span className="truncate text-[13px] font-bold text-ink">📎 {item.file_name}</span>
+                    <span className="truncate text-[13px] font-bold text-ink">
+                      📎 {highlightTerms(item.file_name ?? '', highlightTermsList)}
+                    </span>
                     <span className="text-[11px] text-ink-subtle">
                       {item.byte_size !== undefined ? formatBytes(item.byte_size) : ''}
                     </span>

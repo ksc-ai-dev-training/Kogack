@@ -55,9 +55,35 @@ def _as_month(value: str | None) -> date | None:
         return None
 
 
-def _excerpt(body: str, limit: int = 80) -> str:
+def _excerpt(body: str, terms: list[str], limit: int = 80) -> str:
     text = body.replace("\n", " ")
-    return text if len(text) <= limit else text[:limit] + "…"
+    if len(text) <= limit:
+        return text
+    # 検索語が先頭limit文字に収まらない場合、素朴に先頭limit文字を切り出すと
+    # ヒット箇所自体が表示されない（フロントのハイライト表示が効かなくなる）ため、最初にヒットした
+    # 検索語を中心にスニペットを切り出す（ILIKE同様に大文字小文字を区別しない）
+    lower = text.lower()
+    match_start: int | None = None
+    match_end = 0
+    for term in terms:
+        needle = term.lower()
+        if not needle:
+            continue
+        idx = lower.find(needle)
+        if idx != -1 and (match_start is None or idx < match_start):
+            match_start, match_end = idx, idx + len(needle)
+    # match_startだけでなくmatch_end（語の終端）もlimit以内に収まっているかを見る。
+    # 語の先頭がlimit未満でも終端がlimitを超える場合、素朴な先頭切り出しでは語が途中で切れるため
+    if match_start is None or match_end <= limit:
+        return text[:limit] + "…"
+    start = max(0, match_start - limit // 2)
+    end = min(len(text), start + limit)
+    if match_end > end:  # 窓を広げてもなお終端が収まらない場合の保険
+        end = min(len(text), match_end)
+        start = max(0, end - limit)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return prefix + text[start:end] + suffix
 
 
 def _build_conditions(
@@ -182,7 +208,7 @@ async def search(
                 # （channels.py等の_message_outと同じ分岐。従来この分岐が無く、検索結果のAI/BOT発言の
                 # 発言者名が常にnull＝「(不明)」表示になっていたバグをbackfill）
                 "sender_display_name": r["bot_display_name"] if r["sender_type"] in ("bot", "ai") else r["sender_name"],
-                "excerpt": _excerpt(r["body"]),
+                "excerpt": _excerpt(r["body"], terms),
                 "posted_at": r["created_at"].isoformat(),
             }
             for r in rows
