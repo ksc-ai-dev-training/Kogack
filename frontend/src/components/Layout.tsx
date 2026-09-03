@@ -332,7 +332,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   className="h-[30px] w-[30px] flex-none rounded-full object-cover"
                 />
               ) : (
-                <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full bg-[#cbd5f5] text-xs font-bold text-accent-700">
+                <div
+                  className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full text-xs font-bold text-white"
+                  style={{ background: avatarColorFor(me.id) }}
+                >
                   {me.name.slice(0, 1)}
                 </div>
               )}

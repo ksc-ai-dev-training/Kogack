@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, uploadIcon } from '../lib/api'
+import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from './Toast'
 import type { Me } from '../types'
 
@@ -95,7 +96,10 @@ export default function ProfileEditModal({ me, onClose }: { me: Me; onClose: () 
               className="mx-auto mb-3.5 h-24 w-24 rounded-full border-[3px] border-surface object-cover shadow-[0_0_0_1px_var(--color-line-strong)]"
             />
           ) : (
-            <div className="mx-auto mb-3.5 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-[#cbd5f5] to-[#a5b4e8] text-[30px] font-bold text-accent-700">
+            <div
+              className="mx-auto mb-3.5 flex h-24 w-24 items-center justify-center rounded-full text-[30px] font-bold text-white"
+              style={{ background: avatarColorFor(me.id) }}
+            >
               {(name || '?').slice(0, 1)}
             </div>
           )}

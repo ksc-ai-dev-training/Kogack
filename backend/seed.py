@@ -46,6 +46,14 @@ async def main() -> None:
                 )
                 print("seed.py: 開発用ユーザー sato@kogasoftware.com を投入しました")
 
+            takahashi_id = await conn.fetchval("SELECT id FROM users WHERE email = $1", "takahashi@kogasoftware.com")
+            if takahashi_id is None:
+                takahashi_id = await conn.fetchval(
+                    "INSERT INTO users (email, name, role) VALUES ($1, $2, 'member') RETURNING id",
+                    "takahashi@kogasoftware.com", "高橋 健太",
+                )
+                print("seed.py: 開発用ユーザー takahashi@kogasoftware.com を投入しました")
+
             channel_id = await conn.fetchval("SELECT id FROM channels WHERE name = $1", "雑談")
             if channel_id is None:
                 channel_id = await conn.fetchval(
