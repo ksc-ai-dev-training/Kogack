@@ -33,6 +33,9 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "bot_icon": row["bot_icon"] if row["sender_type"] == "bot" else None,
         "body": row["body"],
         "generation_status": row["generation_status"],
+        # F-14 やりとりの要約で生成された発言かどうか（ユーザーからの要望、フロントが専用バッジを出す）。
+        # スレッド全体の要約はここ（A-13/A-14）を通る唯一の経路
+        "is_summary": row["is_summary"],
         "blocks": blocks or [],
         "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),

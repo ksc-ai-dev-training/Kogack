@@ -289,6 +289,14 @@ export default function MessageList({
                       AI
                     </span>
                   )}
+                  {m.is_summary && (
+                    // F-14 要約ボタンで生成された発言だと分かるようにするバッジ（ユーザーからの要望）。
+                    // ChannelView/ThreadPanelの「📝 要約」ボタンと同じ絵文字・配色（AI発言のaccentトーン）
+                    // にして、この発言がその機能で作られたことを一目で結びつけられるようにした
+                    <span className="rounded bg-accent-100 px-1.5 py-0.5 text-[10px] font-bold text-accent-700">
+                      📝 要約
+                    </span>
+                  )}
                   <span className="text-[11px] text-ink-subtle">{formatTime(m.created_at)}</span>
                 </div>
                 {m.generation_status === 'generating' ? (

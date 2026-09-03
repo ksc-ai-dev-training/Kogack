@@ -103,6 +103,11 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_channel_created ON messages (channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_thread_parent ON messages (thread_parent_id);
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+-- F-14 やりとりの要約で生成された発言かどうか（ユーザーからの要望。会話上で要約機能により
+-- 作成された文章だと分かるようにするため）。要約はチャンネル本体の新規発言として投稿される場合、
+-- thread_parent_idが通常のAIメンション応答と同じくNULLになり構造上区別できないため、専用の
+-- フラグ列で明示する（services/ai_agent.start_summaryのみが true を立てる）
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_summary BOOLEAN NOT NULL DEFAULT false;
 
 -- S-05横断検索（A-20）用（詳細設計書 API設計6.2節）。日本語形態素解析は導入せずpg_trgmの部分一致でよいと判断
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

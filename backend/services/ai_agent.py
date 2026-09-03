@@ -349,8 +349,8 @@ async def start_summary(channel_id: int, thread_id: int | None, requested_by: in
     persona_icon_url = settings["persona_icon_url"]
     placeholder = await pool.fetchrow(
         """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body, generation_status,
-               bot_display_name, bot_icon_url)
-           VALUES ($1, $2, 'ai', '', 'generating', $3, $4) RETURNING id""",
+               bot_display_name, bot_icon_url, is_summary)
+           VALUES ($1, $2, 'ai', '', 'generating', $3, $4, true) RETURNING id""",
         channel_id, thread_id, persona_name, persona_icon_url,
     )
     message_id = placeholder["id"]

@@ -137,6 +137,9 @@ def _message_out(row, attachments: list[dict] | None = None) -> dict:
         "body": row["body"],
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],
+        # F-14 やりとりの要約はチャンネルのみ対応（A-15がチャンネル専用API）のためDMでは常にfalseだが、
+        # 他2ルーターと同じ分岐に揃えておく
+        "is_summary": row["is_summary"],
         # F-41 @メンションはチャンネルのみ対応（候補元のA-46がチャンネル参加者一覧のため）。
         # DM発言は常に空配列とし、フロント側でMessage型の形を揃える。添付ファイル（F-07）は
         # メンションと異なり候補元に依存しないためDMでも対応する。

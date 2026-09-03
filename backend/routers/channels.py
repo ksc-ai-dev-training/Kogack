@@ -470,6 +470,8 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "body": row["body"],
         "generation_status": row["generation_status"],
         "thread_reply_count": row["thread_reply_count"],
+        # F-14 やりとりの要約で生成された発言かどうか（ユーザーからの要望、フロントが専用バッジを出す）
+        "is_summary": row["is_summary"],
         "blocks": blocks or [],
         "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
