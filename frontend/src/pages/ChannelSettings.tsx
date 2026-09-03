@@ -566,8 +566,11 @@ function CharacterTab({
   )
 }
 
-// 振る舞い定義タブ（A-26、F-09）。上書き保存のみで過去バージョンは持たない。監査ログ（T-16）は
-// S-08監査ログタブと同様に未実装のため記録しない旨をヒントに明記する
+// 振る舞い定義タブ（A-26、F-09）。上書き保存のみで過去バージョンは持たない。変更者・日時は
+// 監査ログ（T-16、A-44、S-08管理コンソール「監査ログ」タブ）に記録される（2026-09-01実装済み）。
+// ヒント文言はこの記録先を画面モックアップどおり明記する（バックエンドは既に記録しているのに、
+// このタブのヒントだけ「未実装」時点のまま更新されておらず、chadmin本人が記録の存在を知る
+// 手段が画面上に無かった不具合。ユーザーからの指摘で発覚し修正した）
 function PromptTab({
   channelId,
   settings,
@@ -609,7 +612,7 @@ function PromptTab({
         className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
       />
       <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
-        編集のたびに上書き保存されます（過去バージョンの一覧・差分表示は対象外）。
+        編集のたびに上書き保存されます。変更者・日時は監査ログ（S-08管理コンソール）に記録されます（過去バージョンの一覧・差分表示は対象外）。
       </div>
       <button
         type="button"
