@@ -110,12 +110,12 @@ export function Avatar({
 }) {
   // アイコン画像を設定済みならそれを表示し、無ければ種別ごとのフォールバックにする
   // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）。
-  // AI発言はペルソナアイコン（未設定なら後段の「AI」表示にフォールバック）、人間の発言は
-  // プロフィール画像が対象（services/ai_agent.py・A-62）。
-  // BOT発言（F-36定期投稿・F-38トリガー・F-43システム通知）は、画像アップロード済みかどうかに
-  // 関わらず常に角丸四角（rounded-[9px]）で表示し、人間・AIの円形アイコンと形で区別できるようにする
-  // （BOTかどうかをアイコンの形だけでも判別できるようにする設計判断）。優先順位は送り主アイコン画像
-  // （bot_icon_url）→bot_icon（絵文字）→🔔（F-43システム通知と同じ既定表示）。
+  // BOT発言（F-36定期投稿・F-38トリガー・F-43システム通知）・AI発言はいずれも、画像アップロード済みか
+  // どうかに関わらず常に角丸四角（rounded-[9px]）で表示し、人間の円形アイコンと形で区別できるようにする
+  // （BOT/AIかどうかをアイコンの形だけでも判別できるようにする設計判断。当初はAIも円形だったが、
+  // ペルソナアイコン画像を設定すると実在の人物と見分けがつかなくなるというユーザーからの指摘を受けて
+  // 角丸四角に変更した）。BOTの優先順位は送り主アイコン画像（bot_icon_url）→bot_icon（絵文字）→🔔
+  // （F-43システム通知と同じ既定表示）。AIの優先順位はペルソナアイコン→「AI」のグラデーション表示。
   if (message.sender_type === 'bot') {
     return (
       <div className="h-[34px] w-[34px] flex-none overflow-hidden rounded-[9px] bg-bot-bg">
@@ -123,6 +123,17 @@ export function Avatar({
           <img src={message.sender_picture_url} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-base">{message.bot_icon || '🔔'}</div>
+        )}
+      </div>
+    )
+  }
+  if (message.sender_type === 'ai') {
+    return (
+      <div className="h-[34px] w-[34px] flex-none overflow-hidden rounded-[9px] bg-gradient-to-br from-accent-600 to-accent-700">
+        {message.sender_picture_url ? (
+          <img src={message.sender_picture_url} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-white">AI</div>
         )}
       </div>
     )
@@ -136,13 +147,6 @@ export function Avatar({
         onClick={onClick}
         className={`h-[34px] w-[34px] flex-none rounded-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
       />
-    )
-  }
-  if (message.sender_type === 'ai') {
-    return (
-      <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-gradient-to-br from-accent-600 to-accent-700 text-[11px] font-bold text-white">
-        AI
-      </div>
     )
   }
   const seed = message.sender_user_id ?? message.sender_name ?? message.id
