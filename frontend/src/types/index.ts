@@ -262,6 +262,12 @@ export interface SearchResultItem {
   dm_id: string | null
   dm_label: string | null
   sender_display_name: string | null
+  /** 発言者アイコン表示用（ユーザーからの明示的な要望）。MessageListのAvatarコンポーネントと
+   * 同じ優先順位（画像→BOTは絵文字→色付き頭文字）で描画するためのフィールド一式 */
+  sender_type: 'human' | 'ai' | 'bot'
+  sender_user_id: string | null
+  sender_picture_url: string | null
+  bot_icon?: string | null
   excerpt?: string
   posted_at: string
 }

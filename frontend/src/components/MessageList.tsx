@@ -101,39 +101,64 @@ export function renderMessageBody(
   return nodes
 }
 
+// Avatarが実際に必要とするフィールドだけを抜き出した形（Message全体を要求すると、S-05検索結果の
+// ような別の形のデータ（SearchResultItem）から呼べなくなるため。ユーザーからの要望で検索結果にも
+// 同じアイコン表示を追加した際にこの形へ広げた）
+export type AvatarSource = Pick<
+  Message,
+  'sender_type' | 'sender_user_id' | 'sender_name' | 'sender_picture_url' | 'bot_icon' | 'id'
+>
+
 export function Avatar({
   message,
   onClick,
+  size = 34,
 }: {
-  message: Message
+  message: AvatarSource
   onClick?: (e: MouseEvent<HTMLElement>) => void
+  /** 既定34px（会話ログ本来のサイズ）。S-05検索結果のような密な一覧から呼ぶ場合は縮小できる
+   * （ユーザーからの要望で検索結果にも同じアイコン表示を追加した際に追加。サイズはTailwindの
+   * 任意値クラスだと動的値がビルド時にスキャンされないため、幅・高さ・角丸はstyleで指定する） */
+  size?: number
 }) {
   // アイコン画像を設定済みならそれを表示し、無ければ種別ごとのフォールバックにする
   // （画面設計11.6節 Avatarコンポーネント定義。メッセージ一覧・サイドバー・メンバー一覧等で共通の考え方）。
   // BOT発言（F-36定期投稿・F-38トリガー・F-43システム通知）・AI発言はいずれも、画像アップロード済みか
-  // どうかに関わらず常に角丸四角（rounded-[9px]）で表示し、人間の円形アイコンと形で区別できるようにする
-  // （BOT/AIかどうかをアイコンの形だけでも判別できるようにする設計判断。当初はAIも円形だったが、
-  // ペルソナアイコン画像を設定すると実在の人物と見分けがつかなくなるというユーザーからの指摘を受けて
-  // 角丸四角に変更した）。BOTの優先順位は送り主アイコン画像（bot_icon_url）→bot_icon（絵文字）→🔔
-  // （F-43システム通知と同じ既定表示）。AIの優先順位はペルソナアイコン→「AI」のグラデーション表示。
+  // どうかに関わらず常に角丸四角（既定サイズでrounded-[9px]相当）で表示し、人間の円形アイコンと形で
+  // 区別できるようにする（BOT/AIかどうかをアイコンの形だけでも判別できるようにする設計判断。当初は
+  // AIも円形だったが、ペルソナアイコン画像を設定すると実在の人物と見分けがつかなくなるという
+  // ユーザーからの指摘を受けて角丸四角に変更した）。BOTの優先順位は送り主アイコン画像（bot_icon_url）
+  // →bot_icon（絵文字）→🔔（F-43システム通知と同じ既定表示）。AIの優先順位はペルソナアイコン→
+  // 「AI」のグラデーション表示。
+  const boxStyle = { width: size, height: size, borderRadius: Math.round((size * 9) / 34) }
   if (message.sender_type === 'bot') {
     return (
-      <div className="h-[34px] w-[34px] flex-none overflow-hidden rounded-[9px] bg-bot-bg">
+      <div className="flex-none overflow-hidden bg-bot-bg" style={boxStyle}>
         {message.sender_picture_url ? (
           <img src={message.sender_picture_url} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-base">{message.bot_icon || '🔔'}</div>
+          <div
+            className="flex h-full w-full items-center justify-center"
+            style={{ fontSize: Math.round(size * 0.47) }}
+          >
+            {message.bot_icon || '🔔'}
+          </div>
         )}
       </div>
     )
   }
   if (message.sender_type === 'ai') {
     return (
-      <div className="h-[34px] w-[34px] flex-none overflow-hidden rounded-[9px] bg-gradient-to-br from-accent-600 to-accent-700">
+      <div className="flex-none overflow-hidden bg-gradient-to-br from-accent-600 to-accent-700" style={boxStyle}>
         {message.sender_picture_url ? (
           <img src={message.sender_picture_url} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-white">AI</div>
+          <div
+            className="flex h-full w-full items-center justify-center font-bold text-white"
+            style={{ fontSize: Math.round(size * 0.32) }}
+          >
+            AI
+          </div>
         )}
       </div>
     )
@@ -145,7 +170,8 @@ export function Avatar({
         alt=""
         referrerPolicy="no-referrer"
         onClick={onClick}
-        className={`h-[34px] w-[34px] flex-none rounded-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
+        className={`flex-none rounded-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
+        style={{ width: size, height: size }}
       />
     )
   }
@@ -153,8 +179,8 @@ export function Avatar({
   return (
     <div
       onClick={onClick}
-      className={`flex h-[34px] w-[34px] flex-none items-center justify-center rounded-full text-xs font-bold text-white ${onClick ? 'cursor-pointer' : ''}`}
-      style={{ background: avatarColorFor(seed) }}
+      className={`flex flex-none items-center justify-center rounded-full font-bold text-white ${onClick ? 'cursor-pointer' : ''}`}
+      style={{ background: avatarColorFor(seed), width: size, height: size, fontSize: Math.round(size * 0.35) }}
     >
       {(message.sender_name ?? '?').slice(0, 1)}
     </div>

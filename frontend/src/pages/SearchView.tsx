@@ -5,7 +5,22 @@ import { useSearch, searchParamsFor, type SearchQuery } from '../hooks/useSearch
 import { apiFetch } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
+import { Avatar, type AvatarSource } from '../components/MessageList'
 import type { SearchResponse, SearchResultItem, UserSearchResult } from '../types'
+
+// 検索結果のsender_*フィールドをAvatarコンポーネントが要求する形へ変換する（ユーザーからの明示的な
+// 要望で追加。会話ログ・メンション候補一覧等と同じ「画像優先→種別ごとのフォールバック」表示を
+// 検索結果でも再現する）。message_id/attachment_idのどちらかを色付き頭文字の最終フォールバック種に使う
+function avatarSourceFor(item: SearchResultItem): AvatarSource {
+  return {
+    sender_type: item.sender_type ?? 'human',
+    sender_user_id: item.sender_user_id,
+    sender_name: item.sender_display_name,
+    sender_picture_url: item.sender_picture_url,
+    bot_icon: item.bot_icon,
+    id: item.message_id ?? item.attachment_id ?? '',
+  }
+}
 
 type ModifierType = 'in' | 'from' | 'with'
 type DateModifierType = 'before' | 'after' | 'on' | 'during'
@@ -344,12 +359,18 @@ export default function SearchView() {
                 <circle cx="9" cy="9" r="6.2" stroke="#8a8f98" strokeWidth="1.6" />
                 <path d="M17 17l-3.6-3.6" stroke="#8a8f98" strokeWidth="1.6" strokeLinecap="round" />
               </svg>
+              {/* placeholderはこの検索欄（max-w-md、実測クライアント幅約400px）に収まる長さに
+                  留める。ユーザーからの報告で、元の文言「メッセージを検索（in:チャンネル
+                  from:投稿者 のように条件を指定できます）」（実測描画幅約457px）が欄の幅を
+                  超えて末尾が見切れ、読めなくなっていたことが判明した。placeholderは
+                  ネイティブ<input>の仕様上折り返し・省略記号なしに切れるため、他の文言を
+                  当てる際も同様に描画幅を確認すること */}
               <input
                 ref={inputRef}
                 value={input}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
-                placeholder="メッセージを検索（in:チャンネル from:投稿者 のように条件を指定できます）"
+                placeholder="メッセージを検索（in:チャンネル from:投稿者）"
                 className="w-full text-[13px] text-ink outline-none placeholder:text-ink-subtle"
                 autoFocus
               />
@@ -567,7 +588,8 @@ function SearchResultsTabs({
                 {item.channel_name ? `# ${item.channel_name}` : (item.dm_label ?? 'DM')}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-baseline gap-[7px]">
+                <div className="flex flex-wrap items-center gap-[7px]">
+                  <Avatar message={avatarSourceFor(item)} size={18} />
                   <span className="text-[13px] font-bold text-ink">{item.sender_display_name ?? '(不明)'}</span>
                   <span className="text-[11px] text-ink-subtle">{formatDateTime(item.posted_at)}</span>
                 </div>
@@ -621,7 +643,8 @@ function SearchResultsTabs({
                       {item.byte_size !== undefined ? formatBytes(item.byte_size) : ''}
                     </span>
                   </div>
-                  <div className="mt-0.5 text-[11.5px] text-ink-subtle">
+                  <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-ink-subtle">
+                    <Avatar message={avatarSourceFor(item)} size={16} />
                     {item.sender_display_name ?? '(不明)'} ・ {formatDateTime(item.posted_at)}
                   </div>
                 </div>

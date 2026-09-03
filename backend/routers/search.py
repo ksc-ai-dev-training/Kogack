@@ -184,8 +184,8 @@ async def search(
     if type in ("all", "message"):
         rows = await pool.fetch(
             f"""SELECT m.id, m.channel_id, m.dm_id, m.body, m.created_at,
-                       m.sender_type, m.bot_display_name,
-                       c.name AS channel_name, u.name AS sender_name
+                       m.sender_type, m.sender_user_id, m.bot_display_name, m.bot_icon, m.bot_icon_url,
+                       c.name AS channel_name, u.name AS sender_name, u.picture_url AS sender_picture_url
                 {joins}
                 LEFT JOIN channels c ON c.id = m.channel_id
                 LEFT JOIN users u ON u.id = m.sender_user_id
@@ -208,6 +208,14 @@ async def search(
                 # （channels.py等の_message_outと同じ分岐。従来この分岐が無く、検索結果のAI/BOT発言の
                 # 発言者名が常にnull＝「(不明)」表示になっていたバグをbackfill）
                 "sender_display_name": r["bot_display_name"] if r["sender_type"] in ("bot", "ai") else r["sender_name"],
+                # 検索結果にも発言者アイコンを表示する（ユーザーからの明示的な要望）。
+                # _message_out（channels.py等）と全く同じ優先順位: AI/BOTはbot_icon_url→絵文字→既定表示、
+                # 人間はpicture_url→色付き頭文字。sender_type・sender_user_idもフロントのAvatar共有
+                # コンポーネントがフォールバック描画の分岐・色決定に使うため、あわせて返す
+                "sender_type": r["sender_type"],
+                "sender_user_id": str(r["sender_user_id"]) if r["sender_user_id"] is not None else None,
+                "sender_picture_url": r["bot_icon_url"] if r["sender_type"] in ("ai", "bot") else r["sender_picture_url"],
+                "bot_icon": r["bot_icon"] if r["sender_type"] == "bot" else None,
                 "excerpt": _excerpt(r["body"], terms),
                 "posted_at": r["created_at"].isoformat(),
             }
@@ -227,8 +235,9 @@ async def search(
     if type in ("all", "file"):
         rows = await pool.fetch(
             f"""SELECT ma.id AS attachment_id, ma.file_name, ma.byte_size,
-                       m.channel_id, m.dm_id, m.created_at, m.sender_type, m.bot_display_name,
-                       c.name AS channel_name, u.name AS sender_name
+                       m.channel_id, m.dm_id, m.created_at,
+                       m.sender_type, m.sender_user_id, m.bot_display_name, m.bot_icon, m.bot_icon_url,
+                       c.name AS channel_name, u.name AS sender_name, u.picture_url AS sender_picture_url
                 {file_joins}
                 LEFT JOIN channels c ON c.id = m.channel_id
                 LEFT JOIN users u ON u.id = m.sender_user_id
@@ -252,6 +261,11 @@ async def search(
                 # メッセージ検索と同じ理由（BOT/AI発言のsender_display_nameがnullになるバグのbackfill）。
                 # 実際には現状BOT/AI発言に添付ファイルが付くことは無いが、他の検索結果と分岐を揃える
                 "sender_display_name": r["bot_display_name"] if r["sender_type"] in ("bot", "ai") else r["sender_name"],
+                # メッセージ検索と同じくアイコン表示用のフィールドを返す（ユーザーからの明示的な要望）
+                "sender_type": r["sender_type"],
+                "sender_user_id": str(r["sender_user_id"]) if r["sender_user_id"] is not None else None,
+                "sender_picture_url": r["bot_icon_url"] if r["sender_type"] in ("ai", "bot") else r["sender_picture_url"],
+                "bot_icon": r["bot_icon"] if r["sender_type"] == "bot" else None,
                 "posted_at": r["created_at"].isoformat(),
             }
             for r in rows
