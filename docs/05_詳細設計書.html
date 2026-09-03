@@ -47,6 +47,7 @@
       <tr class="diff-new"><td>1.4</td><td>2026-08-24</td><td>詳細設計書を総論と4分冊（05-1 DB設計／05-2 API設計／05-3 画面設計／05-4 AIサポート）に分割した。1章・2章・5章・7章・9章は本書（総論）に残し、3章はDB設計、4章・6章はAPI設計、8章・11章は画面設計、10章はAIサポートへ分離した。章番号は分冊前のまま維持し、改訂履歴・版数は本書に一本化する。サイドナビ（_sidenav.js）から各分冊へ直接遷移できるようにした。分冊をまたぐ内部参照は「（分冊名 章番号）」の形式に置き換えた。</td></tr>
       <tr class="diff-new"><td>1.5</td><td>2026-09-02</td><td>2026-08-26付のCLAUDE.md既知の制約（システム管理者が一度も参加していない非公開チャンネルではA-06がrequire_channel_memberで弾かれるため、adminバイパス済みのA-23〜A-31等があってもS-06自体を開けなかった）を解消した。新規5.1節<code>require_channel_member_or_admin</code>（発言本文を含まないメタデータ専用API向けの部分的adminバイパス）を追加し、A-06・A-46をこれに切り替えた（5.2節を更新）。5.9節に設計判断コラムを追加し、要件定義書の権限マトリクスが元々admin「○（全チャンネル）」としていたチャンネル管理系操作の意図をこれで実現できたこと、一方で発言本文を扱うA-10〜A-15等はadminバイパス無しのまま維持し会話内容の閲覧制限自体は変えていないことを明記した。A-06のレスポンスに新規<code>is_member</code>を追加し、フロント（ChannelView.tsx）はこれを見てS-03（会話画面）については従来どおり非参加者を締め出す。</td></tr>
       <tr class="diff-new"><td>1.6</td><td>2026-09-02</td><td>システム管理者がS-08管理コンソールのリンク経由でS-06を開いたあと会話画面（S-03）へ遷移すると、メインペインが空白になるだけで「何が起きたか分かりづらい」というユーザー指摘を受け、5.9節の設計判断コラムを更新した。<code>channel.is_member=false</code>（1.5版で追加）の場合に限り、従来の「ワークスペースへ無言でリダイレクト」を「🔒 {チャンネル名} には参加していません」という明示的なメッセージ＋S-06への戻り導線の表示に変更した。この分岐に来る時点でA-06自体は成功しておりチャンネルの存在は既にシステム管理者へ開示済みのため、F-34「存在を伏せる」の対象であるchannelErrorの404/403（5.9節表）には引き続き無言リダイレクトの原則を適用しており、今回の変更はそちらに影響しない。</td></tr>
+      <tr class="diff-new"><td>1.7</td><td>2026-09-03</td><td>7.2節に4件目のGoogle認証エラー種別<code>consent_denied</code>を追加した。層2ドキュメントQ&Aに向けたGoogle Drive OAuthスコープ拡張の検証中に発見した不具合の修正（ユーザーからの報告）: 従来、Googleの同意画面で「キャンセル」を選択すると<code>code</code>が返らないことだけを見て<code>oauth_failed</code>（理由不明の「もう一度お試しください」）に一律分類しており、Drive等の追加スコープを拒否した利用者はチャット機能自体にもログインできないまま原因が分からない状態になっていた。Googleが返す<code>error=access_denied</code>（stateがCookie値と一致した場合のみ信頼する）を専用の種別として区別し、許可が必要である旨を案内するメッセージへ変更した。</td></tr>
     </tbody>
   </table>
 
@@ -284,6 +285,7 @@ CREATE POLICY channels_visibility ON channels FOR SELECT USING (
       <tr><td><code>domain_not_allowed</code></td><td>メールドメインが<code>ALLOWED_DOMAINS</code>外</td><td>「このアカウントではログインできません。<code>@kogasoftware.com</code> のアカウントでログインし直してください。」</td></tr>
       <tr><td><code>account_disabled</code></td><td>該当ユーザーが<code>is_active=false</code></td><td>「アカウントが無効化されています。管理者にお問い合わせください。」</td></tr>
       <tr><td><code>oauth_failed</code></td><td>state不一致・認可コード交換失敗</td><td>「ログインに失敗しました。もう一度お試しください。」</td></tr>
+      <tr class="diff-new"><td><code>consent_denied</code></td><td>Googleの同意画面で「キャンセル」を選択した場合（<code>error=access_denied</code>）。stateがCookie値と一致した場合のみこの種別に分類する（一致しなければ<code>oauth_failed</code>のまま）</td><td>「Googleへのアクセス許可が完了しなかったため、ログインできませんでした。もう一度「Googleでログイン」を押し、表示された内容を「許可」してください。」</td></tr>
     </tbody>
   </table>
 

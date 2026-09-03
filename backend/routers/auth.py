@@ -51,7 +51,9 @@ async def login(request: Request):
 
 
 @router.get("/callback")
-async def callback(request: Request, code: str | None = None, state: str | None = None):
+async def callback(
+    request: Request, code: str | None = None, state: str | None = None, error: str | None = None,
+):
     """A-02: OAuthコールバック（総論9.1節の手順どおり）。
 
     state照合 → トークン交換 → IDトークン検証 → ドメイン照合 →
@@ -60,9 +62,21 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     if not google_auth.is_configured():
         raise HTTPException(501, detail="Google OAuth が未設定です")
 
-    # 1. state をCookie保存値と照合（不一致は不正リクエストとして拒否）
     expected = request.cookies.get(google_auth.STATE_COOKIE)
-    if not code or not state or not expected or not secrets.compare_digest(state, expected):
+    state_ok = bool(state and expected and secrets.compare_digest(state, expected))
+
+    # Googleが同意画面を「キャンセル」された場合等はcodeの代わりにerror（access_denied等）を返す。
+    # 従来はcode不足を一律「state不一致」と同じoauth_failed（「もう一度お試しください」とだけ表示し
+    # 理由を伝えない）にしていたため、利用者が同意画面（Drive権限拡張後は特に）を拒否すると、なぜ
+    # 失敗したか分からないまま何度試しても同じ結果になり、チャット機能自体にもログインできなくなる
+    # 不具合があった（ユーザーからの報告を受けて修正）。stateがCookie値と照合できた場合のみ信頼する
+    # （state不一致のまま偽のerror値を送りつけられても専用メッセージには誘導しない）
+    if error and state_ok:
+        print(f"[auth] google returned error on callback: {error}")
+        return _login_error_redirect("consent_denied" if error == "access_denied" else "oauth_failed")
+
+    # 1. state をCookie保存値と照合（不一致は不正リクエストとして拒否）
+    if not code or not state_ok:
         # CSRF・cookieの取りこぼし・二重送信等の切り分けに使うログ（元は原因調査用の一時追加だったが、
         # oauth_failedは詳細をフロントに返さない設計のため恒久的に残すことにした）
         print(f"[auth] state mismatch: code={bool(code)} state={bool(state)} "

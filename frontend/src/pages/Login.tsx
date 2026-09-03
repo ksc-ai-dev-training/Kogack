@@ -10,12 +10,16 @@ const ROLE_LABELS: Record<string, string> = {
   member: '一般',
 }
 
-// A-02 が認証を拒否したときに ?error= で渡してくる種別（詳細設計書 総論7.2節の3種類）
+// A-02 が認証を拒否したときに ?error= で渡してくる種別（詳細設計書 総論7.2節の4種類）
 const LOGIN_ERRORS: Record<string, string> = {
   domain_not_allowed:
     'このアカウントではログインできません。@kogasoftware.com のアカウントでログインし直してください。',
   account_disabled: 'アカウントが無効化されています。管理者にお問い合わせください。',
   oauth_failed: 'ログインに失敗しました。もう一度お試しください。',
+  // Googleの同意画面で「キャンセル」を押した場合等。理由を明示し、次に何をすればよいか案内する
+  // （ユーザーからの報告を受けて追加。従来はoauth_failedと同じ理由不明のメッセージだった）
+  consent_denied:
+    'Googleへのアクセス許可が完了しなかったため、ログインできませんでした。もう一度「Googleでログイン」を押し、表示された内容を「許可」してください。',
 }
 
 // S-01 ログイン画面（画面モックアップ S-01_ログイン.html）。
