@@ -41,6 +41,7 @@
       <tr class="diff-new"><td>1.10</td><td>2026-09-02</td><td>T-17 direct_message_membersに自分専用DM（F-05、A-16/A-17のis_self）の例外を追記した。DM相手として自分自身のみを指定した場合はT-17の行が1件（自分のみ）となり、「1件のDMにつき2行以上」という既存の記述の例外にあたる。新規カラム・制約変更は無い。</td></tr>
       <tr class="diff-new"><td>1.11</td><td>2026-09-02</td><td>T-08 channel_ai_settings.persona_nameの既定値を'AI'から'Kogack AI'へ変更した（ユーザーからの明示的な要望。実機検証で実際にAIと会話した際、発言者名が「AI」だけでは製品名との結びつきが弱いと判断）。カラム定義・制約自体の変更は無い。</td></tr>
       <tr class="diff-new"><td>1.12</td><td>2026-09-03</td><td>T-05 messagesに新規is_summary列（BOOLEAN、既定false）を追加した。F-14要約ボタン（A-15）で生成された発言のときのみtrueとし、通常のAIメンション応答と会話上で見分けられるようにする（ユーザーからの明示的な要望）。要約はチャンネル本体の新規発言として投稿される場合、thread_parent_idが通常のAI応答と同じくNULLになり既存の列だけでは区別できないため、専用フラグ列とした。</td></tr>
+      <tr class="diff-new"><td>1.13</td><td>2026-09-03</td><td>T-09 doc_foldersにitem_type・parent_folder_idを追加した。フォルダ内の特定ファイルだけを参照範囲に含める機能（ユーザーからの明示的な要望）で、実際のDrive APIによる自動列挙ではなく手動URL貼り付け方式を選択した設計判断を3.9節にcalloutとして追記した。</td></tr>
     </tbody>
   </table>
 
@@ -218,11 +219,17 @@
       <tr><td>T-09</td><td>drive_folder_name</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
       <tr><td>T-09</td><td>added_by</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id</td></tr>
       <tr><td>T-09</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+      <tr class="diff-new"><td>T-09</td><td>item_type</td><td>TEXT</td><td>NOT NULL</td><td>'folder'</td><td>CHECK IN ('folder','file')</td></tr>
+      <tr class="diff-new"><td>T-09</td><td>parent_folder_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→doc_folders.id（自己参照、ON DELETE CASCADE）。CHECK (item_type='folder' AND parent_folder_id IS NULL) OR (item_type='file' AND parent_folder_id IS NOT NULL)</td></tr>
       <tr><td>T-10</td><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id、複合PK(channel_id, folder_id)</td></tr>
-      <tr><td>T-10</td><td>folder_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→doc_folders.id</td></tr>
+      <tr><td>T-10</td><td>folder_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→doc_folders.id（フォルダ・フォルダ内の個別ファイルのいずれのidも指す）</td></tr>
       <tr><td>T-10</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
   </table>
+  <div class="callout diff-new">
+    <strong>設計判断（フォルダ内の特定ファイルだけを参照範囲に含める機能をT-09の拡張で実現した理由）:</strong>
+    ユーザーからの明示的な要望。実際のGoogle Drive APIでフォルダの中身を自動列挙する方式（画面モックアップS-06が想定する形）は、Drive OAuthスコープの全社展開・GCP側のDrive API有効化のいずれも千田氏との協議待ちで未解決のため見送り、フォルダ登録（A-39）と同じ「URL/IDの手動貼り付け」方式のまま個別ファイルも登録できるようにした（着手前にユーザーへ確認し、この方式を選択）。新規テーブルを追加せずT-09にitem_type/parent_folder_idを追加したのは、T-10 channel_doc_foldersが「idの集合を洗い替える」既存の仕組み（A-27）をそのまま使い回すため（ファイルもフォルダも「参照範囲の1項目」という点では同じで、検索対象を区別する必要が生じるのは実際のAI検索実装時）。drive_folder_id/drive_folder_name列はitem_type='file'の行でもそのまま使う（新規に列を増やさない）。
+  </div>
 
   <h3>3.10 T-11 channel_skills / T-12 channel_auto_response_rules</h3>
   <table>

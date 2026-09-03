@@ -368,6 +368,30 @@ CREATE TABLE IF NOT EXISTS channel_doc_folders (
 );
 ALTER TABLE channel_doc_folders ENABLE ROW LEVEL SECURITY;
 
+-- doc_foldersにitem_type/parent_folder_idを追加（フォルダ内の特定ファイルだけを参照範囲に
+-- 含められるようにする、F-22の拡張。ユーザーからの明示的な要望）。実際のDrive APIでフォルダの
+-- 中身を自動列挙する方式は、Drive OAuthスコープの全社展開・GCP側のDrive API有効化のいずれも
+-- 未解決のため今回は見送り、フォルダ登録（A-39）と同じ「URL/IDの手動貼り付け」方式のまま
+-- 個別ファイルも登録できるようにした（着手前にユーザーへ確認し、この方式を選択）。folder/file
+-- を同じテーブルで扱うのは、T-10 channel_doc_foldersが「idの集合を洗い替える」既存の仕組み
+-- （A-27）をそのまま使い回すため（ファイルもフォルダも「参照範囲の1項目」という点では同じで、
+-- 検索対象を区別する必要が生じるのは実際のAI検索実装時）。drive_folder_id/drive_folder_name列は
+-- item_type='file'の行でもそのまま使う（bot_display_name等、既存列を種別問わず使い回す
+-- このコードベースの既存パターンを踏襲し、新規に列を増やさない）。
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS item_type TEXT NOT NULL DEFAULT 'folder';
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS parent_folder_id BIGINT REFERENCES doc_folders(id) ON DELETE CASCADE;
+DO $$ BEGIN
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_item_type_check
+        CHECK (item_type IN ('folder', 'file'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    -- フォルダ（トップレベル候補）はparent_folder_id NULL、ファイルは必ずどのフォルダの子かを持つ
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_parent_matches_type_check
+        CHECK ((item_type = 'folder' AND parent_folder_id IS NULL) OR (item_type = 'file' AND parent_folder_id IS NOT NULL));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- T-16 audit_logs（監査ログ、S-08「監査ログ」タブ。05-1_詳細設計書_DB設計.html 3.12節）。
 -- 「いつ・誰が・どの項目を」変更したかのみを記録し、変更内容そのもの（過去バージョン・差分）は
 -- 保持しない（summaryは種類の説明のみで実際の入力値は含めない）。event_type='login'はA-02

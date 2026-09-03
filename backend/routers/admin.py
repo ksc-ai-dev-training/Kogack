@@ -94,13 +94,22 @@ async def update_user(
 
 
 _DRIVE_FOLDER_URL_RE = re.compile(r"drive\.google\.com/(?:drive/)?(?:u/\d+/)?folders/([a-zA-Z0-9_-]+)")
+# ファイル登録用（フォルダ内の特定ファイルだけを参照範囲に含める機能。CLAUDE.md実装状況節）。
+# Driveのファイル共有URL（.../file/d/<ID>/view等）・「?id=<ID>」形式のいずれにも対応する。
+_DRIVE_FILE_URL_RE = re.compile(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)|[?&]id=([a-zA-Z0-9_-]+)")
 
 
-def _extract_folder_id(raw: str) -> str:
-    """DriveのフォルダURL（https://drive.google.com/drive/folders/<ID>等）が貼り付けられた場合は
+def _extract_drive_id(raw: str, *, is_file: bool) -> str:
+    """DriveのURL（フォルダ: https://drive.google.com/drive/folders/<ID> 、
+    ファイル: https://drive.google.com/file/d/<ID>/view や ?id=<ID> 形式）が貼り付けられた場合は
     IDを抽出する。画面設計8.2節が想定するGoogle Picker連携はDrive OAuthスコープ拡張が前提のため
     次スライスに持ち越し、このスライスはURL・IDいずれかの手動貼り付けを受け付ける簡易フォームとする。"""
     raw = raw.strip()
+    if is_file:
+        m = _DRIVE_FILE_URL_RE.search(raw)
+        if m:
+            return m.group(1) or m.group(2)
+        return raw
     m = _DRIVE_FOLDER_URL_RE.search(raw)
     return m.group(1) if m else raw
 
@@ -108,6 +117,7 @@ def _extract_folder_id(raw: str) -> str:
 def _doc_folders_query(where: str = "") -> str:
     return f"""
         SELECT f.id, f.drive_folder_id, f.drive_folder_name, f.created_at,
+               f.item_type, f.parent_folder_id,
                u.name AS added_by_name,
                COUNT(cdf.channel_id) AS channel_count
         FROM doc_folders f
@@ -115,7 +125,7 @@ def _doc_folders_query(where: str = "") -> str:
         LEFT JOIN channel_doc_folders cdf ON cdf.folder_id = f.id
         {where}
         GROUP BY f.id, u.name
-        ORDER BY f.created_at
+        ORDER BY f.parent_folder_id NULLS FIRST, f.created_at
     """
 
 
@@ -127,18 +137,23 @@ def _doc_folder_out(row) -> dict:
         "added_by_name": row["added_by_name"],
         "channel_count": row["channel_count"],
         "created_at": row["created_at"].isoformat(),
+        "item_type": row["item_type"],
+        "parent_folder_id": str(row["parent_folder_id"]) if row["parent_folder_id"] is not None else None,
     }
 
 
 @router.get("/doc-folders")
 async def list_doc_folders(user: CurrentUser = Depends(require_auth)):
-    """A-38: 参照ドキュメントフォルダ候補の一覧（F-22）。設計時はadmin限定だったが、S-06の
-    「参照ドキュメント範囲」タブ（A-27、当該chadminも操作可）でチャンネル管理者がここから選択
-    できる必要があるため、閲覧のみadminからrequire_auth（認証済み全員）に広げた（基本設計書
-    6.2節「設計判断」）。フォルダ名・登録者名・使用中チャンネル数のみでチャンネル名等の非公開
-    情報は含まないため、閲覧を広げても情報漏えいにはならない。登録・削除（A-39/A-40）は
-    引き続きadmin限定。channel_countは削除前の目安として参考表示する（使用中でも確認なく
-    削除できる。索引・AI検索が未実装のこのスライスでは実害が無い）"""
+    """A-38: 参照ドキュメント候補の一覧（フォルダ・フォルダ内の個別ファイルの両方、F-22）。
+    設計時はadmin限定だったが、S-06の「参照ドキュメント範囲」タブ（A-27、当該chadminも操作可）
+    でチャンネル管理者がここから選択できる必要があるため、閲覧のみadminからrequire_auth
+    （認証済み全員）に広げた（基本設計書6.2節「設計判断」）。フォルダ・ファイル名、登録者名、
+    使用中チャンネル数のみでチャンネル名等の非公開情報は含まないため、閲覧を広げても情報漏えいには
+    ならない。登録・削除（A-39/A-40）は引き続きadmin限定。channel_countは削除前の目安として
+    参考表示する（使用中でも確認なく削除できる。索引・AI検索が未実装のこのスライスでは実害が無い）。
+    フォルダはparent_folder_id=null、ファイルはその親フォルダのidを持つ（フロント側でツリー表示に
+    組み立てる）。並び順はparent_folder_id NULLS FIRSTでフォルダを先頭に、続けて各フォルダの
+    子ファイルをcreated_at順に返す"""
     rows = await get_pool().fetch(_doc_folders_query())
     return {"items": [_doc_folder_out(r) for r in rows]}
 
@@ -146,21 +161,38 @@ async def list_doc_folders(user: CurrentUser = Depends(require_auth)):
 class CreateDocFolderRequest(BaseModel):
     drive_folder_id: str = Field(min_length=1, max_length=300)
     drive_folder_name: str = Field(min_length=1, max_length=200)
+    # 指定時は「このフォルダの中の特定ファイル」としての登録になる（フォルダ内の特定ファイルだけを
+    # 参照範囲に含める機能。CLAUDE.md実装状況節）。省略時は従来どおりトップレベルのフォルダ登録。
+    parent_folder_id: str | None = None
 
 
 @router.post("/doc-folders", status_code=201)
 async def create_doc_folder(body: CreateDocFolderRequest, user: CurrentUser = Depends(require_roles("admin"))):
-    """A-39: フォルダ候補の追加"""
-    folder_id = _extract_folder_id(body.drive_folder_id)
-    if not folder_id:
-        raise HTTPException(422, detail="フォルダのURLまたはIDを入力してください")
+    """A-39: フォルダ（またはparent_folder_id指定時はそのフォルダ内の特定ファイル）候補の追加"""
     pool = get_pool()
-    exists = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM doc_folders WHERE drive_folder_id = $1)", folder_id)
+    is_file = body.parent_folder_id is not None
+    parent_id: int | None = None
+    if is_file:
+        try:
+            parent_id = int(body.parent_folder_id)  # type: ignore[arg-type]
+        except ValueError:
+            raise HTTPException(422, detail="parent_folder_idは数値のIDです")
+        parent = await pool.fetchrow("SELECT item_type FROM doc_folders WHERE id = $1", parent_id)
+        if parent is None:
+            raise HTTPException(404, detail="登録先のフォルダが見つかりません")
+        if parent["item_type"] != "folder":
+            raise HTTPException(422, detail="ファイルの登録先には、フォルダを指定してください")
+
+    drive_id = _extract_drive_id(body.drive_folder_id, is_file=is_file)
+    if not drive_id:
+        raise HTTPException(422, detail="DriveのURLまたはIDを入力してください")
+    exists = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM doc_folders WHERE drive_folder_id = $1)", drive_id)
     if exists:
-        raise HTTPException(409, detail="このフォルダは既に登録されています")
+        raise HTTPException(409, detail="このフォルダ・ファイルは既に登録されています")
     new_id = await pool.fetchval(
-        "INSERT INTO doc_folders (drive_folder_id, drive_folder_name, added_by) VALUES ($1, $2, $3) RETURNING id",
-        folder_id, body.drive_folder_name.strip(), user.id,
+        """INSERT INTO doc_folders (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+        drive_id, body.drive_folder_name.strip(), user.id, "file" if is_file else "folder", parent_id,
     )
     row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), new_id)
     return _doc_folder_out(row)
@@ -168,8 +200,9 @@ async def create_doc_folder(body: CreateDocFolderRequest, user: CurrentUser = De
 
 @router.delete("/doc-folders/{folder_id}", status_code=204)
 async def delete_doc_folder(folder_id: int, user: CurrentUser = Depends(require_roles("admin"))):
-    """A-40: フォルダ候補の削除。使用中のチャンネル（T-10）があってもそのまま削除する
-    （ON DELETE CASCADEでchannel_doc_foldersの割当も連動削除される）"""
+    """A-40: フォルダ（またはフォルダ内の個別ファイル）候補の削除。使用中のチャンネル（T-10）が
+    あってもそのまま削除する（ON DELETE CASCADEでchannel_doc_foldersの割当も連動削除される）。
+    フォルダを削除した場合、その配下に登録済みの個別ファイル候補も同じくCASCADEで連動削除される"""
     deleted = await get_pool().fetchval("DELETE FROM doc_folders WHERE id = $1 RETURNING id", folder_id)
     if deleted is None:
         raise HTTPException(404, detail="見つかりません")

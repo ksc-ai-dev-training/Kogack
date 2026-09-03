@@ -299,7 +299,9 @@ export interface AdminUsersResponse {
   items: AdminUser[]
 }
 
-/** F-22 参照ドキュメント範囲（T-09 doc_folders、S-08「ドキュメント参照範囲」タブ） */
+/** F-22 参照ドキュメント範囲（T-09 doc_folders、S-08「ドキュメント参照範囲」タブ）。
+ * item_type='file'の行は、フォルダ内の特定ファイルだけを参照範囲に含めるための項目で、
+ * parent_folder_idに登録先フォルダのidを持つ（フォルダ自身はparent_folder_id=null）。 */
 export interface DocFolder {
   id: string
   drive_folder_id: string
@@ -307,6 +309,8 @@ export interface DocFolder {
   added_by_name: string
   channel_count: number
   created_at: string
+  item_type: 'folder' | 'file'
+  parent_folder_id: string | null
 }
 
 export interface DocFoldersResponse {

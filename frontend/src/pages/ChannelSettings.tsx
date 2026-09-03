@@ -716,29 +716,55 @@ function DocScopeTab({
       </p>
 
       <div className="mb-5">
-        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">参照するフォルダ</label>
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">参照するフォルダ・ファイル</label>
         {folders.length === 0 ? (
           <p className="rounded-[10px] border border-dashed border-line-strong px-3.5 py-3 text-[12px] text-ink-subtle">
-            登録済みのフォルダ候補がありません。管理コンソールの「ドキュメント参照範囲」タブから登録してください。
+            登録済みの候補がありません。管理コンソールの「ドキュメント参照範囲」タブから登録してください。
           </p>
         ) : (
           <ul className="space-y-1 rounded-[10px] border border-line px-3.5 py-2.5">
-            {folders.map((f) => (
-              <li key={f.id}>
-                <label className="flex items-center gap-2 py-1 text-[13px] text-ink">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(f.id)}
-                    onChange={() => toggle(f.id)}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span className="text-sm">📁</span>
-                  {f.drive_folder_name}
-                </label>
-              </li>
-            ))}
+            {folders
+              .filter((f) => f.item_type === 'folder')
+              .map((f) => {
+                const children = folders.filter((c) => c.parent_folder_id === f.id)
+                return (
+                  <li key={f.id}>
+                    <label className="flex items-center gap-2 py-1 text-[13px] text-ink">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(f.id)}
+                        onChange={() => toggle(f.id)}
+                        className="h-3.5 w-3.5"
+                      />
+                      <span className="text-sm">📁</span>
+                      {f.drive_folder_name}
+                    </label>
+                    {children.length > 0 && (
+                      <ul className="ml-6 border-l border-line pl-2">
+                        {children.map((c) => (
+                          <li key={c.id}>
+                            <label className="flex items-center gap-2 py-1 text-[13px] text-ink">
+                              <input
+                                type="checkbox"
+                                checked={selected.has(c.id)}
+                                onChange={() => toggle(c.id)}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="text-sm">📄</span>
+                              {c.drive_folder_name}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                )
+              })}
           </ul>
         )}
+        <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
+          フォルダにチェックすると、そのフォルダ全体が参照範囲に含まれます。特定のファイルだけを含めたい場合は、そのフォルダの下に表示される個別ファイルだけを選んでください（フォルダ・ファイルの登録は管理コンソールから行います）。
+        </div>
       </div>
 
       <div className="mb-5">

@@ -257,23 +257,51 @@ function DocFoldersTab() {
   const confirm = useConfirm()
   const [input, setInput] = useState('')
   const [name, setName] = useState('')
+  // フォルダ内の特定ファイルだけを参照範囲に含める機能（ユーザーからの明示的な要望）。
+  // 実際のDrive APIでフォルダの中身を自動列挙する方式は、Drive OAuthスコープの全社展開・
+  // GCP側のDrive API有効化のいずれも未解決のため見送り、フォルダ登録と同じ「URL/IDの
+  // 手動貼り付け」方式のまま個別ファイルも登録できるようにした（CLAUDE.md実装状況節）。
+  const [mode, setMode] = useState<'folder' | 'file'>('folder')
+  const topFolders = folders.filter((f) => f.item_type === 'folder')
+  const [parentId, setParentId] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const childrenOf = (folderId: string) => folders.filter((f) => f.parent_folder_id === folderId)
+  // 画面モックアップ（S-08）は入れ子表示ではなく、フォルダ→その子ファイルの順に並べたフラットな
+  // 一覧＋「親フォルダ名 ＞ 項目名」のパンくず表記。ツリー表示（字下げ）はS-06側の踏襲とし、
+  // S-08は一覧の見た目をモックアップに合わせる（ユーザーからの明示的な要望）
+  const flatRows = topFolders.flatMap((f) => [f, ...childrenOf(f.id)])
+  const nameOf = (f: DocFolder) => {
+    if (f.item_type !== 'file') return f.drive_folder_name
+    const parent = folders.find((p) => p.id === f.parent_folder_id)
+    return parent ? `${parent.drive_folder_name} ＞ ${f.drive_folder_name}` : f.drive_folder_name
+  }
+  const dateOf = (f: DocFolder) =>
+    new Date(f.created_at).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })
 
   const add = async () => {
     if (!input.trim() || !name.trim()) {
-      toast('フォルダのURLまたはIDと、表示名の両方を入力してください', 'error')
+      toast('DriveのURLまたはIDと、表示名の両方を入力してください', 'error')
+      return
+    }
+    if (mode === 'file' && !parentId) {
+      toast('登録先のフォルダを選んでください', 'error')
       return
     }
     setSaving(true)
     try {
       await apiFetch('/api/admin/doc-folders', {
         method: 'POST',
-        body: JSON.stringify({ drive_folder_id: input.trim(), drive_folder_name: name.trim() }),
+        body: JSON.stringify({
+          drive_folder_id: input.trim(),
+          drive_folder_name: name.trim(),
+          ...(mode === 'file' ? { parent_folder_id: parentId } : {}),
+        }),
       })
       setInput('')
       setName('')
       await mutate()
-      toast('フォルダを追加しました')
+      toast(mode === 'file' ? 'ファイルを追加しました' : 'フォルダを追加しました')
     } catch (e) {
       toast(e instanceof Error ? e.message : '追加に失敗しました', 'error')
     } finally {
@@ -282,12 +310,13 @@ function DocFoldersTab() {
   }
 
   const remove = async (folder: DocFolder) => {
+    const label = folder.item_type === 'file' ? 'ファイル' : 'フォルダ'
     const ok = await confirm({
-      title: 'フォルダを削除',
+      title: `${label}を削除`,
       message:
         folder.channel_count > 0
-          ? `「${folder.drive_folder_name}」を削除しますか？ ${folder.channel_count}件のチャンネルの参照範囲設定からも同時に外れます。`
-          : `「${folder.drive_folder_name}」を削除しますか？`,
+          ? `「${nameOf(folder)}」を削除しますか？ ${folder.channel_count}件のチャンネルの参照範囲設定からも同時に外れます。`
+          : `「${nameOf(folder)}」を削除しますか？`,
       confirmLabel: '削除する',
       danger: true,
     })
@@ -295,7 +324,7 @@ function DocFoldersTab() {
     try {
       await apiFetch(`/api/admin/doc-folders/${folder.id}`, { method: 'DELETE' })
       await mutate()
-      toast('フォルダを削除しました')
+      toast(`${label}を削除しました`)
     } catch (e) {
       toast(e instanceof Error ? e.message : '削除に失敗しました', 'error')
     }
@@ -311,47 +340,111 @@ function DocFoldersTab() {
           <span className="text-[16px] font-bold text-ink">ドキュメント参照範囲</span>
         </div>
         <p className="mt-1.5 max-w-[640px] text-[12.5px] leading-relaxed text-ink-muted">
-          チャンネルAIが回答の根拠として参照できるGoogleドライブのフォルダ候補を登録します（F-22）。各チャンネルは登録済みの候補の中から使用する範囲を「チャンネル設定」の「参照ドキュメント範囲」タブで選びます。
+          チャンネルAIが回答の根拠として参照できるGoogleドライブのフォルダ・ファイル候補を登録します（F-22）。フォルダ内の特定ファイルだけを候補にすることもできます。各チャンネルは登録済みの候補の中から使用する範囲を「チャンネル設定」の「参照ドキュメント範囲」タブで選びます。
         </p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-7 py-5">
-        <ul className="mb-6 max-w-[640px] space-y-2">
-          {folders.length === 0 && <p className="text-[12px] text-ink-subtle">登録済みのフォルダはありません。</p>}
-          {folders.map((f) => (
-            <li key={f.id} className="flex items-center gap-2.5 rounded-[10px] border border-line px-3.5 py-2.5">
-              <span className="text-base">📁</span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-semibold text-ink">{f.drive_folder_name}</div>
-                <div className="truncate text-[11px] text-ink-subtle">
-                  {f.drive_folder_id} ・ 登録: {f.added_by_name} ・ 使用中のチャンネル {f.channel_count}件
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => remove(f)}
-                className="flex-none rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-danger-text hover:border-danger-border hover:bg-danger-bg"
+        {folders.length === 0 ? (
+          <p className="mb-6 max-w-[640px] text-[12px] text-ink-subtle">登録済みの候補はありません。</p>
+        ) : (
+          <div className="mb-4 max-w-[640px] overflow-hidden rounded-[10px] border border-line">
+            {flatRows.map((f) => (
+              <div
+                key={f.id}
+                className="flex items-center gap-2.5 border-b border-line px-3.5 py-2.5 last:border-b-0"
               >
-                削除
-              </button>
-            </li>
-          ))}
-        </ul>
+                <span className="text-base">{f.item_type === 'file' ? '📄' : '📁'}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-bold text-ink">{nameOf(f)}</div>
+                  <div className="truncate text-[11.5px] text-ink-subtle">
+                    {f.item_type === 'folder' && `登録ファイル${childrenOf(f.id).length}件 ・ `}
+                    追加: {f.added_by_name} ・ {dateOf(f)} ・ 使用中のチャンネル{f.channel_count}件
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => remove(f)}
+                  className="ml-auto flex-none bg-transparent text-[11.5px] text-ink-subtle hover:text-danger-text"
+                >
+                  削除
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mb-6 flex max-w-[640px] items-center justify-between rounded-[10px] border border-line bg-surface-subtle px-4 py-3">
+          <span className="text-[12px] text-ink-muted">最終同期: 未実施 ・ 対象{folders.length}件</span>
+          <button
+            type="button"
+            disabled
+            title="索引・AI検索は次のスライスで実装予定です"
+            className="flex-none rounded-md border border-line-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-bold text-ink-subtle opacity-50"
+          >
+            今すぐ同期
+          </button>
+        </div>
+        <p className="mb-6 max-w-[640px] text-[11px] leading-relaxed text-ink-subtle">
+          「今すぐ同期」は実際のDrive同期・文書の索引化・チャンネルAIからの検索を行うボタンですが、このスライスでは未実装です（次のスライスで対応予定）。同期を実行した時点の内容が回答に反映される想定で、質問者本人がGoogleドライブ上で閲覧権限を持たない文書は、ここで対象に含めていても回答からは除外されます（5.1節）。
+        </p>
 
         <div className="max-w-[640px] rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
-          <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しいフォルダを追加</div>
+          <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しい候補を追加</div>
+          <div className="mb-3.5 flex gap-4">
+            <label className="flex items-center gap-1.5 text-[12.5px] text-ink">
+              <input
+                type="radio"
+                checked={mode === 'folder'}
+                onChange={() => setMode('folder')}
+                className="h-3.5 w-3.5"
+              />
+              フォルダ全体
+            </label>
+            <label className="flex items-center gap-1.5 text-[12.5px] text-ink">
+              <input
+                type="radio"
+                checked={mode === 'file'}
+                onChange={() => setMode('file')}
+                disabled={topFolders.length === 0}
+                className="h-3.5 w-3.5"
+              />
+              フォルダ内の特定ファイル
+            </label>
+          </div>
+          {mode === 'file' && (
+            <div className="mb-3.5">
+              <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">登録先のフォルダ</label>
+              <select
+                value={parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+              >
+                <option value="">選択してください</option>
+                {topFolders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.drive_folder_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="mb-3.5">
             <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">
-              GoogleドライブのフォルダURLまたはID
+              Googleドライブの{mode === 'file' ? 'ファイル' : 'フォルダ'}URLまたはID
             </label>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="https://drive.google.com/drive/folders/..."
+              placeholder={
+                mode === 'file'
+                  ? 'https://drive.google.com/file/d/...'
+                  : 'https://drive.google.com/drive/folders/...'
+              }
               className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
             />
             <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
-              このスライスはURL・IDの手動入力のみに対応します（Googleドライブのフォルダ選択画面からの選択は、Drive連携拡張とあわせて次のスライスで対応予定です）。
+              このスライスはURL・IDの手動入力のみに対応します（Googleドライブのフォルダ・ファイル選択画面からの選択は、Drive連携拡張とあわせて次のスライスで対応予定です）。
             </div>
           </div>
           <div className="mb-3.5">
@@ -359,32 +452,19 @@ function DocFoldersTab() {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例: 開発部 ドキュメント"
+              placeholder={mode === 'file' ? '例: デプロイ手順書' : '例: 開発部 ドキュメント'}
               maxLength={200}
               className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
             />
           </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={add}
-              className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
-            >
-              ＋ フォルダを追加
-            </button>
-            <button
-              type="button"
-              disabled
-              title="索引・AI検索は次のスライスで実装予定です"
-              className="rounded-lg border border-line-strong px-4 py-2 text-[13px] font-semibold text-ink-subtle opacity-50"
-            >
-              今すぐ同期
-            </button>
-          </div>
-          <div className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
-            「今すぐ同期」は実際のDrive同期・文書の索引化・チャンネルAIからの検索を行うボタンですが、このスライスでは未実装です（次のスライスで対応予定）。
-          </div>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={add}
+            className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+          >
+            ＋ {mode === 'file' ? 'ファイル' : 'フォルダ'}を追加
+          </button>
         </div>
       </div>
     </div>

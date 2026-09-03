@@ -58,6 +58,7 @@
       <tr class="diff-new"><td>1.27</td><td>2026-09-02</td><td>A-46のガード関数をrequire_channel_memberから新規require_channel_member_or_admin（総論5.1節）へ切り替え、システムadminは非参加の非公開チャンネルでも参加者一覧を取得できることを明記した（2026-08-26付のCLAUDE.md既知の制約の解消。総論5.9節「設計判断」参照）。あわせてA-06のレスポンスに新規is_memberを追加した（呼び出し元が実際の参加者かどうか。A-06自体も同じくrequire_channel_member_or_adminへ切り替えたため、フロントエンドがS-03会話画面で参加者以外を締め出す判定に使う）。発言本文を扱うA-10〜A-15等は変更なし（adminバイパス無しのまま）。総論（5.1・5.2・5.9節、v1.5）を一貫して更新した。要件定義書・基本設計書は元々「チャンネル管理系操作はadmin全チャンネル可」としていた記載どおりで変更なし。</td></tr>
       <tr class="diff-new"><td>1.28</td><td>2026-09-02</td><td>A-36のレスポンスのchadmin_channelsを、チャンネル名の文字列配列からid・nameのオブジェクト配列に変更した。S-08「利用者管理」タブがフロントエンドで各チャンネル名をS-06（チャンネル設定）へのリンクにするため（非参加の非公開チャンネルへシステムadminがたどり着く導線の追加。1.27版の続き）。A-42（AI利用状況の月次集計）のlimits.channelsは元々channel_id・channel_nameの両方を返していたため変更なし（S-08「AI利用状況・コスト」タブのチャンネル別上限にも同じ考え方でリンクを追加した）。</td></tr>
       <tr class="diff-new"><td>1.29</td><td>2026-09-02</td><td>A-23のレスポンス例のpersona_nameを"AI"から"Kogack AI"に修正した（T-08.persona_nameの既定値変更、詳細設計書DB設計v1.11と一貫）。API仕様・エンドポイント自体の変更は無い。</td></tr>
+      <tr class="diff-new"><td>1.30</td><td>2026-09-03</td><td>A-38〜A-40にitem_type/parent_folder_idを反映した（フォルダ内の特定ファイルだけを参照範囲に含める機能、ユーザーからの明示的な要望。詳細設計書DB設計v1.13と一貫）。A-38レスポンスにitem_type・parent_folder_idを追加、A-39は<code>parent_folder_id</code>を指定した場合に「フォルダ内の特定ファイル」として登録できること（登録先が存在しない場合404、ファイルの下にファイルは登録できず422）、ファイルURLからのID抽出パターンを追記した。A-40はフォルダ削除時に配下の個別ファイル候補も連動削除されることを明記した。新規エンドポイントは追加していない（既存のA-38〜A-40をそのまま拡張）。基本設計書（6.2節、v1.36）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -378,19 +379,29 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <pre class="diff-new"><code>// response 200
 { "items": [
     { "id": "3", "drive_folder_id": "1AbCdEfGhIjKlMnOpQrS", "drive_folder_name": "開発部 ドキュメント",
-      "added_by_name": "石井 直樹", "channel_count": 2, "created_at": "2026-08-31T02:51:18Z" }
+      "added_by_name": "石井 直樹", "channel_count": 2, "created_at": "2026-08-31T02:51:18Z",
+      "item_type": "folder", "parent_folder_id": null },
+    { "id": "9", "drive_folder_id": "1XyZ...", "drive_folder_name": "デプロイ手順書",
+      "added_by_name": "石井 直樹", "channel_count": 1, "created_at": "2026-09-03T08:48:28Z",
+      "item_type": "file", "parent_folder_id": "3" }
 ] }</code></pre>
-  <p class="muted diff-new">F-22（参照ドキュメント範囲）の候補一覧。S-06「参照ドキュメント範囲」タブ（A-27）でチャンネル管理者（chadmin）が選択に使うため、閲覧のみ<code>require_auth</code>（認証済み全員）とし、admin限定にしていない（基本設計書6.2節「設計判断」）。<code>channel_count</code>はA-40で削除する前の目安として参考表示する（05-1 DB設計3.9節のT-09/T-10とchannel_doc_foldersの件数を集計）。</p>
+  <p class="muted diff-new">F-22（参照ドキュメント範囲）の候補一覧。S-06「参照ドキュメント範囲」タブ（A-27）でチャンネル管理者（chadmin）が選択に使うため、閲覧のみ<code>require_auth</code>（認証済み全員）とし、admin限定にしていない（基本設計書6.2節「設計判断」）。<code>channel_count</code>はA-40で削除する前の目安として参考表示する（05-1 DB設計3.9節のT-09/T-10とchannel_doc_foldersの件数を集計）。<code>item_type</code>は<code>folder</code>（トップレベルのフォルダ候補）または<code>file</code>（フォルダ内の特定ファイル候補、<code>parent_folder_id</code>に登録先フォルダのidを持つ）。フロントはこの2つをparent_folder_idでツリー状に組み立てて表示する（05-1 DB設計3.9節v1.13）。</p>
 
   <p class="diff-new"><strong>A-39 <span class="badge badge-post">POST</span> /api/admin/doc-folders</strong></p>
-  <pre class="diff-new"><code>{ "drive_folder_id": "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrS?usp=sharing",
+  <pre class="diff-new"><code>// フォルダの登録
+{ "drive_folder_id": "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrS?usp=sharing",
   "drive_folder_name": "開発部 ドキュメント" }
-// response 201: A-38の1件と同じ形（channel_count: 0）</code></pre>
-  <p class="muted diff-new"><code>drive_folder_id</code>はGoogleドライブのフォルダURLまたはID自体のいずれでも受け付け、URL形式の場合はAPI側で正規表現によりIDを抽出する（画面設計8.2節が想定するGoogle Picker連携はDrive OAuthスコープ拡張が前提のため次スライスに持ち越し、このスライスは手動貼り付けの簡易フォームとする）。抽出後のIDが既存の<code>drive_folder_id</code>と重複する場合は409。admin限定。</p>
+// response 201: A-38の1件と同じ形（channel_count: 0、item_type: "folder", parent_folder_id: null）
+
+// フォルダ内の特定ファイルの登録（parent_folder_idを指定）
+{ "drive_folder_id": "https://drive.google.com/file/d/1XyZ.../view",
+  "drive_folder_name": "デプロイ手順書", "parent_folder_id": "3" }
+// response 201: item_type: "file", parent_folder_id: "3"</code></pre>
+  <p class="muted diff-new"><code>drive_folder_id</code>はGoogleドライブのフォルダ・ファイルのURLまたはID自体のいずれでも受け付け、URL形式の場合はAPI側で正規表現によりIDを抽出する（フォルダは<code>/folders/&lt;id&gt;</code>、ファイルは<code>/file/d/&lt;id&gt;</code>または<code>?id=&lt;id&gt;</code>形式。画面設計8.2節が想定するGoogle Picker連携はDrive OAuthスコープ拡張が前提のため次スライスに持ち越し、このスライスは手動貼り付けの簡易フォームとする）。抽出後のIDが既存の<code>drive_folder_id</code>と重複する場合は409。<code>parent_folder_id</code>を指定した場合は「このフォルダ内の特定ファイルだけを参照範囲に含める」機能（ユーザーからの明示的な要望）として登録され、指定先が存在しない場合404、指定先が<code>item_type='file'</code>の場合（ファイルの下にファイルは登録できない）422。省略時は従来どおりトップレベルのフォルダ登録。admin限定。</p>
 
   <p class="diff-new"><strong>A-40 <span class="badge badge-delete">DELETE</span> /api/admin/doc-folders/{id}</strong></p>
   <pre class="diff-new"><code>// response 204（存在しないidは404）</code></pre>
-  <p class="muted diff-new">使用中のチャンネル（channel_doc_folders）があっても確認なく削除する。ON DELETE CASCADEでT-10側の割当も連動削除され、当該チャンネルのA-23レスポンスのfolder_idsから自動的に外れる。admin限定。</p>
+  <p class="muted diff-new">使用中のチャンネル（channel_doc_folders）があっても確認なく削除する。ON DELETE CASCADEでT-10側の割当も連動削除され、当該チャンネルのA-23レスポンスのfolder_idsから自動的に外れる。フォルダ（<code>item_type='folder'</code>）を削除した場合、その配下に登録済みの個別ファイル候補（<code>parent_folder_id</code>が一致する行）も同じくCASCADEで連動削除される。admin限定。</p>
 
   <p class="diff-new"><strong>A-41 <span class="badge badge-post">POST</span> /api/admin/doc-folders/sync</strong></p>
   <p class="muted diff-new">未実装（F-22の索引・埋め込みベクトル生成、基本設計書8.2節）。S-08の「今すぐ同期」ボタンは無効表示のままとし、次のスライス（Drive OAuthスコープ拡張・埋め込みAPI呼び出しを実装するスライス）で対応する。</p>
