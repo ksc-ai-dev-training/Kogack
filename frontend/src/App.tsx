@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
+import { mutate as mutateAll } from 'swr'
 import { useMe } from './hooks/useMe'
 import { useChannels } from './hooks/useChannels'
 import Layout from './components/Layout'
@@ -17,6 +19,40 @@ import AdminConsole from './pages/AdminConsole'
 // S-08は「利用者管理」タブのみ（ドキュメント参照範囲・AI利用状況・監査ログは未実装）。
 export default function App() {
   const { me, isLoading } = useMe()
+  const currentId = me?.id ?? null
+
+  // 表示中のログインユーザーがアプリ実行中に切り替わったら、安全な起点（/）へ強制的に戻す
+  // （ユーザーからの報告：あるユーザーがチャンネル会話を開いたまま、ログイン・ログアウトの
+  // ボタンを経由しないセッション切り替え（複数タブ・別ブラウザでの再ログイン・dev-loginの
+  // API直接呼び出し等）が起きると、そのタブは直前のユーザーが見ていたURLをそのまま新しい
+  // ユーザーの画面として描画してしまい、非公開チャンネルであれば存在まで意図せず開示していた）。
+  // ログイン・ログアウトの各ボタン自体は既にnavigate()で対応済みだが、それらを経由しない経路は
+  // 保護されていなかった。useEffectでnavigate()を呼ぶ実装は、ChannelView等が新しいユーザーの
+  // 権限で一度マウントされてしまってから遅れて是正する形になり、他のフックの再検証と競合すると
+  // 是正が効かないことがあったため、レンダー中にstateを調整するReact公式パターンへ変更し、
+  // 「新しいユーザーでChannelView等が一度も描画されない」ようにした（useUnreadDivider.tsと同じ手法）。
+  const [lastUserId, setLastUserId] = useState<string | null | undefined>(undefined)
+  const [pendingSwitch, setPendingSwitch] = useState(false)
+  if (!isLoading && lastUserId !== currentId) {
+    if (lastUserId !== undefined && currentId !== null) {
+      setPendingSwitch(true)
+    }
+    setLastUserId(currentId)
+  }
+  // pendingSwitchは<Navigate>を一度描画したら消費済みとして戻す（次のレンダーでは通常どおりに戻す）。
+  // レンダー中に消費すると<Navigate>自体が描画されないままリセットされてしまうため、
+  // ここはコミット後に実行されるuseEffectで行う。あわせてSWRの全キャッシュを再取得する
+  // （ユーザーからの報告：DM相手一覧等サイドバーの表示にも同じ問題があり、切り替え後
+  // 数秒間（各フックのポーリング間隔に依存）は直前のユーザーのDM相手がサイドバーに残っていた。
+  // SWRのキャッシュキーはURLのみでユーザーを問わないため、Layoutが再マウントされても
+  // useDms()等は次の自然な再検証まで古いデータを表示し続けてしまう。ここで明示的に
+  // 全キャッシュを再取得することで、切り替わった直後から新しいユーザーのデータに揃える）
+  useEffect(() => {
+    if (pendingSwitch) {
+      setPendingSwitch(false)
+      mutateAll(() => true, undefined, { revalidate: true })
+    }
+  }, [pendingSwitch])
 
   if (isLoading) {
     return <div className="p-8 text-center text-sm text-ink-subtle">読み込み中...</div>
@@ -29,6 +65,13 @@ export default function App() {
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     )
+  }
+
+  if (pendingSwitch) {
+    // 直前に表示していたユーザーとは異なるユーザーに切り替わった直後の1回だけここを通る。
+    // ChannelView等のルート要素を一切描画せずに/へ逃がすことで、新しいユーザーの権限で
+    // 古いURL（他人のチャンネル等）が一瞬でも描画されないようにする
+    return <Navigate to="/" replace />
   }
 
   return (
