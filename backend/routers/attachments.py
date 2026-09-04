@@ -6,7 +6,7 @@
 # attachmentsとして含めることで、確定したmessage_idに紐づくT-06行が作られる。
 #
 # 本番はSupabase Storageを想定する設計（基本設計書2.2節）だが、A-61アイコンアップロードと同じ考え方で
-# ローカル開発はbackend/uploads/attachments へのディスク保存で代替する（Koyeb実配備時はSupabase Storageへの
+# ローカル開発はbackend/uploads/attachments へのディスク保存で代替する（Fly.io実配備時はSupabase Storageへの
 # 置き換えが必要）。アイコン（全認証済み利用者に公開）と異なり、添付ファイルはチャンネル/DM参加者限定の
 # 公開範囲とする（基本設計書6.2節「設計判断」）ため、ダウンロード（A-22）はrequire_thread_accessと同じ
 # 権限判定を経由する。

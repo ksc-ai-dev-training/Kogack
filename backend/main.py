@@ -42,7 +42,7 @@ app.include_router(users.router)
 
 @app.get("/healthz", include_in_schema=False)
 async def healthz():
-    """Koyeb のヘルスチェック用。DBまで疎通しているかを確認する"""
+    """Fly.io のヘルスチェック用。DBまで疎通しているかを確認する"""
     try:
         await database.get_pool().fetchval("SELECT 1")
     except Exception:

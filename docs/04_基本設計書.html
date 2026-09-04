@@ -67,6 +67,7 @@
       <tr class="diff-new"><td>1.36</td><td>2026-09-03</td><td>S-06「参照ドキュメント範囲」タブで、フォルダ内の特定ファイルだけを参照範囲に含められるようにした（ユーザーからの明示的な要望）。実際のDrive APIでフォルダの中身を自動列挙する方式は、GCP側のDrive API有効化・Drive OAuthスコープの全社展開・アクセストークン保存基盤のいずれも未解決のため見送り、A-39フォルダ登録と同じ手動URL貼り付け方式のまま個別ファイルも登録できる方式を採用した理由を6.2節に設計判断として追記した。T-09 doc_foldersにitem_type・parent_folder_idを追加（新規テーブルは追加せず）、S-08「ドキュメント参照範囲」タブの登録フォーム・S-06のチェックボックスをいずれもフォルダ・ファイルのツリー表示に変更した。詳細設計書DB設計（T-09、v1.13）・API設計（A-38〜A-40、v1.30）を一貫して更新した。要件定義書・画面モックアップは既存のF-22・S-06・S-08の記載どおりで変更なし（画面モックアップが想定する実際のDrive API連携版は、上記の前提解決後に別途対応する）。</td></tr>
       <tr class="diff-new"><td>1.37</td><td>2026-09-04</td><td>S-05検索結果クリックでその発言までスクロールし薄いオレンジでハイライトする機能を追加した（ユーザーからの明示的な要望）。A-10/A-18が「直近50件のみ」しか読み込めず「もっと古いメッセージを読み込む」機能自体が無いため、検索結果の多くは表示できない制約があると判明し、ユーザーへ実装範囲（直近50件のみの簡易版／任意の古さに対応する版）を確認して後者を選択した経緯・新規<code>around</code>パラメータの設計を6.2節に追記した。詳細設計書API設計（A-10・A-18・A-20、v1.32）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
       <tr class="diff-new"><td>1.38</td><td>2026-09-04</td><td>スレッド返信（A-14）内でのチャンネルAIへのメンションに対応した（ユーザーからの明示的な要望）。AIサポート基盤の初回スライス（8.2節）時点から「次スライスでA-14にも同じ配線を追加する」と想定されていた対象外事項を実装した。8.1節に、スレッド内は反応モード（F-15）に関わらず常に明示的なメンションを要求する設計判断を追記した。要件定義書・画面モックアップ・詳細設計書は変更なし（当初から想定されていた実装のため）。</td></tr>
+      <tr class="diff-new"><td>1.39</td><td>2026-09-04</td><td>ホスティング先をKoyebからFly.ioへ変更した（ユーザーの意向）。9.6節に設計判断として変更理由（Dockerfile新規作成、gitブランチ連動の自動デプロイが無くfly deployコマンドを明示実行する運用へ変更、本番/ステージングをアプリ単位で分離する方式へ変更）を追記し、2.1節のシステム構成図・技術スタック表・9.2/9.6節の各表のKoyeb表記をFly.ioへ更新した。リポジトリ直下にDockerfile・.dockerignore・fly.tomlを新規作成した（詳細はリポジトリのCLAUDE.md参照）。要件定義書・詳細設計書・画面モックアップは変更なし（ホスティング先はいずれの文書でも個別のIDに紐づく形では言及されていないため）。</td></tr>
     </tbody>
   </table>
 
@@ -133,7 +134,7 @@
   <h2 id="sec2">2. システム構成</h2>
 
   <h3>2.1 システム構成図</h3>
-  <p>本システムは、React製SPAをフロントエンドとし、Koyeb上でホスティングするFastAPIがAPIを提供、データストアにSupabaseのPostgreSQLを用いる3層構成である。認証はGoogle OAuth 2.0、社内ドキュメントの参照はGoogle Drive APIと連携する。AIの回答生成には外部AI API（OpenAI API）を用い、座席予約システムとはREST API経由で連携する。既存システムLCC CRMの構成を踏襲する（REQ-N-07）。</p>
+  <p>本システムは、React製SPAをフロントエンドとし、<span class="diff-new">Fly.io</span>上でホスティングするFastAPIがAPIを提供、データストアにSupabaseのPostgreSQLを用いる3層構成である。認証はGoogle OAuth 2.0、社内ドキュメントの参照はGoogle Drive APIと連携する。AIの回答生成には外部AI API（OpenAI API）を用い、座席予約システムとはREST API経由で連携する。既存システムLCC CRMの構成を踏襲する（REQ-N-07）。<span class="diff-new">ただしホスティング先のみLCC CRM（Koyeb）から変更している（9.6節「設計判断」参照）。</span></p>
 
   <div class="diagram">
     <svg width="860" height="380" viewBox="0 0 860 380" font-family="'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif">
@@ -152,9 +153,9 @@
       <text x="95" y="188" text-anchor="middle" font-size="12" fill="#1a1d21">React SPA</text>
       <text x="95" y="206" text-anchor="middle" font-size="10.5" fill="#60656d">3秒間隔ポーリング</text>
 
-      <!-- Koyeb 枠 -->
+      <!-- Fly.io 枠 -->
       <rect x="230" y="105" width="220" height="160" rx="8" fill="#ffffff" stroke="#d9dde3" stroke-width="1.5" stroke-dasharray="5 4"/>
-      <text x="340" y="126" text-anchor="middle" font-size="11.5" font-weight="600" fill="#8a8f98">Koyeb（main / staging）</text>
+      <text x="340" y="126" text-anchor="middle" font-size="11.5" font-weight="600" fill="#8a8f98">Fly.io（kogack / kogack-staging）</text>
       <rect x="255" y="138" width="170" height="100" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="1.5"/>
       <text x="340" y="164" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a8a">FastAPI</text>
       <text x="340" y="184" text-anchor="middle" font-size="12" fill="#1a1d21">Uvicorn + asyncpg</text>
@@ -233,7 +234,7 @@
       <tr><td>ファイルストレージ（本書で確定）</td><td>Supabase Storage。DBと同一ベンダーとし、認証・アクセス制御の仕組みを流用して運用を簡素化する</td></tr>
       <tr class="diff-new"><td>アイコン画像のアップロード（本書で追加）</td><td>個人アイコン（T-01.picture_url）・チャンネルAIアイコン（T-08.persona_icon_url）・BOTアイコン（T-19.bot_icon_url）を対象に、共通の画像アップロードAPI（A-61）を用意する。JPEG/PNG/WebP、1件5MBまで。Supabase Storageの<code>icons/</code>パス配下に保存し、message_attachments（チャンネル/DM参加者限定）とは異なり全認証済み利用者が読み取れる公開範囲とする（アイコンは組織内のあらゆる画面に表示されうるため。6.2節「設計判断」）。アップロード画像の内容審査（モデレーション）、旧ファイルの自動削除は対象外（3.2節）。</td></tr>
       <tr><td>連携先システム（本書で確定）</td><td>座席予約システムの参照REST APIを前提とする。具体的なエンドポイント仕様は連携先システムの実装状況に依存するため、詳細設計書で確定する（8.4節・10章参照。外部依存リスクが残る）</td></tr>
-      <tr><td>ホスティング</td><td>Koyeb（main=本番 / staging=ステージング）。本番はフロントをビルドしFastAPIが静的配信するSPA構成（LCC CRM踏襲）</td></tr>
+      <tr class="diff-new"><td>ホスティング（本書で変更）</td><td>Fly.io（アプリ kogack=本番 / kogack-staging=ステージングの2アプリに分けて運用）。本番はフロントをビルドしFastAPIが静的配信するSPA構成（LCC CRM踏襲、ホスティング先のみKoyebから変更。9.6節「設計判断」）</td></tr>
       <tr><td>開発</td><td>Vite devサーバー(3000)→FastAPI(8001)へ /api プロキシ</td></tr>
       <tr class="diff-new"><td>予約メッセージの送信（本書で追加）</td><td>外部のジョブスケジューラ（Celery等）は導入せず、FastAPIプロセス内でアプリ起動時に開始するasyncioバックグラウンドタスクとして実装する（<code>services/scheduled_dispatcher.py</code>）。30秒間隔で <code>scheduled_messages</code>（T-18）のうち <code>status='pending'</code> かつ <code>scheduled_at &lt;= now()</code> の行を検出し、通常の投稿処理（A-11相当）を呼び出してT-05へ発言化する。既存の3秒間隔ポーリング（リアルタイム配信）とは独立した仕組み。単一インスタンス運用を前提とする（10章）。<span class="diff-new">同じディスパッチャが <code>recurring_posts</code>（T-19、F-36）も対象に含み、<code>next_run_at &lt;= now()</code> かつ <code>is_active=true</code> の行を検出してsender_type='bot'のT-05発言を作成し、次回時刻を計算して<code>next_run_at</code>を更新する（6.2節「設計判断」参照）。</span></td></tr>
     </tbody>
@@ -241,7 +242,7 @@
 
   <h3>2.3 開発時と本番時の構成差</h3>
   <table>
-    <thead><tr><th>項目</th><th>開発時</th><th>本番時（Koyeb）</th></tr></thead>
+    <thead><tr><th>項目</th><th>開発時</th><th>本番時（Fly.io）</th></tr></thead>
     <tbody>
       <tr><td>フロント配信</td><td>Vite devサーバー（ポート3000）がHMR付きで配信</td><td><code>vite build</code> の成果物（静的ファイル）をFastAPIが静的配信</td></tr>
       <tr><td>API呼び出し</td><td>Viteのプロキシ設定で <code>/api</code> をFastAPI（ポート8001）へ転送。同一オリジン扱いのためCORS設定不要</td><td>同一オリジン（FastAPIが静的配信とAPIを兼ねる）。<code>/api</code> 以外のパスはSPAの <code>index.html</code> にフォールバック</td></tr>
@@ -551,7 +552,7 @@
   </div>
 
   <h3>5.4 F-06 横断検索・F-07 ファイル共有</h3>
-  <p><strong>処理概要:</strong> 過去の発言・ファイル・ドキュメント根拠の横断検索（F-06。<span class="diff-new">検索条件モディファイアはF-42、5.23節を参照</span>）。検索対象は利用者の参照権限（参加チャンネル・DM、文書の閲覧権限）の範囲に限定する（REQ-N-02）。ファイル共有（F-07）は1ファイル20MBまでとし、Supabase Storageに保存する。<span class="diff-new">このスライスはA-61アイコンアップロードと同じ考え方でbackend/uploads/attachmentsへのディスク保存で代替する（Koyeb実配備時はSupabase Storageへの置き換えが必要）。投稿欄でアップロードしたファイルはA-21が即座に実体を保存して参照情報を返し、実際の投稿（A-11/A-14/A-19）でT-06 message_attachmentsへ紐づける（6.2節「設計判断」）。ダウンロード（A-22）は添付先の発言の参加者に限定する（アイコンと異なり公開しない）。</span>AIによる添付ファイルの内容参照（テキスト抽出等）は対象外。</p>
+  <p><strong>処理概要:</strong> 過去の発言・ファイル・ドキュメント根拠の横断検索（F-06。<span class="diff-new">検索条件モディファイアはF-42、5.23節を参照</span>）。検索対象は利用者の参照権限（参加チャンネル・DM、文書の閲覧権限）の範囲に限定する（REQ-N-02）。ファイル共有（F-07）は1ファイル20MBまでとし、Supabase Storageに保存する。<span class="diff-new">このスライスはA-61アイコンアップロードと同じ考え方でbackend/uploads/attachmentsへのディスク保存で代替する（Fly.io実配備時はSupabase Storageへの置き換えが必要）。投稿欄でアップロードしたファイルはA-21が即座に実体を保存して参照情報を返し、実際の投稿（A-11/A-14/A-19）でT-06 message_attachmentsへ紐づける（6.2節「設計判断」）。ダウンロード（A-22）は添付先の発言の参加者に限定する（アイコンと異なり公開しない）。</span>AIによる添付ファイルの内容参照（テキスト抽出等）は対象外。</p>
   <table>
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
     <tbody><tr><td>S-05, S-03</td><td>A-20〜A-22</td><td>T-05〜T-07, T-09, T-10</td></tr></tbody>
@@ -907,7 +908,7 @@
   </div>
 
   <div class="callout diff-new">
-    <strong>設計判断（予約メッセージの送信を外部ジョブスケジューラではなくFastAPI内蔵のasyncioタスクにした理由）:</strong> Celery＋Redisのような専用ジョブキューを導入すると、Koyeb上の構成要素が増え（ワーカープロセス・ブローカー）、9月末リリースの規模に対して過剰である。既に8.1節でAI応答生成を非同期タスクとして起動する仕組み（<code>asyncio.create_task</code>）があり、同じ方式を「30秒間隔でDBをポーリングして期限到来分を処理する」ループとして流用できるため、追加インフラなしで実現できると判断した。ただし、この方式はFastAPIプロセスが1つであることを前提とする。将来Koyebで複数インスタンスに水平スケールする場合、同じ予約メッセージを複数インスタンスが同時に処理し二重送信する恐れがあるため、その時点で <code>UPDATE ... WHERE status='pending' RETURNING</code>（1行を排他的に確保するアトミックな更新）への変更、または専用ワーカーへの切り出しが必要になる（10章に前提として明記）。予約メッセージへの添付ファイルを対象外としたのは、T-05に発言として存在する前にファイルを保存する経路（message_attachments.message_idはNOT NULL）を新たに設ける必要があり、本追加のスコープに対して過大なためである。
+    <strong>設計判断（予約メッセージの送信を外部ジョブスケジューラではなくFastAPI内蔵のasyncioタスクにした理由）:</strong> Celery＋Redisのような専用ジョブキューを導入すると、Fly.io上の構成要素が増え（ワーカープロセス・ブローカー）、9月末リリースの規模に対して過剰である。既に8.1節でAI応答生成を非同期タスクとして起動する仕組み（<code>asyncio.create_task</code>）があり、同じ方式を「30秒間隔でDBをポーリングして期限到来分を処理する」ループとして流用できるため、追加インフラなしで実現できると判断した。ただし、この方式はFastAPIプロセスが1つであることを前提とする。将来Fly.ioで複数インスタンスに水平スケールする場合、同じ予約メッセージを複数インスタンスが同時に処理し二重送信する恐れがあるため、その時点で <code>UPDATE ... WHERE status='pending' RETURNING</code>（1行を排他的に確保するアトミックな更新）への変更、または専用ワーカーへの切り出しが必要になる（10章に前提として明記）。予約メッセージへの添付ファイルを対象外としたのは、T-05に発言として存在する前にファイルを保存する経路（message_attachments.message_idはNOT NULL）を新たに設ける必要があり、本追加のスコープに対して過大なためである。
   </div>
 
   <div class="callout diff-new">
@@ -1167,7 +1168,7 @@
     <thead><tr><th>項目</th><th>方針</th></tr></thead>
     <tbody>
       <tr><td>稼働時間</td><td>業務時間内（平日9-18時）の利用を前提。計画停止は3営業日前までにチャンネルで周知</td></tr>
-      <tr><td>基盤</td><td>Koyeb（アプリ）と Supabase（DB・Storage）のマネージドサービスの可用性に依拠し、自前の冗長化は行わない</td></tr>
+      <tr class="diff-new"><td>基盤</td><td>Fly.io（アプリ）と Supabase（DB・Storage）のマネージドサービスの可用性に依拠し、自前の冗長化は行わない</td></tr>
       <tr><td>外部依存</td><td>外部AI API・Google Drive API・座席予約システムのいずれかが一時的に利用不能でも、チャット自体（人間同士の会話）は継続できるよう、AI呼び出し部分の失敗を会話全体の失敗にしない設計とする</td></tr>
     </tbody>
   </table>
@@ -1207,13 +1208,18 @@
   </table>
 
   <h3>9.6 デプロイ</h3>
+
+  <div class="callout diff-new">
+    <strong>設計判断（ホスティング先をKoyebからFly.ioへ変更した理由）:</strong> LCC CRM踏襲の既定はKoyebだったが（REQ-N-07・要件定義書8.1節）、ユーザーの意向によりFly.ioへ変更した。アプリ構成自体（Reactをビルドし、FastAPIが静的配信するSPA構成の単一コンテナ）はKoyebを前提に設計した内容がそのまま踏襲でき、変更が必要だったのは主に3点: （1）実行環境がコンテナ（Dockerfile）を要求する点はKoyeb・Fly.ioとも同じだが、Dockerfile・.dockerignore自体はこれまで未作成だったため本節にあわせて新規作成した（リポジトリ直下）。（2）Koyebの「gitブランチにpushすると自動でデプロイされる」仕組みはFly.io標準機能には無く、<code>fly deploy</code>コマンドを明示的に実行する運用に変更した（CI/CD連携で自動化する余地は残すが、このスライスの対象外）。（3）本番/ステージングの分離は、Koyebでは1サービス内のブランチ切り替えで実現していたが、Fly.ioでは<code>kogack</code>（本番）・<code>kogack-staging</code>（ステージング）という2つの独立したアプリとして分離する方式に変更した（Fly.ioの一般的な環境分離パターン）。環境変数・秘密情報の設定方法も、Koyebのダッシュボード設定から<code>fly secrets set</code>コマンドへ変更している。<code>fly.toml</code>（リポジトリ直下）の<code>internal_port</code>と、Dockerfileが読む環境変数<code>PORT</code>が対応する。
+  </div>
+
   <table>
     <thead><tr><th>項目</th><th>方針</th></tr></thead>
     <tbody>
-      <tr><td>ホスティング</td><td>Koyeb。main ブランチ=本番 / staging ブランチ=ステージング</td></tr>
-      <tr><td>リリースフロー</td><td>staging へマージ→ステージング環境で動作確認→main へマージ→本番反映（Gitブランチ連動の自動デプロイ）</td></tr>
-      <tr><td>ビルド</td><td>デプロイ時にフロントを <code>vite build</code> でビルドし、FastAPIが静的配信する（2.3節参照）</td></tr>
-      <tr><td>環境分離</td><td>環境変数を環境ごとにKoyeb上で設定。DBも環境ごとに分離</td></tr>
+      <tr class="diff-new"><td>ホスティング</td><td>Fly.io。アプリ kogack=本番 / kogack-staging=ステージング（2アプリに分けて運用）</td></tr>
+      <tr class="diff-new"><td>リリースフロー</td><td>staging（アプリ kogack-staging）へ<code>fly deploy</code>して動作確認→問題なければ本番（アプリ kogack）へ<code>fly deploy</code>（Koyebのようなgitブランチ連動の自動デプロイは無く、明示的なコマンド実行が必要）</td></tr>
+      <tr><td>ビルド</td><td>デプロイ時にフロントを <code>vite build</code> でビルドし、FastAPIが静的配信する（2.3節参照）。<code>Dockerfile</code>のマルチステージビルドで、frontendのビルドとbackendの実行環境を1つのイメージにまとめる</td></tr>
+      <tr class="diff-new"><td>環境分離</td><td>環境変数を環境（アプリ）ごとに<code>fly secrets set</code>で設定。DBも環境ごとに分離</td></tr>
     </tbody>
   </table>
 
@@ -1241,7 +1247,7 @@
     <li>座席予約システムが参照可能な手段を用意できるかは、連携先の状況に依存する外部要因である（8.4節）。</li>
     <li>AI利用コストが想定を超えた場合にAIの応答自体を止めるか、通知のみで応答は継続するかは別途協議により確定する（9.5節）。</li>
     <li>既存Slackとの併存を前提とし、本システムでSlackを置き換えることは行わない。既存Slackへの通知・連携の要否は別途協議する。</li>
-    <li class="diff-new">予約メッセージの送信・定期投稿（F-35, F-36）を担うディスパッチャは、FastAPIプロセスが単一インスタンスであることを前提とする（6.2節「設計判断」）。将来Koyebで水平スケールする場合は、二重送信を防ぐ排他制御（アトミックなUPDATE、または専用ワーカーへの切り出し）への変更が必要になる。</li>
+    <li class="diff-new">予約メッセージの送信・定期投稿（F-35, F-36）を担うディスパッチャは、FastAPIプロセスが単一インスタンスであることを前提とする（6.2節「設計判断」）。将来Fly.ioで水平スケールする場合は、二重送信を防ぐ排他制御（アトミックなUPDATE、または専用ワーカーへの切り出し）への変更が必要になる。</li>
     <li>本ドキュメント一式は新人社員のAI開発研修のサンプル成果物として作成されている。</li>
   </ul>
 

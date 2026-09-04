@@ -1,0 +1,40 @@
+# Dockerイメージのビルド時に「送らないファイル」の一覧（.gitignoreと同じ書き方）。
+# ここに書いたものは docker build がそもそも読み込まないため、
+# ①秘密情報が誤って焼き込まれるのを防ぐ　②ビルドが速くなる、の2つの効果がある。
+
+# ---- 秘密情報。本番の値は Fly.io の secrets として別途渡すため、
+#      イメージには絶対に含めない ----
+.env
+.env.*
+!.env.example
+
+# ---- Git ----
+.git
+.gitignore
+
+# ---- Node.js（frontend）。依存パッケージはビルドステージの中で
+#      npm ci によりクリーンな状態から入れ直すため、ローカルの
+#      node_modules をそのまま持ち込む必要はない ----
+**/node_modules
+
+# ---- Python（backend）。ローカルの仮想環境やキャッシュはコンテナの中では
+#      無意味（むしろOSやCPU構成の違いで壊れる原因になる）なので除外する ----
+**/__pycache__
+**/*.pyc
+backend/.venv
+
+# ---- ビルド成果物。frontend/dist はステージ1の中で作り直すので、
+#      ローカルに残っている古いビルドを持ち込まない ----
+frontend/dist
+
+# ---- ローカル開発でのアップロード先（アイコン・添付ファイル）。
+#      本番はSupabase Storageへ置き換える想定のため不要（CLAUDE.md参照） ----
+backend/uploads
+
+# ---- 設計ドキュメント・研修資料・エディタ設定。アプリの実行そのものには不要 ----
+docs
+検討資料
+.claude
+CLAUDE.md
+README.md
+start.bat

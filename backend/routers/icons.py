@@ -3,7 +3,7 @@
 # 実際に設定する側（A-25/A-54/A-55/A-62）で権限を検証する（基本設計書API一覧「設計判断」）。
 #
 # 本番はSupabase Storageを想定する設計（基本設計書2.2節）だが、このスライスではDATABASE_URLと同じ
-# 考え方でローカル開発を優先し、backend/uploads/icons へのディスク保存で代替する。Koyebへの実配備時は
+# 考え方でローカル開発を優先し、backend/uploads/icons へのディスク保存で代替する。Fly.ioへの実配備時は
 # 単一コンテナに永続ディスクの保証が無いため、Supabase Storageへの置き換えが必要（CLAUDE.md実装状況）。
 import uuid
 from pathlib import Path
