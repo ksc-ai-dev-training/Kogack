@@ -52,10 +52,16 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
   // そのまま3000msに残し、ここだけ個別にconfigで上書きする。サイドバー・未読バッジ・スレッド等は
   // 従来どおり3秒のまま（影響範囲を会話ログの表示に限定するため）。使用感を試したうえで本採用するか
   // 判断する想定で、CLAUDE.mdへの記録は結論が出てから行う
+  //
+  // dedupingIntervalもrefreshIntervalと同じ1000msに揃える必要がある。SWRの既定は2000msで、
+  // 同一キーへのリクエストをその間隔内は重複とみなして間引く仕様のため、refreshIntervalだけ
+  // 1000msにしてもここを2000msのままにすると実質的に2秒に1回しか新規リクエストが飛ばない
+  // （同じ画面に居続けるより、別のチャンネル/DMへ切替→復帰した方が速く反映される、という
+  // ユーザー報告のとおりの症状になる。切替先は別のSWRキーのため間引きの対象外になるため）
   const { data, error, isLoading, mutate } = usePolling<Message[]>(
     basePath ? `${basePath}/messages${anchorMessageId ? `::around=${anchorMessageId}` : ''}` : null,
     fetcher,
-    { refreshInterval: 1000 },
+    { refreshInterval: 1000, dedupingInterval: 1000 },
   )
 
   // sinceによる差分ポーリングは新着行しか取り込まないため、返信投稿時に元発言のthread_reply_countが
