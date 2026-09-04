@@ -28,12 +28,17 @@ DATABASE_URL = (
     or f"postgresql://kogack:kogack@localhost:{_db_port}/kogack"
 )
 
-# 本番（Supabase）は自動マイグレーションを行わず、SCHEMA は手動適用する。
-# 起動のたびに CREATE TABLE を流さないよう APP_ENV=production では抑止する
+# 本番(Supabase)も含め、既定でSCHEMAを起動時に自動適用する(AUTO_MIGRATE既定値="1")。
+# 2026-09-04: 本番のみ既定で無効にしていた旧実装が原因で、messages.is_summary列(2026-09-03追加)が
+# Fly.io本番のSupabase DBへ反映されないまま残り、メッセージ一覧取得(A-10/A-18)が
+# KeyError経由の500エラーになる事故が発生した(CLAUDE.md実装状況節に記録)。SCHEMAは
+# CREATE TABLE IF NOT EXISTS・ADD COLUMN IF NOT EXISTS・制約追加はDO $$ ... EXCEPTION WHEN
+# duplicate_object THEN NULL; END $$ でいずれも冪等に保たれているため、毎起動時に流しても
+# 安全という前提で既定を反転した(起動のたびに冪等なSQLが1回余分に走る分だけコールドスタートが
+# わずかに遅くなるが、スキーマ取りこぼしの再発を防ぐ方を優先する判断。ユーザー承認済み)。
+# 明示的に無効化したい場合のみ AUTO_MIGRATE=0 を環境変数/.envで指定する。
 APP_ENV = os.environ.get("APP_ENV") or ROOT_ENV.get("APP_ENV", "development")
-AUTO_MIGRATE = (
-    os.environ.get("AUTO_MIGRATE") or ROOT_ENV.get("AUTO_MIGRATE") or ("0" if APP_ENV == "production" else "1")
-) == "1"
+AUTO_MIGRATE = (os.environ.get("AUTO_MIGRATE") or ROOT_ENV.get("AUTO_MIGRATE") or "1") == "1"
 
 _pool: asyncpg.Pool | None = None
 
