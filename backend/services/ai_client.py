@@ -19,6 +19,10 @@ MODEL_COSTS = {
     # gpt-5-nano: $0.05/$0.40（1Mトークン、USD）。ローカル動作確認用に最安のテキスト生成モデルとして採用
     # （2026-09-02時点のOpenAI公式単価、developers.openai.com/api/docs/pricing）
     "gpt-5-nano": {"input": 0.0077, "output": 0.0613},
+    # gpt-4.1-nano: $0.10/$0.40（1Mトークン、USD）。gpt-5-nanoは推論系モデルでreasoning_tokensの
+    # 分だけ応答が遅くなることが本番実機で判明したため、2026-09-04に非推論系のこちらへ切り替えた
+    # （gpt-4o-miniより安価かつコンテキスト長も大きい。2026-09-04時点のOpenAI公式単価）
+    "gpt-4.1-nano": {"input": 0.0153, "output": 0.0613},
 }
 
 
