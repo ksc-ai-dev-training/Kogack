@@ -47,9 +47,15 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
     return s.messages
   }
 
+  // メッセージ一覧のみポーリング間隔を短縮する試験的な変更（ユーザーからの要望、2026-09-04）。
+  // 基本設計書2.2節・8.7節の「3秒間隔」という全体方針は変えず、usePollingの既定値（usePolling.ts）は
+  // そのまま3000msに残し、ここだけ個別にconfigで上書きする。サイドバー・未読バッジ・スレッド等は
+  // 従来どおり3秒のまま（影響範囲を会話ログの表示に限定するため）。使用感を試したうえで本採用するか
+  // 判断する想定で、CLAUDE.mdへの記録は結論が出てから行う
   const { data, error, isLoading, mutate } = usePolling<Message[]>(
     basePath ? `${basePath}/messages${anchorMessageId ? `::around=${anchorMessageId}` : ''}` : null,
     fetcher,
+    { refreshInterval: 1000 },
   )
 
   // sinceによる差分ポーリングは新着行しか取り込まないため、返信投稿時に元発言のthread_reply_countが
