@@ -475,6 +475,9 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "blocks": blocks or [],
         "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
+        # sinceポーリングの差分取得はupdated_atで判定する（下記list_messages参照）。フロントの
+        # useMessagesがカーソル追跡に使う
+        "updated_at": row["updated_at"].isoformat(),
     }
 
 
@@ -526,15 +529,24 @@ async def list_messages(
     """A-10: 履歴取得。sinceは3秒間隔ポーリングの差分取得に使う（基本設計書9.1節）。
     thread_reply_countはS-04スレッド表示への導線（「N件の返信」）に使う（詳細設計書 API設計4.3節）。
     aroundは検索結果からのハイライトジャンプ用（指定した発言を中心に前後AROUND_WINDOW件、
-    ユーザーからの明示的な要望。sinceと同時指定時はsinceを優先する）"""
+    ユーザーからの明示的な要望。sinceと同時指定時はsinceを優先する）。
+
+    バグ修正（2026-09-04）: sinceの判定はcreated_atではなくupdated_atで行う。AI応答は
+    generation_status='generating'のプレースホルダとして作成され、本文確定時はUPDATEのみで
+    created_atは変わらない。created_atで絞り込むと、一度「生成中」の状態でこの行をポーリング
+    取得した時点でsinceカーソルがその行のcreated_at自身まで進んでしまい、以後同じ行は
+    created_at > sinceを二度と満たさなくなる（＝本文確定後の更新が同じ画面に居続ける限り
+    永久に届かない）という不具合が実際に発生した。updated_atなら本文確定時のUPDATEで
+    値が進むため、次のポーリングで再度取得できる（フロントのuseMessagesもupdated_atで
+    カーソルを追跡し、既存行はid一致で上書きするよう対応済み）。"""
     pool = get_pool()
     if since:
         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
         rows = await pool.fetch(
             f"""{_MESSAGES_SELECT}
                WHERE m.channel_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
-                 AND m.created_at > $2
-               ORDER BY m.created_at ASC""",
+                 AND m.updated_at > $2
+               ORDER BY m.updated_at ASC""",
             channel_id, since_dt,
         )
     elif around:

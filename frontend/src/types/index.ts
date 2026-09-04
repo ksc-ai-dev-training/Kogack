@@ -149,6 +149,9 @@ export interface Message {
   /** F-07 ファイル共有。チャンネル・DMどちらの発言にも付く */
   attachments?: MessageAttachment[]
   created_at: string
+  /** sinceポーリングの差分取得カーソルに使う（useMessages）。AI応答の本文確定はUPDATEのみで
+   * created_atが変わらないため、このフィールドで「更新された」ことを検知する（2026-09-04バグ修正） */
+  updated_at: string
 }
 
 export interface MessagesResponse {

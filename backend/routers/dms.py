@@ -146,6 +146,8 @@ def _message_out(row, attachments: list[dict] | None = None) -> dict:
         "blocks": [],
         "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
+        # channels.pyと同じ理由でsinceポーリングの差分取得判定に使う（下記list_messages参照）
+        "updated_at": row["updated_at"].isoformat(),
     }
 
 
@@ -192,15 +194,18 @@ async def list_messages(
     user: CurrentUser = Depends(require_dm_member),
 ):
     """A-18: 履歴取得。channels.list_messagesと同じsince差分ポーリング方式（基本設計書9.1節）。
-    aroundはchannels.list_messagesと同じくハイライトジャンプ用（ユーザーからの明示的な要望）"""
+    aroundはchannels.list_messagesと同じくハイライトジャンプ用（ユーザーからの明示的な要望）。
+    sinceの判定はcreated_atではなくupdated_atで行う（channels.list_messagesと同じ理由・
+    2026-09-04のバグ修正。DM発言は現状AI応答が無いため実害は起きていなかったが、他2ルーターと
+    挙動を揃えておく）"""
     pool = get_pool()
     if since:
         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
         rows = await pool.fetch(
             f"""{_MESSAGES_SELECT}
                WHERE m.dm_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
-                 AND m.created_at > $2
-               ORDER BY m.created_at ASC""",
+                 AND m.updated_at > $2
+               ORDER BY m.updated_at ASC""",
             dm_id, since_dt,
         )
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])

@@ -40,6 +40,9 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "blocks": blocks or [],
         "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
+        # channels.py/dms.pyの_message_outと型を揃えるため（useThreadは全件再取得のみで
+        # sinceカーソルには使わないが、Message型のフィールドとしては必須にしている）
+        "updated_at": row["updated_at"].isoformat(),
     }
 
 

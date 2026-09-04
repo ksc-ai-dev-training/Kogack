@@ -66,7 +66,7 @@ async def recover_orphaned_generations() -> None:
     無かったために「生成中」のまま数十分固まり続けた発言が発生したことを受けて追加した）。"""
     count = await get_pool().fetchval(
         """WITH updated AS (
-               UPDATE messages SET body = $1, generation_status = NULL
+               UPDATE messages SET body = $1, generation_status = NULL, updated_at = now()
                WHERE generation_status = 'generating'
                RETURNING id
            )
@@ -337,7 +337,7 @@ async def _generate_and_post(
         # 呼ばれた場合の競合対策（cancel_generation側が既にキャンセル済みメッセージへ更新していれば
         # ここは0件更新となり、完了した応答が中断メッセージを上書きしてしまうことを防ぐ）
         await pool.execute(
-            """UPDATE messages SET body = $2, generation_status = NULL
+            """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()
                WHERE id = $1 AND generation_status = 'generating'""",
             message_id, reply,
         )
@@ -359,7 +359,7 @@ async def _generate_and_post(
     except Exception:
         traceback.print_exc()
         await pool.execute(
-            """UPDATE messages SET body = $2, generation_status = NULL
+            """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()
                WHERE id = $1 AND generation_status = 'generating'""",
             message_id, "（エラーが発生したため回答できませんでした）",
         )
@@ -380,7 +380,7 @@ async def cancel_generation(message_id: int) -> bool:
     if task is not None and not task.done():
         task.cancel()
     row = await get_pool().fetchrow(
-        """UPDATE messages SET body = $2, generation_status = NULL
+        """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()
            WHERE id = $1 AND generation_status = 'generating' RETURNING id""",
         message_id, "（利用者により生成が中断されました）",
     )
@@ -469,7 +469,7 @@ async def _generate_summary_and_post(
         rows = await _fetch_summary_source_rows(channel_id, thread_id)
         if not rows:
             await pool.execute(
-                """UPDATE messages SET body = $2, generation_status = NULL
+                """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()
                    WHERE id = $1 AND generation_status = 'generating'""",
                 message_id, "（要約する発言がありませんでした）",
             )
@@ -490,7 +490,7 @@ async def _generate_summary_and_post(
         reply = (res.choices[0].message.content or "").strip() or "（要約を生成できませんでした）"
 
         await pool.execute(
-            """UPDATE messages SET body = $2, generation_status = NULL
+            """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()
                WHERE id = $1 AND generation_status = 'generating'""",
             message_id, reply,
         )
@@ -509,7 +509,7 @@ async def _generate_summary_and_post(
     except Exception:
         traceback.print_exc()
         await pool.execute(
-            """UPDATE messages SET body = $2, generation_status = NULL
+            """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()
                WHERE id = $1 AND generation_status = 'generating'""",
             message_id, "（エラーが発生したため要約できませんでした）",
         )

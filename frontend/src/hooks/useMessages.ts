@@ -41,8 +41,20 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
         : `${basePath}/messages`
     const res = await apiFetch<MessagesResponse>(url)
     if (res.items.length > 0) {
-      s.messages = s.since ? [...s.messages, ...res.items] : res.items
-      s.since = res.items[res.items.length - 1].created_at
+      if (s.since) {
+        // バグ修正（2026-09-04）: sinceでの差分取得は「新規行」だけでなく「既存行の更新」
+        // （AI応答が生成中→本文確定になる等、UPDATEのみでcreated_atが変わらないケース）も
+        // 返ってきうる（バックエンド側もsinceの絞り込みをupdated_at基準に変更済み）。従来は
+        // 常に末尾へ追記するだけだったため、一度「生成中」の状態でこの行を取得すると、
+        // 画面を切り替えない限り本文確定後の内容が永久に反映されないバグがあった。
+        // id一致で上書きすることで、既存行はその場で内容が更新され、新規行だけが追記される
+        const byId = new Map(s.messages.map((m) => [m.id, m] as const))
+        for (const item of res.items) byId.set(item.id, item)
+        s.messages = [...byId.values()]
+      } else {
+        s.messages = res.items
+      }
+      s.since = res.items[res.items.length - 1].updated_at
     }
     return s.messages
   }
