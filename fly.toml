@@ -1,41 +1,31 @@
-# Fly.io デプロイ設定。`fly deploy` はこのファイルを読んで、アプリ名・使用する
-# Dockerfile・待ち受けポート・ヘルスチェック等を決める。
+# fly.toml app configuration file generated for kogack on 2026-09-04T14:13:29+09:00
 #
-# 重要: このファイルはリポジトリにコミットされ、リポジトリを見られる人全員に
-# 見える。DATABASE_URL・JWT_SECRET・GOOGLE_CLIENT_SECRET・OPENAI_API_KEY のような
-# 秘密情報は絶対にここへ書かず、`fly secrets set KEY=value` で別途登録すること
-# （.env と同じ理由。[env] セクションには本当に非公開でよい値だけを置く）。
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "kogack"            # Fly.io上のアプリ名。Fly.io全体で一意である必要があるため、
-                           # 実際に `fly launch`/`fly deploy` する際に使用可能な名前へ
-                           # 変更が必要になる場合がある（例: kogack-<会社名> 等）
-primary_region = "nrt"    # 東京リージョン
+app = 'kogack'
+primary_region = 'nrt'
 
 [build]
-  # 特に指定しなければ、リポジトリ直下の Dockerfile が自動的に使われる
+[env]
+  APP_ENV = 'production'
 
 [http_service]
-  internal_port = 8000     # Dockerfile の `ENV PORT=8000`（既定値）と一致させる。
-                            # Fly.ioはここに書いた番号を起動時に環境変数 PORT として
-                            # コンテナへ渡す（Dockerfile側は ${PORT:-8000} を読むだけで
-                            # 決め打ちしていないため、この値を変えるときはここだけ直せばよい）
-  force_https = true       # http:// でアクセスされても https:// へ自動転送する
-  auto_stop_machines = "stop"   # しばらくアクセスが無いとマシンを自動停止し、
-                                 # 課金・リソース消費を抑える（PaaSでの一般的な省コスト設定）
-  auto_start_machines = true    # 停止中に新しいリクエストが来たら自動的に再起動する
-  min_machines_running = 0      # 常時起動しておく最低台数。0なら「使う時だけ動く」構成
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
 
   [[http_service.checks]]
-    # backend/main.py の /healthz（DBまで疎通しているか確認するエンドポイント）を
-    # Fly.io自身が定期的に叩き、応答が無い/異常なマシンへは新規リクエストを回さないようにする
-    grace_period = "10s"   # 起動直後はまだDB接続等が終わっていない可能性があるため、
-                            # このチェックを最初の10秒は失敗しても異常とみなさない
-    interval = "15s"       # 15秒おきにチェックする
-    method = "GET"
-    timeout = "5s"
-    path = "/healthz"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/healthz'
 
-[env]
-  # ここは「非公開ではない」設定値だけを置く場所（本番であることの明示のみ）。
-  # DATABASE_URL 等の秘密情報は前述のとおり `fly secrets set` で別途登録する。
-  APP_ENV = "production"
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
