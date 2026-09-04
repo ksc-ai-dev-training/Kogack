@@ -485,13 +485,48 @@ _MESSAGES_SELECT = """SELECT m.*, u.name AS sender_name, u.picture_url AS sender
    LEFT JOIN users u ON u.id = m.sender_user_id"""
 
 
+AROUND_WINDOW = 25  # 検索結果からのハイライトジャンプ（around_message_id）で前後何件ずつ取るか
+
+
+async def _around_rows(pool, select: str, scope_column: str, scope_id: int, around_message_id: int):
+    """検索結果クリックでのハイライトジャンプ（ユーザーからの明示的な要望）用に、指定した発言を
+    中心に前後AROUND_WINDOW件ずつを取得する。通常の「直近N件」読み込みと異なり、任意の過去の
+    発言にもその場でジャンプできるようにする（従来「もっと古いメッセージを読み込む」機能自体が
+    無く、直近50件の外にある検索結果は表示できなかった制約の解消）。対象の発言が見つからない
+    （削除済み・他チャンネルの発言・スレッド返信）場合はNoneを返す"""
+    anchor = await pool.fetchrow(
+        f"""SELECT created_at FROM messages
+           WHERE id = $1 AND {scope_column} = $2 AND thread_parent_id IS NULL AND deleted_at IS NULL""",
+        around_message_id, scope_id,
+    )
+    if anchor is None:
+        return None
+    before = list(reversed(await pool.fetch(
+        f"""{select}
+           WHERE m.{scope_column} = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
+             AND m.created_at <= $2
+           ORDER BY m.created_at DESC LIMIT $3""",
+        scope_id, anchor["created_at"], AROUND_WINDOW,
+    )))
+    after = await pool.fetch(
+        f"""{select}
+           WHERE m.{scope_column} = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
+             AND m.created_at > $2
+           ORDER BY m.created_at ASC LIMIT $3""",
+        scope_id, anchor["created_at"], AROUND_WINDOW,
+    )
+    return before + list(after)
+
+
 @router.get("/{channel_id}/messages")
 async def list_messages(
-    channel_id: int, since: str | None = None, limit: int = 50,
+    channel_id: int, since: str | None = None, limit: int = 50, around: int | None = None,
     user: CurrentUser = Depends(require_channel_member),
 ):
     """A-10: 履歴取得。sinceは3秒間隔ポーリングの差分取得に使う（基本設計書9.1節）。
-    thread_reply_countはS-04スレッド表示への導線（「N件の返信」）に使う（詳細設計書 API設計4.3節）"""
+    thread_reply_countはS-04スレッド表示への導線（「N件の返信」）に使う（詳細設計書 API設計4.3節）。
+    aroundは検索結果からのハイライトジャンプ用（指定した発言を中心に前後AROUND_WINDOW件、
+    ユーザーからの明示的な要望。sinceと同時指定時はsinceを優先する）"""
     pool = get_pool()
     if since:
         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -502,6 +537,10 @@ async def list_messages(
                ORDER BY m.created_at ASC""",
             channel_id, since_dt,
         )
+    elif around:
+        rows = await _around_rows(pool, _MESSAGES_SELECT, "channel_id", channel_id, around)
+        if rows is None:
+            raise HTTPException(404, detail="発言が見つかりません")
     else:
         rows = list(reversed(await pool.fetch(
             f"""{_MESSAGES_SELECT}
@@ -514,7 +553,7 @@ async def list_messages(
     items = [
         _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
     ]
-    if since:
+    if since or around:
         return {"items": items, "has_more": False}
     return {"items": items, "has_more": len(rows) == limit}
 

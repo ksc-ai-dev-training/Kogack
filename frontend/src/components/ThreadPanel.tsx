@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useThread } from '../hooks/useThread'
 import { apiFetch } from '../lib/api'
 import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageList'
-import Composer from './Composer'
+import Composer, { type MentionCandidate } from './Composer'
 import ProfileCard from './ProfileCard'
 import { useToast } from './Toast'
 import type { AttachmentPayload, ChannelMember, MentionPayload, Message } from '../types'
@@ -16,6 +16,9 @@ export default function ThreadPanel({
   headerSub,
   members,
   aiPersonaName,
+  aiIsEnabled,
+  aiPersonaIconUrl,
+  highlightMessageId,
   onClose,
   onReplyPosted,
   onReplyDeleted,
@@ -27,21 +30,42 @@ export default function ThreadPanel({
   members?: ChannelMember[]
   /** AIメンションのハイライト用（チャンネルのスレッドのみ渡す。DMのスレッドでは渡さない） */
   aiPersonaName?: string
+  /** F-41メンション候補にチャンネルAIを含めるかどうか（ChannelViewのmentionCandidatesWithAiと
+   * 同じ考え方をスレッド返信にも適用する。ユーザーからの明示的な要望でスレッド内メンションに
+   * 対応した際に追加。DMのスレッドでは渡さない） */
+  aiIsEnabled?: boolean
+  aiPersonaIconUrl?: string | null
+  /** S-05横断検索の結果クリックでのハイライトジャンプ先（ユーザーからの明示的な要望）。
+   * ChannelView/DmViewから?highlight=をそのまま渡す。この返信一覧に該当が無ければ何も起きない */
+  highlightMessageId?: string | null
   onClose: () => void
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
 }) {
   const { replies, mutate: mutateReplies } = useThread(messageId)
   const bodyRef = useRef<HTMLDivElement>(null)
+  // F-41 メンション候補。ChannelView.tsxのmentionCandidatesWithAiと同じ考え方（ユーザーからの
+  // 明示的な要望「スレッド内のメンション先候補にもAIを入れてほしい」で追加）。選択してもAIメンションは
+  // ID参照化しない（Composer.MentionCandidate.isAi参照）
+  const mentionCandidatesWithAi: MentionCandidate[] = aiIsEnabled
+    ? [
+        { id: 'ai', name: aiPersonaName ?? 'Kogack AI', isAi: true, picture_url: aiPersonaIconUrl },
+        ...(members?.filter((m) => m.is_active) ?? []),
+      ]
+    : (members?.filter((m) => m.is_active) ?? [])
   // F-40 プロフィールカード（元発言のヘッダーはMessageListの外で個別に描画しているため、
   // ここだけ別途状態を持つ）
   const [parentProfileOpen, setParentProfileOpen] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
   const toast = useToast()
+  // ハイライト対象がこのスレッドの返信一覧に実在する間は、末尾自動スクロールを止める
+  // （MessageList側のscrollIntoViewと競合させないため。ChannelView本体と同じ考え方）
+  const highlightInReplies = !!highlightMessageId && replies.some((r) => r.id === highlightMessageId)
 
   useEffect(() => {
+    if (highlightInReplies) return
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
-  }, [replies.length])
+  }, [replies.length, highlightInReplies])
 
   const send = async (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
     await apiFetch(`/api/messages/${messageId}/thread`, {
@@ -152,6 +176,7 @@ export default function ThreadPanel({
           showDaySeparators={false}
           members={members}
           aiPersonaName={aiPersonaName}
+          highlightMessageId={highlightMessageId}
           onDeleted={() => {
             mutateReplies()
             onReplyDeleted?.()
@@ -167,7 +192,7 @@ export default function ThreadPanel({
         <Composer
           placeholder="スレッドに返信"
           onSend={send}
-          mentionCandidates={members?.filter((m) => m.is_active)}
+          mentionCandidates={mentionCandidatesWithAi}
           aiPersonaName={aiPersonaName}
           scheduleTarget={{
             channel_id: parentMessage?.channel_id ?? undefined,

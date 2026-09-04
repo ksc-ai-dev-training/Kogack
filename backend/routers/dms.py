@@ -156,12 +156,43 @@ _MESSAGES_SELECT = """SELECT m.*, u.name AS sender_name, u.picture_url AS sender
    LEFT JOIN users u ON u.id = m.sender_user_id"""
 
 
+AROUND_WINDOW = 25  # channels.pyと同じ（検索結果からのハイライトジャンプで前後何件ずつ取るか）
+
+
+async def _around_rows(pool, dm_id: int, around_message_id: int):
+    """channels.py の _around_rows と同じ考え方（検索結果クリックでのハイライトジャンプ用）。
+    対象の発言が見つからない場合はNoneを返す"""
+    anchor = await pool.fetchrow(
+        """SELECT created_at FROM messages
+           WHERE id = $1 AND dm_id = $2 AND thread_parent_id IS NULL AND deleted_at IS NULL""",
+        around_message_id, dm_id,
+    )
+    if anchor is None:
+        return None
+    before = list(reversed(await pool.fetch(
+        f"""{_MESSAGES_SELECT}
+           WHERE m.dm_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
+             AND m.created_at <= $2
+           ORDER BY m.created_at DESC LIMIT $3""",
+        dm_id, anchor["created_at"], AROUND_WINDOW,
+    )))
+    after = await pool.fetch(
+        f"""{_MESSAGES_SELECT}
+           WHERE m.dm_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
+             AND m.created_at > $2
+           ORDER BY m.created_at ASC LIMIT $3""",
+        dm_id, anchor["created_at"], AROUND_WINDOW,
+    )
+    return before + list(after)
+
+
 @router.get("/{dm_id}/messages")
 async def list_messages(
-    dm_id: int, since: str | None = None, limit: int = 50,
+    dm_id: int, since: str | None = None, limit: int = 50, around: int | None = None,
     user: CurrentUser = Depends(require_dm_member),
 ):
-    """A-18: 履歴取得。channels.list_messagesと同じsince差分ポーリング方式（基本設計書9.1節）"""
+    """A-18: 履歴取得。channels.list_messagesと同じsince差分ポーリング方式（基本設計書9.1節）。
+    aroundはchannels.list_messagesと同じくハイライトジャンプ用（ユーザーからの明示的な要望）"""
     pool = get_pool()
     if since:
         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -172,6 +203,14 @@ async def list_messages(
                ORDER BY m.created_at ASC""",
             dm_id, since_dt,
         )
+        attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+        return {
+            "items": [_message_out(r, attachments_by_message.get(r["id"])) for r in rows], "has_more": False,
+        }
+    if around:
+        rows = await _around_rows(pool, dm_id, around)
+        if rows is None:
+            raise HTTPException(404, detail="発言が見つかりません")
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
         return {
             "items": [_message_out(r, attachments_by_message.get(r["id"])) for r in rows], "has_more": False,

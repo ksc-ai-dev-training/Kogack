@@ -20,14 +20,17 @@
 #     実行前確認（F-25）自体は引き続き対象外。T-08.out_of_scope_policyは層2ドキュメントQ&A関連の
 #     ためこのスライスではプロンプトに反映されない（値は保存できるが未使用。ドキュメントQ&A実装時に使う）
 #   - AI利用コストの上限判定・通知（T-14、F-29後半）は対象外。T-13への記録のみ行う
-#   - チャンネル本体の投稿（A-11）のみが起動対象。スレッド返信（A-14）内の@メンションはこの
-#     スライスでは対象外（次スライスでA-14にも同じ配線を追加する）
+#   - チャンネル本体の投稿（A-11）に加え、スレッド返信（A-14）内の@メンションにも対応する
+#     （2026-09-04、ユーザーからの明示的な要望で追加。当初のスライスでは対象外だったが、
+#     「次スライスでA-14にも同じ配線を追加する」という当初からの想定どおり実装した）
 #
-# トリガー: A-11で当該チャンネルのis_ai_enabled=trueのとき、非同期タスクとして起動する（8.1節・
-# 8.7節、REQ-N-05。A-11自体は応答を待たずに投稿完了を返す）。reaction_mode='mention_only'
-# （既定）では人間の発言本文に「@{persona_name}」の文字列一致が含まれるときのみ、'proactive'
-# （F-15）では人間の発言であれば常に起動する。AIへのメンションはID参照化の対象外（基本設計書5.22節
-# 「設計判断」。チャンネルAIは1チャンネルにつき1つしかなく、同姓同名のような曖昧さが生じない）。
+# トリガー: A-11・A-14（スレッド返信）で当該チャンネルのis_ai_enabled=trueのとき、非同期タスクとして
+# 起動する（8.1節・8.7節、REQ-N-05。A-11/A-14自体は応答を待たずに投稿完了を返す）。
+# reaction_mode='mention_only'（既定）では人間の発言本文に「@{persona_name}」の文字列一致が
+# 含まれるときのみ、'proactive'（F-15）では人間の発言であれば常に起動する（ただしチャンネル本体の
+# 投稿に限る。スレッド返信は下記のとおりreaction_modeに関わらず常にメンション必須）。AIへの
+# メンションはID参照化の対象外（基本設計書5.22節「設計判断」。チャンネルAIは1チャンネルにつき
+# 1つしかなく、同姓同名のような曖昧さが生じない）。
 #
 # F-14 やりとりの要約（start_summary/_generate_summary_and_post）はA-15（routers/channels.py）から
 # 呼ばれる別経路で、メンション応答と同じ生成中プレースホルダ方式・T-13コスト記録を再利用しつつ、
@@ -165,8 +168,9 @@ def _completion_extra_kwargs(model: str) -> dict:
 
 def detect_mention(body: str, persona_name: str) -> bool:
     """AIメンションの検知は本文中の「@ペルソナ名」の文字列一致のみ（ID参照化しない。
-    基本設計書5.22節「設計判断」）。F-41のメンションピッカーの候補にはチャンネルAIを含めていない
-    （このスライスでは対象外）ため、利用者は手入力で「@{persona_name}」と書く必要がある。"""
+    基本設計書5.22節「設計判断」）。F-41のメンションピッカーの候補にはチャンネル本体・スレッド
+    返信のいずれもチャンネルAIを含める（Composer.tsx）が、それでも本文としては同じ「@ペルソナ名」の
+    プレーンテキストが入るだけで、この文字列一致の判定方法自体は変わらない。"""
     return f"@{persona_name}" in body
 
 
@@ -205,40 +209,44 @@ def _rows_to_chat_messages(rows, names: dict[int, str]) -> list[dict]:
     return messages
 
 
-async def maybe_trigger(channel_id: int, body: str, requested_by: int) -> None:
-    """A-11から呼ばれる。条件を満たせば非同期タスクとしてAI応答生成を起動する（fire-and-forget、
-    REQ-N-05）。OPENAI_API_KEY未設定・AI無効のいずれかであれば何もしない。reaction_mode='mention_only'
-    （既定）ではメンション無しの場合も何もしない。'proactive'（F-15）ではメンション判定自体を
-    スキップし、人間の発言であれば常に起動する（04_基本設計書.html 8.1節の設計判断どおり、
-    追加のLLM呼び出しによる関連性判定は行わない）。"""
+async def maybe_trigger(channel_id: int, body: str, requested_by: int, thread_id: int | None = None) -> None:
+    """A-11・A-14（thread_id指定時）から呼ばれる。条件を満たせば非同期タスクとしてAI応答生成を
+    起動する（fire-and-forget、REQ-N-05）。OPENAI_API_KEY未設定・AI無効のいずれかであれば何もしない。
+    reaction_mode='mention_only'（既定）ではメンション無しの場合も何もしない。'proactive'（F-15）では
+    メンション判定自体をスキップし、人間の発言であれば常に起動する（04_基本設計書.html 8.1節の
+    設計判断どおり、追加のLLM呼び出しによる関連性判定は行わない）。
+    thread_id指定時（スレッド返信、ユーザーからの明示的な要望で対応）はreaction_modeに関わらず
+    常に明示的なメンションを要求する（proactiveをスレッド内の人間同士のやり取りにまで広げると、
+    毎回AIが割り込んでくる形になり要望の範囲を超えるため。「呼びかけたら答える」という
+    最小限の対応にとどめた。基本設計書8.1節に設計判断として追記）。"""
     if not ai_client.is_configured():
         return
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         return
     persona_name = settings["persona_name"] or "Kogack AI"
-    if settings["reaction_mode"] != "proactive" and not detect_mention(body, persona_name):
+    requires_mention = thread_id is not None or settings["reaction_mode"] != "proactive"
+    if requires_mention and not detect_mention(body, persona_name):
         return
-    asyncio.create_task(_generate_and_post(channel_id, settings, requested_by))
+    asyncio.create_task(_generate_and_post(channel_id, settings, requested_by, thread_id))
 
 
-async def _generate_and_post(channel_id: int, settings: dict, requested_by: int) -> None:
+async def _fetch_history_rows(channel_id: int, thread_id: int | None):
+    """AI応答生成に渡す会話履歴を取得する。thread_id指定時はそのスレッド（元発言＋返信）に
+    絞り込み、チャンネル全体の雑談ではなくスレッド自身の文脈を渡す（ユーザーからの明示的な要望で
+    スレッド内メンションに対応した際に追加。F-14要約の_fetch_summary_source_rowsと異なり
+    件数上限MAX_HISTORY_MESSAGESを掛ける点は通常のチャンネル発言と同じ扱いにする）"""
     pool = get_pool()
-    persona_name = settings["persona_name"] or "Kogack AI"
-    persona_icon_url = settings["persona_icon_url"]
-
-    # 生成中プレースホルダ（詳細設計書10.3節で確定した方式）。bot_display_name/bot_icon_urlを
-    # BOT発言と同じ列に流用し、生成時点のペルソナ名・アイコンをスナップショットする
-    # （後で設定が変わっても、この発言の表示は変わらない）
-    placeholder = await pool.fetchrow(
-        """INSERT INTO messages (channel_id, sender_type, body, generation_status,
-               bot_display_name, bot_icon_url)
-           VALUES ($1, 'ai', '', 'generating', $2, $3) RETURNING id""",
-        channel_id, persona_name, persona_icon_url,
-    )
-    message_id = placeholder["id"]
-
-    try:
+    if thread_id is not None:
+        rows = await pool.fetch(
+            """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+               FROM messages
+               WHERE (id = $1 OR thread_parent_id = $1)
+                 AND deleted_at IS NULL AND generation_status IS NULL
+               ORDER BY created_at DESC LIMIT $2""",
+            thread_id, MAX_HISTORY_MESSAGES,
+        )
+    else:
         rows = await pool.fetch(
             """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
                FROM messages
@@ -247,7 +255,31 @@ async def _generate_and_post(channel_id: int, settings: dict, requested_by: int)
                ORDER BY created_at DESC LIMIT $2""",
             channel_id, MAX_HISTORY_MESSAGES,
         )
-        history_rows = list(reversed(rows))
+    return list(reversed(rows))
+
+
+async def _generate_and_post(
+    channel_id: int, settings: dict, requested_by: int, thread_id: int | None = None,
+) -> None:
+    pool = get_pool()
+    persona_name = settings["persona_name"] or "Kogack AI"
+    persona_icon_url = settings["persona_icon_url"]
+
+    # 生成中プレースホルダ（詳細設計書10.3節で確定した方式）。bot_display_name/bot_icon_urlを
+    # BOT発言と同じ列に流用し、生成時点のペルソナ名・アイコンをスナップショットする
+    # （後で設定が変わっても、この発言の表示は変わらない）。thread_id指定時はそのスレッドへの
+    # 返信として投稿する（start_summaryと同じ方式。基本設計書「スレッド内のやり取りは本体の
+    # タイムラインに流れない」の一貫性のため、スレッド内メンションへの応答も同じスレッドに留める）
+    placeholder = await pool.fetchrow(
+        """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body, generation_status,
+               bot_display_name, bot_icon_url)
+           VALUES ($1, $2, 'ai', '', 'generating', $3, $4) RETURNING id""",
+        channel_id, thread_id, persona_name, persona_icon_url,
+    )
+    message_id = placeholder["id"]
+
+    try:
+        history_rows = await _fetch_history_rows(channel_id, thread_id)
         names = await _resolve_sender_names(history_rows)
         auto_response_section = await _build_auto_response_section(channel_id, settings)
         skills_section = await _build_skills_section(channel_id, settings)

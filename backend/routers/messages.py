@@ -9,6 +9,7 @@ from attachments import AttachmentInput, fetch_attachments_grouped, insert_attac
 from auth_helpers import CurrentUser, require_auth, require_thread_access
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
+from services import ai_agent
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -113,7 +114,10 @@ async def post_reply(
 ):
     """A-14: スレッドへの返信投稿。channel_id/dm_idは元発言から引き継ぐ。@メンション（F-41）は
     元発言がチャンネルの場合のみT-07へ保存する（DMは候補元のA-46が無いため対象外）。添付ファイル（F-07）は
-    チャンネル・DMどちらの返信でも対象（メンションと異なり候補元に依存しないため）"""
+    チャンネル・DMどちらの返信でも対象（メンションと異なり候補元に依存しないため）。チャンネルAIへの
+    メンション（本文中の「@ペルソナ名」）を検知した場合、A-11と同様にservices/ai_agent.pyの応答生成を
+    非同期タスクとして起動する（元発言がチャンネルの場合のみ。DMには対象外。ユーザーからの明示的な
+    要望で対応。応答は同じスレッドへの返信として投稿される）"""
     pool = get_pool()
     parent = await pool.fetchrow(
         "SELECT channel_id, dm_id, sender_type, bot_display_name FROM messages WHERE id = $1", message_id
@@ -134,6 +138,8 @@ async def post_reply(
             if parent["channel_id"] is not None else []
         )
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
+    if parent["channel_id"] is not None:
+        await ai_agent.maybe_trigger(parent["channel_id"], body.body, user.id, thread_id=message_id)
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url}, blocks, attachments,
     )

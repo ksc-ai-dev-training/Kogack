@@ -60,6 +60,7 @@
       <tr class="diff-new"><td>1.29</td><td>2026-09-02</td><td>A-23のレスポンス例のpersona_nameを"AI"から"Kogack AI"に修正した（T-08.persona_nameの既定値変更、詳細設計書DB設計v1.11と一貫）。API仕様・エンドポイント自体の変更は無い。</td></tr>
       <tr class="diff-new"><td>1.30</td><td>2026-09-03</td><td>A-38〜A-40にitem_type/parent_folder_idを反映した（フォルダ内の特定ファイルだけを参照範囲に含める機能、ユーザーからの明示的な要望。詳細設計書DB設計v1.13と一貫）。A-38レスポンスにitem_type・parent_folder_idを追加、A-39は<code>parent_folder_id</code>を指定した場合に「フォルダ内の特定ファイル」として登録できること（登録先が存在しない場合404、ファイルの下にファイルは登録できず422）、ファイルURLからのID抽出パターンを追記した。A-40はフォルダ削除時に配下の個別ファイル候補も連動削除されることを明記した。新規エンドポイントは追加していない（既存のA-38〜A-40をそのまま拡張）。基本設計書（6.2節、v1.36）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.31</td><td>2026-09-03</td><td>A-20（横断検索）のmessage/file結果にsender_type・sender_user_id・sender_picture_url・bot_iconを追加した（検索結果に発言者アイコンを表示する機能、ユーザーからの明示的な要望）。優先順位はA-10等の<code>_message_out</code>と同じ（AI/BOTはbot_icon_url→絵文字→既定表示、人間はpicture_url→色付き頭文字）。新規エンドポインは追加していない。画面モックアップは検索結果にアイコンを想定していないため、この機能はモックアップに無い追加として扱う（要件定義書・基本設計書・画面モックアップの改訂は無い）。</td></tr>
+      <tr class="diff-new"><td>1.32</td><td>2026-09-04</td><td>検索結果クリックでその発言までスクロールし薄いオレンジでハイライトする機能を追加した（ユーザーからの明示的な要望）。A-10/A-18に新規パラメータ<code>around</code>（発言idを中心に前後25件ずつ取得。直近50件の外にある古い検索結果にもジャンプできるようにするため）を追加し、A-20のmessage/file結果に<code>thread_parent_id</code>（file結果には<code>message_id</code>も）を追加した。新規エンドポインは追加していない（既存のA-10/A-18/A-20をそのまま拡張）。基本設計書（6.2節、v1.37）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
     </tbody>
   </table>
 
@@ -189,7 +190,7 @@ POST /api/channels/42/members
 { "items": [ { "id":"10301", "sender_type":"human", "sender_user_id":"7", "body":"...",
     "generation_status": null, "thread_reply_count": 2, "blocks": [], "created_at":"..." } ],
   "has_more": false }</code></pre>
-  <p class="muted"><code>since</code> 省略時は直近50件。ポーリング（3秒間隔）は直近ポーリング時刻を <code>since</code> として差分取得する（基本設計書9.1節）。<code>generation_status</code> が <code>"generating"</code> の行はAI発言が生成中であることを示す（AIサポート10.3節）。</p>
+  <p class="muted"><code>since</code> 省略時は直近50件。ポーリング（3秒間隔）は直近ポーリング時刻を <code>since</code> として差分取得する（基本設計書9.1節）。<code>generation_status</code> が <code>"generating"</code> の行はAI発言が生成中であることを示す（AIサポート10.3節）。<span class="diff-new"><code>around</code>（発言id、<code>since</code>と同時指定時は<code>since</code>を優先）を指定すると、直近N件ではなくその発言を中心に前後25件ずつを返す（S-05検索結果からのハイライトジャンプ用、ユーザーからの明示的な要望。基本設計書6.2節「設計判断」）。対象の発言が存在しない・スレッド返信・他チャンネルの発言の場合は404。A-18も同じ<code>around</code>パラメータに対応する。</span></p>
 
   <p><strong>A-12 <span class="badge badge-delete">DELETE</span> /api/messages/{id}（メッセージ削除）</strong></p>
   <pre><code>DELETE /api/messages/10301
@@ -253,10 +254,11 @@ POST /api/channels/42/members
 { "counts": { "message": 4, "file": 1, "document": 2 },
   "items": [
     { "type": "message", "message_id": "10245", "channel_id": "42", "channel_name": "開発部",
+      "thread_parent_id": null,
       "sender_display_name": "田中", "sender_type": "human", "sender_user_id": "15",
       "sender_picture_url": "/api/icons/....png", "bot_icon": null,
       "excerpt": "デプロイ手順は...", "posted_at": "..." },
-    { "type": "file", "attachment_id": "301", "file_name": "デプロイ手順書.pdf", "channel_id": "42", ... },
+    { "type": "file", "attachment_id": "301", "message_id": "10240", "file_name": "デプロイ手順書.pdf", "channel_id": "42", ... },
     { "type": "document", "doc_title": "運用ドキュメント：デプロイ手順書", "doc_url": "...", "excerpt": "..." }
   ], "page": 1 }
 
@@ -268,7 +270,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
     { "type": "message", "message_id": "10245", "channel_id": "42", "channel_name": "開発部",
       "sender_display_name": "田中 智子", "excerpt": "デプロイ手順は...", "posted_at": "2026-08-19T01:06:00Z" }
   ], "page": 1 }</code></pre>
-  <p class="muted">クエリパラメータ: <code>in</code>=channel_id、<code>from</code>=user_id、<code>with</code>=user_id、<code>before</code>/<code>after</code>/<code>on</code>=YYYY-MM-DD、<code>during</code>=YYYY-MM。いずれも省略可・複数同時指定可（AND）。<code>in</code>/<code>with</code>は指定した対象に自分がアクセス権を持たない場合（未参加チャンネル・未参加DM）、総論5.3節と同じ扱いで結果0件を返す（403にはしない。存在の有無を教えないため）。<span class="diff-new">ファイル検索（<code>type=file</code>、F-07実装によりA-21/A-22が揃ったため対応）はT-06 message_attachmentsをmessagesに結合し、<code>file_name</code>にILIKEで一致判定する。in/with/from/日付系はJOIN先messagesの列で判定するため、メッセージ検索と全く同じ条件式を使い回せる（6.5節参照）。<code>type=document</code>は引き続き常に0件。</span> <span class="diff-new">message/fileいずれの結果にも<code>sender_type</code>・<code>sender_user_id</code>・<code>sender_picture_url</code>・<code>bot_icon</code>を含める（検索結果に発言者アイコンを表示する機能、ユーザーからの明示的な要望）。優先順位は<code>_message_out</code>（A-10等）と同じで、AI/BOT発言は<code>bot_icon_url</code>→<code>bot_icon</code>（絵文字）→既定表示、人間は<code>picture_url</code>→色付き頭文字。フロントはMessageListの<code>Avatar</code>コンポーネントを共有し、検索結果一覧の密度に合わせて縮小表示する（画面モックアップは検索結果にアイコンを想定していないため、この機能はモックアップに無い追加）。</span></p>
+  <p class="muted">クエリパラメータ: <code>in</code>=channel_id、<code>from</code>=user_id、<code>with</code>=user_id、<code>before</code>/<code>after</code>/<code>on</code>=YYYY-MM-DD、<code>during</code>=YYYY-MM。いずれも省略可・複数同時指定可（AND）。<code>in</code>/<code>with</code>は指定した対象に自分がアクセス権を持たない場合（未参加チャンネル・未参加DM）、総論5.3節と同じ扱いで結果0件を返す（403にはしない。存在の有無を教えないため）。<span class="diff-new">ファイル検索（<code>type=file</code>、F-07実装によりA-21/A-22が揃ったため対応）はT-06 message_attachmentsをmessagesに結合し、<code>file_name</code>にILIKEで一致判定する。in/with/from/日付系はJOIN先messagesの列で判定するため、メッセージ検索と全く同じ条件式を使い回せる（6.5節参照）。<code>type=document</code>は引き続き常に0件。</span> <span class="diff-new">message/fileいずれの結果にも<code>sender_type</code>・<code>sender_user_id</code>・<code>sender_picture_url</code>・<code>bot_icon</code>を含める（検索結果に発言者アイコンを表示する機能、ユーザーからの明示的な要望）。優先順位は<code>_message_out</code>（A-10等）と同じで、AI/BOT発言は<code>bot_icon_url</code>→<code>bot_icon</code>（絵文字）→既定表示、人間は<code>picture_url</code>→色付き頭文字。フロントはMessageListの<code>Avatar</code>コンポーネントを共有し、検索結果一覧の密度に合わせて縮小表示する（画面モックアップは検索結果にアイコンを想定していないため、この機能はモックアップに無い追加）。</span> <span class="diff-new">message/fileいずれの結果にも<code>thread_parent_id</code>（スレッド返信の場合は元発言のid、それ以外はnull）を含め、file結果には添付先の発言id（<code>message_id</code>）も含める（検索結果クリックでその発言までスクロールし薄いオレンジでハイライトする機能、ユーザーからの明示的な要望）。フロントは<code>thread_parent_id</code>があれば<code>?thread=</code>も付けてスレッドパネル側を開き、無ければ本体タイムライン側で<code>?highlight=</code>のみ渡す。A-10/A-18の<code>around</code>パラメータ（本節上部）と組み合わせて、直近50件の外にある古い検索結果にもジャンプできる（従来「もっと古いメッセージを読み込む」機能自体が無く不可能だった制約の解消。基本設計書6.2節「設計判断」）。</span></p>
 
   <p><strong>A-21 <span class="badge badge-post">POST</span> /api/attachments（ファイルアップロード。F-07）</strong></p>
   <pre><code>// request: multipart/form-data（file）

@@ -6,15 +6,39 @@ import type { Message, MessagesResponse } from '../types'
 // A-10/A-18: メッセージ一覧。3秒間隔ポーリングでsince差分取得し、既存分に追記する
 // （詳細設計書 総論9.1節・画面設計11.4節）。basePathはチャンネル・DM共通
 // （例: /api/channels/42 や /api/dms/9）。切替時は履歴をリセットする。
-export function useMessages(basePath: string | undefined) {
-  const state = useRef<{ basePath: string; since: string | null; messages: Message[] } | null>(null)
+// anchorMessageIdは検索結果からのハイライトジャンプ用（ユーザーからの明示的な要望）。指定時は
+// 直近N件ではなく、その発言を中心に前後を取得する（around=、A-10/A-18）。取得後の継続ポーリングは
+// 通常どおりsince差分に切り替わる（そこまでの間に投稿された分は追いつかず、以後の新着だけを
+// 追いかける形になるが、検索結果は元々過去の文脈を見るためのものなのでこれで十分と判断）。
+// anchorMessageIdがundefinedに変わった（呼び出し元がハイライト表示を終えて?highlight=を消した）
+// だけでは状態をリセットしない＝それまでに読み込んだ内容は保持したまま、通常のsince継続ポーリングに
+// 移行する。新しい（前回と異なる）anchorMessageIdが来たときだけ、その発言を中心に読み直す
+export function useMessages(basePath: string | undefined, anchorMessageId?: string) {
+  const state = useRef<{
+    basePath: string
+    anchor: string | null
+    since: string | null
+    messages: Message[]
+  } | null>(null)
 
-  const fetcher = async (path: string): Promise<Message[]> => {
-    if (!state.current || state.current.basePath !== basePath) {
-      state.current = { basePath: basePath!, since: null, messages: [] }
+  // fetcherはSWRから渡されるkeyの文字列自体は使わない（下のusePollingのkeyはanchor変化時に
+  // 即時再取得させるためのSWRキャッシュ識別子であり、実際にfetchするURLとは別物にしている。
+  // 同じ内容をkeyにも組み込むと?around=が二重に付いてしまうため）。実際のURLは常にbasePathと
+  // 内部stateから組み立てる
+  const fetcher = async (): Promise<Message[]> => {
+    const needsReset =
+      !state.current ||
+      state.current.basePath !== basePath ||
+      (!!anchorMessageId && anchorMessageId !== state.current.anchor)
+    if (needsReset) {
+      state.current = { basePath: basePath!, anchor: anchorMessageId ?? null, since: null, messages: [] }
     }
-    const s = state.current
-    const url = s.since ? `${path}?since=${encodeURIComponent(s.since)}` : path
+    const s = state.current!
+    const url = s.since
+      ? `${basePath}/messages?since=${encodeURIComponent(s.since)}`
+      : s.anchor
+        ? `${basePath}/messages?around=${encodeURIComponent(s.anchor)}`
+        : `${basePath}/messages`
     const res = await apiFetch<MessagesResponse>(url)
     if (res.items.length > 0) {
       s.messages = s.since ? [...s.messages, ...res.items] : res.items
@@ -24,7 +48,7 @@ export function useMessages(basePath: string | undefined) {
   }
 
   const { data, error, isLoading, mutate } = usePolling<Message[]>(
-    basePath ? `${basePath}/messages` : null,
+    basePath ? `${basePath}/messages${anchorMessageId ? `::around=${anchorMessageId}` : ''}` : null,
     fetcher,
   )
 

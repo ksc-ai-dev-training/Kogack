@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { apiFetch } from '../lib/api'
@@ -221,6 +221,7 @@ export default function MessageList({
   members,
   unreadDividerMessageId,
   aiPersonaName,
+  highlightMessageId,
 }: {
   messages: Message[]
   emptyMessage?: string
@@ -233,6 +234,10 @@ export default function MessageList({
   members?: ChannelMember[]
   /** このメッセージの直前に「ここから未読メッセージ」区切り線を表示する（useUnreadDivider） */
   unreadDividerMessageId?: string | null
+  /** S-05横断検索の結果クリックでジャンプしてきた発言。見つかり次第1回だけスクロールし、
+   * 薄いオレンジ背景でフラッシュ表示する（ユーザーからの明示的な要望）。呼び出し元
+   * （ChannelView/DmView/ThreadPanel）がURLの?highlight=から渡す */
+  highlightMessageId?: string | null
   /** AIメンション（本文中の「@ペルソナ名」）のハイライトに使う（チャンネルAIのpersona_name。
    * DM会話では渡さない。channel.ai_persona_nameを参照） */
   aiPersonaName?: string
@@ -246,6 +251,19 @@ export default function MessageList({
   const [profileFor, setProfileFor] = useState<{ id: string; anchor: DOMRect } | null>(null)
   const openProfile = (id: string, e: MouseEvent<HTMLElement>) =>
     setProfileFor({ id, anchor: e.currentTarget.getBoundingClientRect() })
+
+  // S-05検索結果からのハイライトジャンプ（ユーザーからの明示的な要望）。目的の発言がmessagesに
+  // 現れた時点（初回は`around=`取得の応答待ちのため即座には無い）で1回だけスクロールする。
+  // scrolledForを見て同じhighlightMessageIdに対しては再スクロールしない（3秒ごとのポーリングで
+  // messagesが更新されるたびに毎回スクロールされて読んでいる位置が飛ぶのを防ぐ）
+  const scrolledFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!highlightMessageId || scrolledFor.current === highlightMessageId) return
+    const el = document.getElementById(`message-${highlightMessageId}`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    scrolledFor.current = highlightMessageId
+  }, [highlightMessageId, messages])
 
   const deleteMessage = async (messageId: string) => {
     const ok = await confirm({
@@ -283,8 +301,13 @@ export default function MessageList({
             {isNewDay && <DaySeparator label={formatDaySeparator(m.created_at)} />}
             {unreadDividerMessageId === m.id && <UnreadDivider />}
             <div
-              className={`group relative flex gap-2.5 px-5 py-[7px] ${
-                openThreadId === m.id ? 'bg-accent-50' : 'hover:bg-surface-subtle'
+              id={`message-${m.id}`}
+              className={`group relative flex gap-2.5 px-5 py-[7px] transition-colors duration-700 ${
+                highlightMessageId === m.id
+                  ? 'bg-bot-bg'
+                  : openThreadId === m.id
+                    ? 'bg-accent-50'
+                    : 'hover:bg-surface-subtle'
               }`}
             >
               <Avatar

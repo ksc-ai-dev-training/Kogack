@@ -183,7 +183,7 @@ async def search(
     items: list[dict] = []
     if type in ("all", "message"):
         rows = await pool.fetch(
-            f"""SELECT m.id, m.channel_id, m.dm_id, m.body, m.created_at,
+            f"""SELECT m.id, m.channel_id, m.dm_id, m.thread_parent_id, m.body, m.created_at,
                        m.sender_type, m.sender_user_id, m.bot_display_name, m.bot_icon, m.bot_icon_url,
                        c.name AS channel_name, u.name AS sender_name, u.picture_url AS sender_picture_url
                 {joins}
@@ -204,6 +204,11 @@ async def search(
                 "channel_name": r["channel_name"],
                 "dm_id": str(r["dm_id"]) if r["dm_id"] is not None else None,
                 "dm_label": dm_labels.get(r["dm_id"]) if r["dm_id"] is not None else None,
+                # スレッド返信かどうか（ユーザーからの要望で追加した「検索結果クリックでハイライト
+                # ジャンプする」機能に使う。本体タイムラインに流れない返信は、通常の?highlight=では
+                # 見つからないため、フロントはthread_parent_idがある場合?thread=も付けて
+                # スレッドパネル側を開く。詳細設計書API設計6.1節参照）
+                "thread_parent_id": str(r["thread_parent_id"]) if r["thread_parent_id"] is not None else None,
                 # BOT/AI発言（いずれもsender_user_id無し）はbot_display_nameを表示名として使う
                 # （channels.py等の_message_outと同じ分岐。従来この分岐が無く、検索結果のAI/BOT発言の
                 # 発言者名が常にnull＝「(不明)」表示になっていたバグをbackfill）
@@ -235,7 +240,7 @@ async def search(
     if type in ("all", "file"):
         rows = await pool.fetch(
             f"""SELECT ma.id AS attachment_id, ma.file_name, ma.byte_size,
-                       m.channel_id, m.dm_id, m.created_at,
+                       m.id AS message_id, m.channel_id, m.dm_id, m.thread_parent_id, m.created_at,
                        m.sender_type, m.sender_user_id, m.bot_display_name, m.bot_icon, m.bot_icon_url,
                        c.name AS channel_name, u.name AS sender_name, u.picture_url AS sender_picture_url
                 {file_joins}
@@ -252,12 +257,17 @@ async def search(
             {
                 "type": "file",
                 "attachment_id": str(r["attachment_id"]),
+                # 検索結果クリック時のハイライトジャンプ先（ユーザーからの明示的な要望）。
+                # ファイル自体ではなく、それが添付された発言をハイライトする
+                "message_id": str(r["message_id"]),
                 "file_name": r["file_name"],
                 "byte_size": r["byte_size"],
                 "channel_id": str(r["channel_id"]) if r["channel_id"] is not None else None,
                 "channel_name": r["channel_name"],
                 "dm_id": str(r["dm_id"]) if r["dm_id"] is not None else None,
                 "dm_label": dm_labels.get(r["dm_id"]) if r["dm_id"] is not None else None,
+                # メッセージ検索と同じ理由（検索結果クリック時のハイライトジャンプ先の判定に使う）
+                "thread_parent_id": str(r["thread_parent_id"]) if r["thread_parent_id"] is not None else None,
                 # メッセージ検索と同じ理由（BOT/AI発言のsender_display_nameがnullになるバグのbackfill）。
                 # 実際には現状BOT/AI発言に添付ファイルが付くことは無いが、他の検索結果と分岐を揃える
                 "sender_display_name": r["bot_display_name"] if r["sender_type"] in ("bot", "ai") else r["sender_name"],

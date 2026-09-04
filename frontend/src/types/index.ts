@@ -268,6 +268,9 @@ export interface SearchResultItem {
   sender_user_id: string | null
   sender_picture_url: string | null
   bot_icon?: string | null
+  /** スレッド返信の場合、元発言のid（ハイライトジャンプ機能がスレッドパネルを開く判定に使う。
+   * ユーザーからの明示的な要望） */
+  thread_parent_id: string | null
   excerpt?: string
   posted_at: string
 }

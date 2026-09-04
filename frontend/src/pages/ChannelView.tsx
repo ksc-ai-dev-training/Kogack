@@ -18,6 +18,10 @@ export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const threadId = searchParams.get('thread')
+  // S-05横断検索の結果クリックでのハイライトジャンプ先（ユーザーからの明示的な要望）。
+  // ?thread=も付いている場合はスレッド返信へのジャンプなので、本体タイムライン側は
+  // アンカー取得しない（ThreadPanel側へ渡すことで、そちらのMessageListがハイライトする）
+  const highlightId = searchParams.get('highlight')
   const { me } = useMe()
   const { channel, error: channelError } = useChannel(channelId)
   const { joined, mutate: mutateChannelsList } = useChannels()
@@ -31,9 +35,15 @@ export default function ChannelView() {
         ...members.filter((m) => m.is_active),
       ]
     : members.filter((m) => m.is_active)
+  // highlightIdがスレッド返信宛て（threadIdも同時に付いている）の場合は、返信自体ではなく
+  // スレッドの元発言（threadId）を中心に本体タイムラインをアンカーする。ThreadPanelへ渡す
+  // parentMessageはこの本体messagesから探す実装のため、元発言が直近読み込み分の外（古い発言）
+  // だと見つからずnullになってしまう問題への対処。highlightIdが無い通常時（元々の「表示中の
+  // 発言をクリックしてスレッドを開く」経路）は元の挙動のまま変更しない
+  const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-  } = useMessages(channelId ? `/api/channels/${channelId}` : undefined)
+  } = useMessages(channelId ? `/api/channels/${channelId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(
     channelId,
     joined.find((c) => c.id === channelId)?.unread_count,
@@ -46,8 +56,29 @@ export default function ChannelView() {
   const toast = useToast()
 
   useEffect(() => {
+    // 検索結果からのハイライトジャンプ中（本体タイムライン側、?thread=無し）は、MessageList側の
+    // 「対象の発言までスクロール」と競合するため末尾への自動スクロールを止める（ユーザーからの
+    // 明示的な要望で追加。無条件に末尾スクロールすると、直後に実行されるMessageListのscrollIntoView
+    // を上書きしてしまい、常に末尾に戻ってしまう）
+    if (highlightId && !threadId) return
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
-  }, [messages.length])
+  }, [messages.length, highlightId, threadId])
+
+  useEffect(() => {
+    // ハイライト表示は一時的なもの。数秒経ったら?highlight=をURLから外し、通常の
+    // 「新着で末尾に自動スクロール」する状態に戻す（つけっぱなしだと、ジャンプ後に会話を
+    // 続けていても新着に追従しなくなってしまう）。useMessages側はanchorMessageIdが
+    // undefinedに変わっただけでは読み込み済みの内容を破棄しないため、消しても表示は消えない
+    if (!highlightId) return
+    const t = setTimeout(() => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('highlight')
+        return next
+      }, { replace: true })
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [highlightId, setSearchParams])
 
   useEffect(() => {
     // このチャンネルを開いている間は既読として扱う（未読バッジ用。基本設計書4.2節「設計判断」）。
@@ -173,6 +204,7 @@ export default function ChannelView() {
             members={members}
             unreadDividerMessageId={unreadDividerMessageId}
             aiPersonaName={channel?.ai_persona_name}
+            highlightMessageId={highlightId}
           />
         </div>
 
@@ -201,6 +233,9 @@ export default function ChannelView() {
           headerSub={`# ${channel?.name ?? ''}`}
           members={members}
           aiPersonaName={channel?.ai_persona_name}
+          aiIsEnabled={channel?.ai_is_enabled}
+          aiPersonaIconUrl={channel?.ai_persona_icon_url}
+          highlightMessageId={highlightId}
           onClose={closeThread}
           onReplyPosted={() => bumpThreadReplyCount(threadId)}
           onReplyDeleted={() => decrementThreadReplyCount(threadId)}

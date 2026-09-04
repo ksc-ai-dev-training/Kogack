@@ -17,18 +17,37 @@ export default function DmView() {
   const { dmId } = useParams<{ dmId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const threadId = searchParams.get('thread')
+  // S-05横断検索の結果クリックでのハイライトジャンプ先（ChannelViewと同じ考え方。
+  // ユーザーからの明示的な要望）
+  const highlightId = searchParams.get('highlight')
   const { me } = useMe()
   const { dms, isLoading: dmsLoading, mutate: mutateDms } = useDms()
   const dm = dms.find((d) => d.id === dmId)
+  const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-  } = useMessages(dmId ? `/api/dms/${dmId}` : undefined)
+  } = useMessages(dmId ? `/api/dms/${dmId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(dmId, dm?.unread_count, messages, me?.id)
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    // ChannelViewと同じ理由でハイライトジャンプ中は末尾自動スクロールを止める
+    if (highlightId && !threadId) return
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
-  }, [messages.length])
+  }, [messages.length, highlightId, threadId])
+
+  useEffect(() => {
+    // ChannelViewと同じ、ハイライト表示の一時的な?highlight=クリア
+    if (!highlightId) return
+    const t = setTimeout(() => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('highlight')
+        return next
+      }, { replace: true })
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [highlightId, setSearchParams])
 
   useEffect(() => {
     // このDMを開いている間は既読として扱う（未読バッジ用。ChannelViewと同じ考え方）
@@ -78,6 +97,7 @@ export default function DmView() {
             openThreadId={threadId}
             onDeleted={removeMessage}
             unreadDividerMessageId={unreadDividerMessageId}
+            highlightMessageId={highlightId}
           />
         </div>
 
@@ -102,6 +122,7 @@ export default function DmView() {
           messageId={threadId}
           parentMessage={messages.find((m) => m.id === threadId) ?? null}
           headerSub={title}
+          highlightMessageId={highlightId}
           onClose={closeThread}
           onReplyPosted={() => bumpThreadReplyCount(threadId)}
           onReplyDeleted={() => decrementThreadReplyCount(threadId)}

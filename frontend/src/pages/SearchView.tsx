@@ -344,9 +344,17 @@ export default function SearchView() {
     if (e.key === 'Enter') submit()
   }
 
+  // 検索結果クリックでのハイライトジャンプ（ユーザーからの明示的な要望）。message_id（file結果は
+  // 添付先の発言id）を?highlight=に付け、遷移先のMessageListがその発言までスクロールして
+  // 薄いオレンジでフラッシュ表示する。スレッド返信（thread_parent_idあり）は本体タイムラインに
+  // 流れないため、?thread=も付けてスレッドパネル側を開く（thread_parent_idが元発言のid）
   const openResult = (item: SearchResultItem) => {
-    if (item.channel_id) navigate(`/channels/${item.channel_id}`)
-    else if (item.dm_id) navigate(`/dms/${item.dm_id}`)
+    const params = new URLSearchParams()
+    if (item.message_id) params.set('highlight', item.message_id)
+    if (item.thread_parent_id) params.set('thread', item.thread_parent_id)
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    if (item.channel_id) navigate(`/channels/${item.channel_id}${qs}`)
+    else if (item.dm_id) navigate(`/dms/${item.dm_id}${qs}`)
   }
 
   return (
