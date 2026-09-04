@@ -82,6 +82,55 @@ async def delete_message(message_id: int, user: CurrentUser = Depends(require_au
     return {"id": str(message_id), "deleted": True}
 
 
+@router.post("/{message_id}/cancel-generation")
+async def cancel_generation(message_id: int, user: CurrentUser = Depends(require_auth)):
+    """A-74: 生成中のAI発言を強制的に中断する（ユーザーからの明示的な要望）。バックエンドプロセスの
+    再起動と生成中のタイミングが重なると、それまで進行中の生成タスク自体が失われる一方でDB側の
+    generation_status='generating'だけが残り、実際にKogack運用中「生成中」のまま数十分固まり
+    続ける発言が発生した。この復旧手段として追加した。A-12削除と異なり投稿者本人・admin限定にはせず、
+    そのチャンネルの参加者であれば誰でも中断できる（AI発言に「所有者」という概念が無く、生成が
+    詰まっている状態は参加者全員の閲覧を妨げるため）。DM上のAI発言は存在しない前提だが、
+    念のためA-12と同じ参加者チェックの分岐を用意する。"""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        """SELECT channel_id, dm_id, sender_type, generation_status
+           FROM messages WHERE id = $1 AND deleted_at IS NULL""",
+        message_id,
+    )
+    if row is None:
+        raise HTTPException(404, detail="見つかりません")
+    if row["sender_type"] != "ai":
+        raise HTTPException(400, detail="AIの発言ではありません")
+
+    if user.role != "admin":
+        if row["channel_id"] is not None:
+            is_member = await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+                row["channel_id"], user.id,
+            )
+        else:
+            is_member = await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM direct_message_members WHERE dm_id = $1 AND user_id = $2)",
+                row["dm_id"], user.id,
+            )
+        if not is_member:
+            # 参加していない会話の発言は存在自体を伏せる（A-12・総論5.3節と同じ考え方）
+            raise HTTPException(404, detail="見つかりません")
+
+    if row["generation_status"] != "generating":
+        raise HTTPException(400, detail="生成中の発言ではありません")
+
+    cancelled = await ai_agent.cancel_generation(message_id)
+    if not cancelled:
+        # 直前のSELECTと実際の更新の間に自然完了していた等の競合（基本的に発生しても実害は無い）
+        raise HTTPException(400, detail="生成中の発言ではありません")
+
+    updated = await pool.fetchrow("SELECT * FROM messages WHERE id = $1", message_id)
+    blocks_by_message = await fetch_blocks_grouped(pool, [message_id])
+    attachments_by_message = await fetch_attachments_grouped(pool, [message_id])
+    return _message_out(updated, blocks_by_message.get(message_id), attachments_by_message.get(message_id))
+
+
 @router.get("/{message_id}/thread")
 async def list_thread(message_id: int, user: CurrentUser = Depends(require_thread_access)):
     """A-13: スレッド内の返信一覧（古い順）"""

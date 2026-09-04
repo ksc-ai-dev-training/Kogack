@@ -61,6 +61,7 @@
       <tr class="diff-new"><td>1.30</td><td>2026-09-03</td><td>A-38〜A-40にitem_type/parent_folder_idを反映した（フォルダ内の特定ファイルだけを参照範囲に含める機能、ユーザーからの明示的な要望。詳細設計書DB設計v1.13と一貫）。A-38レスポンスにitem_type・parent_folder_idを追加、A-39は<code>parent_folder_id</code>を指定した場合に「フォルダ内の特定ファイル」として登録できること（登録先が存在しない場合404、ファイルの下にファイルは登録できず422）、ファイルURLからのID抽出パターンを追記した。A-40はフォルダ削除時に配下の個別ファイル候補も連動削除されることを明記した。新規エンドポイントは追加していない（既存のA-38〜A-40をそのまま拡張）。基本設計書（6.2節、v1.36）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.31</td><td>2026-09-03</td><td>A-20（横断検索）のmessage/file結果にsender_type・sender_user_id・sender_picture_url・bot_iconを追加した（検索結果に発言者アイコンを表示する機能、ユーザーからの明示的な要望）。優先順位はA-10等の<code>_message_out</code>と同じ（AI/BOTはbot_icon_url→絵文字→既定表示、人間はpicture_url→色付き頭文字）。新規エンドポインは追加していない。画面モックアップは検索結果にアイコンを想定していないため、この機能はモックアップに無い追加として扱う（要件定義書・基本設計書・画面モックアップの改訂は無い）。</td></tr>
       <tr class="diff-new"><td>1.32</td><td>2026-09-04</td><td>検索結果クリックでその発言までスクロールし薄いオレンジでハイライトする機能を追加した（ユーザーからの明示的な要望）。A-10/A-18に新規パラメータ<code>around</code>（発言idを中心に前後25件ずつ取得。直近50件の外にある古い検索結果にもジャンプできるようにするため）を追加し、A-20のmessage/file結果に<code>thread_parent_id</code>（file結果には<code>message_id</code>も）を追加した。新規エンドポインは追加していない（既存のA-10/A-18/A-20をそのまま拡張）。基本設計書（6.2節、v1.37）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
+      <tr class="diff-new"><td>1.33</td><td>2026-09-04</td><td>新規A-74（POST /api/messages/{id}/cancel-generation）を追加した。ユーザーからの報告「AIの生成が数十分も生成中のまま」を受けた調査で、非同期タスク方式にはプロセス再起動から復旧する手段が無い設計上の欠落が判明したため対応した。チャンネル参加者なら誰でも実行できる（A-12削除と異なり投稿者本人・admin限定にしない）。あわせてアプリ起動時に生成中のまま残っている行を自動復旧する処理も追加した（新規APIではなく内部の起動処理）。基本設計書（8.7節、v1.40）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
     </tbody>
   </table>
 
@@ -196,6 +197,11 @@ POST /api/channels/42/members
   <pre><code>DELETE /api/messages/10301
 // response 200: { "id": "10301", "deleted": true }</code></pre>
   <p class="muted">論理削除（T-05.deleted_at/deleted_by）。投稿者本人またはadminのみ実行できる。チャンネル・DMどちらの発言、スレッド返信・元発言のいずれも同じエンドポイントで扱う。削除に成功すると以後A-10/A-18/A-13の一覧から除外される（元発言を削除した場合、そのスレッドのA-13/A-14は404になる）。参加していない会話の発言に対しては存在自体を伏せるため404、参加しているが投稿者本人でもadminでもない場合は403を返す（総論5.3節と同じ使い分け）。<span class="diff-new">F-43のシステム通知（<code>sender_type='bot'</code>かつ<code>bot_display_name='システム通知'</code>）はadminであっても削除できず、常に400（「システム通知は削除できません」）を返す（基本設計書6.2節「設計判断」）。</span></p>
+
+  <p class="diff-new"><strong>A-74 <span class="badge badge-post">POST</span> /api/messages/{id}/cancel-generation（AI生成の強制中断）</strong></p>
+  <pre class="diff-new"><code>POST /api/messages/10306/cancel-generation
+// response 200: A-10等と同じ発言の形（body: "（利用者により生成が中断されました）", generation_status: null）</code></pre>
+  <p class="muted diff-new">生成中（<code>sender_type='ai'</code>かつ<code>generation_status='generating'</code>）の発言を対象に、そのチャンネルの参加者であれば誰でも実行できる（A-12削除と異なり投稿者本人・admin限定にしない。AI発言に「所有者」という概念が無く、生成が詰まっている状態は参加者全員の閲覧を妨げるため）。対象が存在しない・参加していない会話の発言の場合は404、AI発言でない場合・既に生成が完了している場合は400。実行中の生成タスクがプロセス内に見つかればその場でキャンセルするが、見つからなくても失敗にしない（バックエンドプロセスの再起動でタスク自体が失われた「オーファン」状態でも、DB側の<code>generation_status</code>を直接クリアすることで復旧できる。基本設計書8.7節「設計判断」）。同種の理由により、アプリ起動時（lifespanのstartup）にも<code>generation_status='generating'</code>のまま残っている行を一括で自動復旧する処理を追加した（新規APIではなくアプリ内部の起動処理）。</p>
 
   <p><strong>A-13 <span class="badge badge-get">GET</span> /api/messages/{id}/thread（スレッド内の返信一覧）</strong></p>
   <pre><code>// response 200

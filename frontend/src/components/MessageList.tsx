@@ -282,6 +282,25 @@ export default function MessageList({
     }
   }
 
+  // A-74: 生成中のAI発言を強制的に中断する（ユーザーからの明示的な要望「AIの生成をアプリ上で
+  // 強制的に中断させる機能がほしい」。バックエンドプロセスの再起動と重なると「生成中」のまま
+  // 固まり続けることがあった実際の障害を受けて追加）。所有者という概念が無いAI発言のため、
+  // 削除ボタン（投稿者本人/adminのみホバー時に表示）と異なり、参加者なら誰でも常に押せるようにする。
+  // 中断後の本文は次の3秒ポーリングで自然に反映されるため、ここでは楽観的更新はしない
+  // （AI応答が完了した際の表示更新も同じくポーリング任せで、一貫している）
+  const [cancelling, setCancelling] = useState<string | null>(null)
+  const cancelGeneration = async (messageId: string) => {
+    setCancelling(messageId)
+    try {
+      await apiFetch(`/api/messages/${messageId}/cancel-generation`, { method: 'POST' })
+      toast('生成を中断しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '中断に失敗しました', 'error')
+    } finally {
+      setCancelling(null)
+    }
+  }
+
   if (messages.length === 0) {
     return emptyMessage ? <p className="px-5 py-3 text-sm text-ink-subtle">{emptyMessage}</p> : null
   }
@@ -349,13 +368,24 @@ export default function MessageList({
                   <span className="text-[11px] text-ink-subtle">{formatTime(m.created_at)}</span>
                 </div>
                 {m.generation_status === 'generating' ? (
-                  <div className="mt-0.5 flex items-center gap-1 text-[12.5px] text-ink-subtle">
-                    <span className="inline-flex gap-[3px]">
-                      <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle" />
-                      <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle [animation-delay:.2s]" />
-                      <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle [animation-delay:.4s]" />
+                  <div className="mt-0.5 flex items-center gap-2 text-[12.5px] text-ink-subtle">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex gap-[3px]">
+                        <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle" />
+                        <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle [animation-delay:.2s]" />
+                        <span className="ai-typing-dot h-[5px] w-[5px] rounded-full bg-ink-subtle [animation-delay:.4s]" />
+                      </span>
+                      生成中…
                     </span>
-                    生成中…
+                    <button
+                      type="button"
+                      disabled={cancelling === m.id}
+                      onClick={() => cancelGeneration(m.id)}
+                      title="AIの生成をここで打ち切ります（数十分など、いつまでも終わらない場合に使えます）"
+                      className="rounded border border-line-strong px-1.5 py-0.5 text-[11px] font-semibold text-ink-muted hover:border-danger-border hover:text-danger-text disabled:opacity-50"
+                    >
+                      ■ {cancelling === m.id ? '中断中…' : '中断'}
+                    </button>
                   </div>
                 ) : (
                   <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">

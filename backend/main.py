@@ -11,12 +11,16 @@ from routers import (
     admin, ai_settings, attachments, auth, channels, dms, icons, messages, recurring_posts,
     scheduled_messages, search, trigger_rules, users,
 )
-from services import scheduled_dispatcher
+from services import ai_agent, scheduled_dispatcher
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await database.init_pool()
+    # 前回のプロセス終了時に生成中のまま取り残された発言を復旧する（A-74 生成の強制中断と対になる
+    # 自動復旧。ユーザーからの報告で発覚した「デプロイ・再起動のタイミングと重なると『生成中』の
+    # まま固まり続ける」障害への対応。services/ai_agent.py参照）
+    await ai_agent.recover_orphaned_generations()
     scheduled_dispatcher.start()  # F-35 送信予約の30秒間隔ディスパッチャ（基本設計書5.15節）
     yield
     await scheduled_dispatcher.stop()

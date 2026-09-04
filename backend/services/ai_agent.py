@@ -45,6 +45,38 @@ from services import ai_client
 MAX_HISTORY_MESSAGES = 20  # AI API手順書の目安「直近10往復まで」（human+aiであわせて概ね20件。bot発言混在のため厳密な往復数ではない）
 MAX_SUMMARY_CHANNEL_MESSAGES = 100  # F-14: チャンネル本体を要約する場合の対象件数上限（スレッド全体は上限なし）
 MAX_OUTPUT_TOKENS = 1000
+
+# 生成中（generation_status='generating'）のAI発言を、message_id起点で実行中のasyncio.Taskに
+# 対応付ける（A-74 生成の強制中断、ユーザーからの明示的な要望）。単一インスタンス運用が前提の
+# プロセス内メモリのみの対応表であり、他のasyncioバックグラウンドタスク（scheduled_dispatcher等）と
+# 同じ制約を持つ（詳細設計書10章）。_generate_and_post/_generate_summary_and_postが開始時に
+# 自分自身を登録し、finallyで必ず取り除く
+_active_generations: dict[int, asyncio.Task] = {}
+
+
+async def recover_orphaned_generations() -> None:
+    """アプリ起動時（main.pyのlifespan）に呼ぶ。前回のプロセス終了（デプロイ・クラッシュ・
+    ローカルでのuvicorn --reload再起動等）の時点でgeneration_status='generating'のまま
+    残っている発言を、エラーメッセージへ差し替えて復旧する。プロセスが新しく立ち上がった
+    直後であり_active_generationsは必ず空（asyncio.Taskをプロセスを跨いで保持することはできない）
+    なので、見つかった行はすべて「タスク自体が失われたオーファン」と判断してよい。
+    A-74（cancel_generation、ユーザーからの明示的な要望）による手動中断が「今動いているものを
+    止める」手段であるのに対し、これは「前回落ちたときの後始末」を自動で行う手段（実際に
+    Kogack運用中、バックエンドプロセスの再起動と生成中のタイミングが重なり、この仕組みが
+    無かったために「生成中」のまま数十分固まり続けた発言が発生したことを受けて追加した）。"""
+    count = await get_pool().fetchval(
+        """WITH updated AS (
+               UPDATE messages SET body = $1, generation_status = NULL
+               WHERE generation_status = 'generating'
+               RETURNING id
+           )
+           SELECT count(*) FROM updated""",
+        "（サーバーの再起動により、この発言の生成は中断されました。もう一度お試しください）",
+    )
+    if count:
+        print(f"[ai_agent] recovered {count} orphaned generating message(s) on startup")
+
+
 # temperatureは意図的に指定しない（APIの既定値=1を使う）。実際にgpt-5-nanoで検証したところ
 # 「'temperature'はこのモデルでは既定値(1)以外をサポートしない」という400エラーになった
 # （openai.BadRequestError: Unsupported value）。AI_MODELは環境変数で自由に差し替える設計のため、
@@ -277,6 +309,10 @@ async def _generate_and_post(
         channel_id, thread_id, persona_name, persona_icon_url,
     )
     message_id = placeholder["id"]
+    # A-74 生成の強制中断用に、この発言を今実行中のタスクとして登録する（ユーザーからの明示的な
+    # 要望）。finallyで必ず取り除く（正常終了・エラー・中断のいずれの経路でも登録が残り続けない
+    # ようにするため）。cancel_generationはこの対応表からタスクを見つけてasyncio.Task.cancel()する
+    _active_generations[message_id] = asyncio.current_task()
 
     try:
         history_rows = await _fetch_history_rows(channel_id, thread_id)
@@ -297,8 +333,12 @@ async def _generate_and_post(
         )
         reply = (res.choices[0].message.content or "").strip() or "（回答を生成できませんでした）"
 
+        # WHERE generation_status='generating' は、生成の完了とほぼ同時にcancel_generationが
+        # 呼ばれた場合の競合対策（cancel_generation側が既にキャンセル済みメッセージへ更新していれば
+        # ここは0件更新となり、完了した応答が中断メッセージを上書きしてしまうことを防ぐ）
         await pool.execute(
-            "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+            """UPDATE messages SET body = $2, generation_status = NULL
+               WHERE id = $1 AND generation_status = 'generating'""",
             message_id, reply,
         )
 
@@ -311,12 +351,40 @@ async def _generate_and_post(
                 channel_id, requested_by, model,
                 res.usage.prompt_tokens, res.usage.completion_tokens, cost,
             )
+    except asyncio.CancelledError:
+        # cancel_generation()が呼ばれた場合。中断後のメッセージ本文は呼び出し元（cancel_generation）が
+        # 責任を持って書き込み済みのため、ここでは対応表からの削除（finally）以外は何もしない。
+        # そのまま再送出しないと、このタスク自体がキャンセルされたことにならない（asyncioの作法）
+        raise
     except Exception:
         traceback.print_exc()
         await pool.execute(
-            "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+            """UPDATE messages SET body = $2, generation_status = NULL
+               WHERE id = $1 AND generation_status = 'generating'""",
             message_id, "（エラーが発生したため回答できませんでした）",
         )
+    finally:
+        _active_generations.pop(message_id, None)
+
+
+async def cancel_generation(message_id: int) -> bool:
+    """A-74: 生成中のAI発言を強制的に中断する（ユーザーからの明示的な要望「AIの生成をアプリ上で
+    強制的に中断させる機能がほしい」）。_active_generationsに実行中のタスクが見つかればそれを
+    キャンセルするが、見つからなくても失敗にしない（プロセス再起動等でタスク自体が失われた
+    「オーファン化」した発言でも、DB側のgeneration_statusを直接クリアすることで復旧できる。
+    実際にKogack運用中、バックエンドプロセスの再起動と生成中のタイミングが重なり、この復旧手段が
+    無いために「生成中」のまま数十分固まり続けた発言が発生したことがあり、この関数が無いと
+    利用者側には打つ手が無かった）。戻り値は実際にgenerating状態の発言を1件更新できたか
+    （呼び出し元が404/400を判定するために使う）。"""
+    task = _active_generations.get(message_id)
+    if task is not None and not task.done():
+        task.cancel()
+    row = await get_pool().fetchrow(
+        """UPDATE messages SET body = $2, generation_status = NULL
+           WHERE id = $1 AND generation_status = 'generating' RETURNING id""",
+        message_id, "（利用者により生成が中断されました）",
+    )
+    return row is not None
 
 
 # F-14 やりとりの要約（基本設計書5.6節・8.7節「生成中表示」を流用）。手動実行のボタン契機のみで
@@ -394,11 +462,15 @@ async def _generate_summary_and_post(
     channel_id: int, thread_id: int | None, message_id: int, settings: dict, requested_by: int,
 ) -> None:
     pool = get_pool()
+    # A-74 生成の強制中断用の登録（_generate_and_postと同じ考え方。要約もgeneration_status='generating'の
+    # プレースホルダを使うため、同じ「プロセス再起動でオーファン化する」リスクを持つ）
+    _active_generations[message_id] = asyncio.current_task()
     try:
         rows = await _fetch_summary_source_rows(channel_id, thread_id)
         if not rows:
             await pool.execute(
-                "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+                """UPDATE messages SET body = $2, generation_status = NULL
+                   WHERE id = $1 AND generation_status = 'generating'""",
                 message_id, "（要約する発言がありませんでした）",
             )
             return
@@ -418,7 +490,8 @@ async def _generate_summary_and_post(
         reply = (res.choices[0].message.content or "").strip() or "（要約を生成できませんでした）"
 
         await pool.execute(
-            "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+            """UPDATE messages SET body = $2, generation_status = NULL
+               WHERE id = $1 AND generation_status = 'generating'""",
             message_id, reply,
         )
 
@@ -431,9 +504,14 @@ async def _generate_summary_and_post(
                 channel_id, requested_by, model,
                 res.usage.prompt_tokens, res.usage.completion_tokens, cost,
             )
+    except asyncio.CancelledError:
+        raise  # _generate_and_postと同じ理由（cancel_generationが本文の更新に責任を持つ）
     except Exception:
         traceback.print_exc()
         await pool.execute(
-            "UPDATE messages SET body = $2, generation_status = NULL WHERE id = $1",
+            """UPDATE messages SET body = $2, generation_status = NULL
+               WHERE id = $1 AND generation_status = 'generating'""",
             message_id, "（エラーが発生したため要約できませんでした）",
         )
+    finally:
+        _active_generations.pop(message_id, None)
