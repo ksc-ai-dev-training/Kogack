@@ -99,11 +99,24 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 - 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない"""
 
 
-def _build_system_prompt(settings: dict, auto_response_section: str = "", skills_section: str = "") -> str:
+def _build_system_prompt(
+    settings: dict, auto_response_section: str = "", skills_section: str = "", requester_name: str = "",
+) -> str:
     persona_name = settings["persona_name"] or "Kogack AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
     behavior = (settings["behavior_prompt"] or "").strip()
     lines = [f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}']
+    if requester_name:
+        # バグ修正（2026-09-04）: 利用者が表示名を変更した後も、AIの返答が変更前の名前で
+        # 呼びかけ続ける事象が実際に発生した。会話履歴中の人間発言のラベル（_rows_to_chat_messages）は
+        # sender_user_idからの都度DB引き直しで常に最新になるが、AI自身の過去の発言本文は不変のまま
+        # 履歴として毎回渡されるため、モデルが自分の過去の呼び方をそのまま踏襲してしまう。
+        # 履歴内の矛盾を明示的に解消する指示をここで都度追加する
+        lines.append(
+            f"今あなたに話しかけている利用者の現在の名前は「{requester_name}」です。"
+            f"これより前の会話履歴（あなた自身の過去の発言を含む）で別の名前が使われていても、"
+            f"それは名前変更前の古い情報のため使わず、必ず「{requester_name}」と呼んでください。"
+        )
     if behavior:
         lines.append(behavior)
     if auto_response_section:
@@ -317,10 +330,21 @@ async def _generate_and_post(
     try:
         history_rows = await _fetch_history_rows(channel_id, thread_id)
         names = await _resolve_sender_names(history_rows)
+        # 依頼者（今回メンション/proactiveでAIを起動した本人）の「今現在の」表示名。
+        # namesは履歴に含まれる発言者しか持たないため、念のため直接引き直す（依頼者本人の
+        # 発言は必ず履歴に含まれるはずだが、フォールバックとして安全側に倒す）
+        requester_name = names.get(requested_by) or await pool.fetchval(
+            "SELECT name FROM users WHERE id = $1", requested_by
+        )
         auto_response_section = await _build_auto_response_section(channel_id, settings)
         skills_section = await _build_skills_section(channel_id, settings)
         messages: list[dict] = [
-            {"role": "system", "content": _build_system_prompt(settings, auto_response_section, skills_section)}
+            {
+                "role": "system",
+                "content": _build_system_prompt(
+                    settings, auto_response_section, skills_section, requester_name or "",
+                ),
+            }
         ]
         messages += _rows_to_chat_messages(history_rows, names)
 
