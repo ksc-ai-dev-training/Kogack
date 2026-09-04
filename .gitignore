@@ -15,6 +15,9 @@ backend/uploads/
 .env.*
 !.env.example
 
+# 層2Drive読み取りPoC検証用の一時ファイル（routers/auth.pyのTEMPコードが出力するaccess_token）
+backend/_temp_drive_access_token.txt
+
 # OS
 Thumbs.db
 .DS_Store
