@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMe } from '../hooks/useMe'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { apiFetch, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from './Toast'
@@ -12,6 +13,7 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 // トップバー右のユーザーメニューから開くが、このアプリの実装はサイドバー下部にユーザー情報を
 // まとめて表示する構成のため、そこをユーザーメニュー相当として開く（Layout.tsx）。
 export default function ProfileEditModal({ me, onClose }: { me: Me; onClose: () => void }) {
+  const overlayClose = useOverlayClose(onClose)
   const { mutate: mutateMe } = useMe()
   const toast = useToast()
   const [name, setName] = useState(me.name)
@@ -68,7 +70,7 @@ export default function ProfileEditModal({ me, onClose }: { me: Me; onClose: () 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6"
-      onClick={onClose}
+      {...overlayClose}
     >
       <div
         className="flex w-full max-w-[380px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"

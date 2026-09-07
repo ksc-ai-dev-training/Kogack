@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useMe } from '../hooks/useMe'
 import { useDms } from '../hooks/useDms'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from './Toast'
@@ -11,6 +12,7 @@ import type { Dm, UserSearchResult } from '../types'
 // 一覧の先頭に検索結果とは独立した「自分」の固定枠を常時表示し、自分専用DM（F-05）を選べるようにする。
 // 「自分」は他の相手との組み合わせ選択を許さない排他枠（toggleSelf/toggle参照）
 export default function DmPickerModal({ onClose }: { onClose: () => void }) {
+  const overlayClose = useOverlayClose(onClose)
   const { me } = useMe()
   const { dms, mutate: mutateDms } = useDms()
   const navigate = useNavigate()
@@ -86,7 +88,7 @@ export default function DmPickerModal({ onClose }: { onClose: () => void }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6"
-      onClick={onClose}
+      {...overlayClose}
     >
       <div
         className="flex max-h-[82vh] w-full max-w-[440px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"

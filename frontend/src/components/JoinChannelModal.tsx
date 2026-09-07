@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useChannels } from '../hooks/useChannels'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { apiFetch, ApiError } from '../lib/api'
 import { useToast } from './Toast'
 
 // 補足01 チャンネルに参加／作成（このスライスは公開チャンネルのみ。非公開＝F-34は次スライス）
 export default function JoinChannelModal({ onClose }: { onClose: () => void }) {
+  const overlayClose = useOverlayClose(onClose)
   const [tab, setTab] = useState<'join' | 'create'>('join')
   const { joinable, mutate } = useChannels()
   const navigate = useNavigate()
@@ -56,7 +58,7 @@ export default function JoinChannelModal({ onClose }: { onClose: () => void }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6"
-      onClick={onClose}
+      {...overlayClose}
     >
       <div
         className="flex max-h-[82vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"

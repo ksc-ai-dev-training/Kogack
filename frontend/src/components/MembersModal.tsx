@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useUserProfile } from '../hooks/useUserProfile'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError } from '../lib/api'
@@ -24,6 +25,7 @@ export default function MembersModal({
   initialTab?: 'info' | 'members'
   onClose: () => void
 }) {
+  const overlayClose = useOverlayClose(onClose)
   const navigate = useNavigate()
   const { me } = useMe()
   const { channel } = useChannel(channelId)
@@ -133,7 +135,7 @@ export default function MembersModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6"
-      onClick={onClose}
+      {...overlayClose}
     >
       <div
         className="flex max-h-[82vh] w-full max-w-[420px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"

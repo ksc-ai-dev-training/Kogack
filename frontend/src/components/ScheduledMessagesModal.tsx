@@ -1,6 +1,7 @@
 import { useScheduledMessages } from '../hooks/useScheduledMessages'
 import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { apiFetch } from '../lib/api'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
@@ -24,6 +25,7 @@ function formatScheduledAt(iso: string): string {
 // 補足04 予約中のメッセージ（F-35）。ヘッダーの予約中バッジ（Layout.tsx）から開く。
 // A-51はpendingのみ返すため、ここに並ぶのは常にキャンセル可能な予約だけ。
 export default function ScheduledMessagesModal({ onClose }: { onClose: () => void }) {
+  const overlayClose = useOverlayClose(onClose)
   const { items, mutate } = useScheduledMessages()
   const { joined } = useChannels()
   const { dms } = useDms()
@@ -62,7 +64,7 @@ export default function ScheduledMessagesModal({ onClose }: { onClose: () => voi
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6"
-      onClick={onClose}
+      {...overlayClose}
     >
       <div
         className="flex max-h-[82vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"

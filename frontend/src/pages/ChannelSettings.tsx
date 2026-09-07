@@ -6,6 +6,7 @@ import { useAiSettings } from '../hooks/useAiSettings'
 import { useDocFolders } from '../hooks/useDocFolders'
 import { useRecurringPosts } from '../hooks/useRecurringPosts'
 import { useTriggerRules } from '../hooks/useTriggerRules'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
@@ -1312,6 +1313,7 @@ function SkillEditModal({
   onClose: () => void
   onSaved: () => Promise<unknown>
 }) {
+  const overlayClose = useOverlayClose(onClose)
   const toast = useToast()
   const [title, setTitle] = useState(skill.title)
   const [instructions, setInstructions] = useState(skill.instructions)
@@ -1339,7 +1341,7 @@ function SkillEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" {...overlayClose}>
       <div
         className="flex max-h-[85vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
         onClick={(e) => e.stopPropagation()}
@@ -1774,6 +1776,7 @@ function RecurringPostEditModal({
   onClose: () => void
   onSaved: () => Promise<unknown>
 }) {
+  const overlayClose = useOverlayClose(onClose)
   const toast = useToast()
   const initialAnchor = new Date(item.anchor_at)
   const [body, setBody] = useState(item.body)
@@ -1823,7 +1826,7 @@ function RecurringPostEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" {...overlayClose}>
       <div
         className="flex max-h-[85vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
         onClick={(e) => e.stopPropagation()}
@@ -2159,6 +2162,7 @@ function TriggerRuleEditModal({
   onClose: () => void
   onSaved: () => Promise<unknown>
 }) {
+  const overlayClose = useOverlayClose(onClose)
   const toast = useToast()
   const [triggerType, setTriggerType] = useState(item.trigger_type)
   const [triggerValue, setTriggerValue] = useState(item.trigger_value)
@@ -2201,7 +2205,7 @@ function TriggerRuleEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" {...overlayClose}>
       <div
         className="flex max-h-[85vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
         onClick={(e) => e.stopPropagation()}

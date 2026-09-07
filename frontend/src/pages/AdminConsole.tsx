@@ -4,6 +4,7 @@ import { useAdminUsers } from '../hooks/useAdminUsers'
 import { useAuditLogs } from '../hooks/useAuditLogs'
 import { useDocFolders } from '../hooks/useDocFolders'
 import { useUsageStats } from '../hooks/useUsageStats'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
@@ -884,6 +885,7 @@ function ChannelLimitEditModal({
   mutate: () => Promise<unknown>
   onClose: () => void
 }) {
+  const overlayClose = useOverlayClose(onClose)
   const toast = useToast()
   const [limitYen, setLimitYen] = useState(String(limit.monthly_limit_yen))
   const [thresholdPct, setThresholdPct] = useState(String(limit.notify_threshold_pct))
@@ -923,7 +925,7 @@ function ChannelLimitEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.45)] p-6" {...overlayClose}>
       <div
         className="flex w-full max-w-[420px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
         onClick={(e) => e.stopPropagation()}
