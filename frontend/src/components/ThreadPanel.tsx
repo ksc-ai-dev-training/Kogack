@@ -158,6 +158,13 @@ export default function ThreadPanel({
               <div className="whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
                 {renderMessageBody(parentMessage.body, parentMessage.blocks, members, aiPersonaName)}
               </div>
+              {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (
+                // F-30（MessageList.tsxと同じ）。元発言はMessageListを経由せずここで個別に描画しているため
+                // 別途対応が必要（AI発言に人間がスレッド返信した場合、元発言側にも表示する）
+                <div className="mt-[7px] flex items-center gap-[5px] text-[11px] text-ink-subtle">
+                  ⚠ AIの回答には誤りが含まれる場合があります。
+                </div>
+              )}
             </div>
             {parentProfileOpen && parentMessage.sender_user_id && (
               <ProfileCard userId={parentMessage.sender_user_id} onClose={() => setParentProfileOpen(false)} />
