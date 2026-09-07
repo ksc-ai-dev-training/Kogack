@@ -62,6 +62,7 @@
       <tr class="diff-new"><td>1.31</td><td>2026-09-03</td><td>A-20（横断検索）のmessage/file結果にsender_type・sender_user_id・sender_picture_url・bot_iconを追加した（検索結果に発言者アイコンを表示する機能、ユーザーからの明示的な要望）。優先順位はA-10等の<code>_message_out</code>と同じ（AI/BOTはbot_icon_url→絵文字→既定表示、人間はpicture_url→色付き頭文字）。新規エンドポインは追加していない。画面モックアップは検索結果にアイコンを想定していないため、この機能はモックアップに無い追加として扱う（要件定義書・基本設計書・画面モックアップの改訂は無い）。</td></tr>
       <tr class="diff-new"><td>1.32</td><td>2026-09-04</td><td>検索結果クリックでその発言までスクロールし薄いオレンジでハイライトする機能を追加した（ユーザーからの明示的な要望）。A-10/A-18に新規パラメータ<code>around</code>（発言idを中心に前後25件ずつ取得。直近50件の外にある古い検索結果にもジャンプできるようにするため）を追加し、A-20のmessage/file結果に<code>thread_parent_id</code>（file結果には<code>message_id</code>も）を追加した。新規エンドポインは追加していない（既存のA-10/A-18/A-20をそのまま拡張）。基本設計書（6.2節、v1.37）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
       <tr class="diff-new"><td>1.33</td><td>2026-09-04</td><td>新規A-74（POST /api/messages/{id}/cancel-generation）を追加した。ユーザーからの報告「AIの生成が数十分も生成中のまま」を受けた調査で、非同期タスク方式にはプロセス再起動から復旧する手段が無い設計上の欠落が判明したため対応した。チャンネル参加者なら誰でも実行できる（A-12削除と異なり投稿者本人・admin限定にしない）。あわせてアプリ起動時に生成中のまま残っている行を自動復旧する処理も追加した（新規APIではなく内部の起動処理）。基本設計書（8.7節、v1.40）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
+      <tr class="diff-new"><td>1.34</td><td>2026-09-07</td><td>F-41 @メンションをDMへも拡張した（ユーザーからの明示的な要望）。A-14の説明（4.3節）を「元発言がDMの場合は候補元が無いためmentionsを送っても無視される」から「元発言がチャンネル・DMいずれの場合もT-07へ保存する」に更新し、対象がそのDMの参加者であることを検証する点を明記した。A-19（4.4節）はmentionsフィールドを受け付けるようになったが、A-16・A-17と同じ形式でリクエスト/レスポンス例は既存のA-11の例と共通のため新規の例は追加していない。基本設計書（5.22節、v1.41）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -216,7 +217,7 @@ POST /api/channels/42/members
   <pre><code>{ "body": "@田中 智子 確認しました",
   "mentions": [ { "target_user_id": "7", "display_name_snapshot": "田中 智子" } ] }
 // response 201: A-11と同じ形（channel_id/dm_idは元発言から継承、blocksを含む）</code></pre>
-  <p class="muted"><code>mentions</code>はA-11と同じ扱い（対象がチャンネル参加者であることを検証してT-07へ保存）。元発言がDMの場合はメンション候補元（A-46）が存在しないためmentionsを送っても無視され、blocksは常に空になる。<span class="diff-new">元発言がF-43のシステム通知の場合は400（「システム通知には返信できません」）を返し、返信自体を作成しない（基本設計書6.2節「設計判断」）。</span></p>
+  <p class="muted"><code>mentions</code>は元発言がチャンネル・DMいずれの場合もT-07へ保存する（<span class="diff-new">v1.26でDMも対応。対象がそのDMの参加者であることを検証する点はA-19と同じ</span>）。元発言がF-43のシステム通知の場合は400（「システム通知には返信できません」）を返し、返信自体を作成しない（基本設計書6.2節「設計判断」）。</p>
 
   <p><strong>A-49 <span class="badge badge-put">PUT</span> /api/channels/{id}/visibility（公開/非公開切替）</strong></p>
   <pre><code>{ "is_public": false }

@@ -8,6 +8,7 @@ import { apiFetch } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
+import type { AttachmentPayload, MentionPayload } from '../types'
 
 // S-03相当のDM会話＋S-04スレッド表示（ChannelViewのDM版）。ヘッダーはチャンネル名の代わりに相手の氏名を表示する。
 // 参加者は開始時に固定のため、詳細取得API（A-06相当）は無くA-16の一覧から該当DMを引く。
@@ -23,6 +24,10 @@ export default function DmView() {
   const { me } = useMe()
   const { dms, isLoading: dmsLoading, mutate: mutateDms } = useDms()
   const dm = dms.find((d) => d.id === dmId)
+  // F-41 メンション候補（バグ修正2026-09-04でDMも対応。ユーザーからの明示的な要望）。
+  // ChannelViewのmentionCandidatesWithAiと同じ考え方だが、DMにはチャンネルAIが存在しないため
+  // isAi合成候補は追加せず、このDMのメンバー（自分以外、無効化アカウントを除く）のみを候補にする
+  const mentionCandidates = dm?.members.filter((m) => m.is_active) ?? []
   const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
@@ -103,13 +108,14 @@ export default function DmView() {
 
         <div className="flex-none border-t border-line px-5 py-2.5">
           <Composer
-            placeholder={`${title} にメッセージを送る`}
+            placeholder={`${title} にメッセージを送る（@でメンション）`}
+            mentionCandidates={mentionCandidates}
             scheduleTarget={{ dm_id: dmId }}
-            onSend={async (body, _mentions, attachments) => {
+            onSend={async (body, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
               if (!dmId) return
               await apiFetch(`/api/dms/${dmId}/messages`, {
                 method: 'POST',
-                body: JSON.stringify({ body, attachments }),
+                body: JSON.stringify({ body, mentions, attachments }),
               })
               await mutateMessages()
             }}
@@ -122,6 +128,7 @@ export default function DmView() {
           messageId={threadId}
           parentMessage={messages.find((m) => m.id === threadId) ?? null}
           headerSub={title}
+          members={mentionCandidates}
           highlightMessageId={highlightId}
           onClose={closeThread}
           onReplyPosted={() => bumpThreadReplyCount(threadId)}

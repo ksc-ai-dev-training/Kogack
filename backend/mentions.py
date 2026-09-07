@@ -1,7 +1,7 @@
 # F-41 @メンション用の共通処理（詳細設計書 API設計4.3節、基本設計書5.22節「設計判断」）。
-# T-07 message_blocksへblock_type='mention'として保存し、A-11（channels.py）・A-14（messages.py）の
-# 両方から呼び出す。AIへのメンション検知（services/ai_agent.py起動）・自動応答トリガー判定は
-# AIサポート未実装のためこのスライスの対象外（人間へのメンション参照の保存・表示のみ）。
+# T-07 message_blocksへblock_type='mention'として保存し、A-11（channels.py）・A-14（messages.py）・
+# A-19（dms.py）から呼び出す。AIへのメンション検知（services/ai_agent.py起動）はチャンネルAI自体が
+# チャンネル専用機能のためDMでは対象外のまま（基本設計書8章）。
 import json
 
 from pydantic import BaseModel, Field
@@ -21,22 +21,34 @@ def _block_out(row) -> dict:
     }
 
 
-async def insert_mention_blocks(conn, message_id: int, channel_id: int, mentions: list[MentionInput]) -> list[dict]:
-    """mentionsのうち当該チャンネルの参加者であるものだけをT-07へ保存する
-    （基本設計書5.22節「設計判断」: target_user_idが当該チャンネルの参加者であることをAPI側で検証）。
-    参加者でないtarget_user_idは黙って除外する（メッセージ送信自体は失敗させない）。"""
+async def insert_mention_blocks(
+    conn, message_id: int, mentions: list[MentionInput], *, channel_id: int | None = None, dm_id: int | None = None,
+) -> list[dict]:
+    """mentionsのうち当該チャンネル/DMの参加者であるものだけをT-07へ保存する
+    （基本設計書5.22節「設計判断」: target_user_idが参加者であることをAPI側で検証）。
+    参加者でないtarget_user_idは黙って除外する（メッセージ送信自体は失敗させない）。
+    channel_id・dm_idはどちらか一方を指定する（messages.channel_id/dm_idと同じ排他関係）。
+    バグ修正（2026-09-04）: 従来はchannel_id専用でDMは対象外（呼び出し元がif文で分岐して
+    空リストを返すだけ）だったが、ユーザーからの要望でDMでもメンションできるようにするため、
+    direct_message_membersを見る経路を追加した"""
     if not mentions:
         return []
     candidate_ids = [int(m.target_user_id) for m in mentions if m.target_user_id.isdigit()]
     if not candidate_ids:
         return []
-    valid_ids = {
-        r["user_id"]
-        for r in await conn.fetch(
+    if channel_id is not None:
+        member_rows = await conn.fetch(
             "SELECT user_id FROM channel_members WHERE channel_id = $1 AND user_id = ANY($2::bigint[])",
             channel_id, candidate_ids,
         )
-    }
+    elif dm_id is not None:
+        member_rows = await conn.fetch(
+            "SELECT user_id FROM direct_message_members WHERE dm_id = $1 AND user_id = ANY($2::bigint[])",
+            dm_id, candidate_ids,
+        )
+    else:
+        return []
+    valid_ids = {r["user_id"] for r in member_rows}
     blocks: list[dict] = []
     sort_order = 0
     for m in mentions:

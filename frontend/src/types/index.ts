@@ -96,6 +96,17 @@ export interface ChannelMembersResponse {
   items: ChannelMember[]
 }
 
+/** F-41メンション（候補一覧・既存メッセージ内の表示名解決）に必要な最低限の形。ChannelMember・
+ * DmMemberいずれも構造的に満たすため、MessageList/renderMessageBody/ThreadPanelの`members`は
+ * この型で受け取り、チャンネル・DMどちらの一覧もそのまま渡せるようにする（バグ修正2026-09-04で
+ * DMのメンションに対応した際、ChannelMember固定だった型をこの形へ緩めた） */
+export interface MentionSourceMember {
+  id: string
+  name: string
+  picture_url: string | null
+  is_active: boolean
+}
+
 /** T-07 message_blocks（05-1詳細設計書DB設計3.7節）。このスライスで実際に作成されるのは
  * block_type='mention'のみ（citation/external_system/quote_reference/pending_actionはAIサポート未実装）。 */
 export interface MentionPayload {
@@ -163,6 +174,9 @@ export interface DmMember {
   id: string
   name: string
   picture_url: string | null
+  /** F-41メンション候補の絞り込みに使う（無効化アカウントを候補に出さない。バグ修正2026-09-04でDMも
+   * メンション対応した際に追加。ChannelMember.is_activeと同じ考え方） */
+  is_active: boolean
 }
 
 /** members には自分自身は含まれない（サイドバー・ヘッダー表示用に相手のみ解決済み）。

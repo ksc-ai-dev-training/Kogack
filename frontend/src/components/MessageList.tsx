@@ -5,7 +5,7 @@ import { apiFetch } from '../lib/api'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
-import type { ChannelMember, Message } from '../types'
+import type { MentionSourceMember, Message } from '../types'
 
 export function formatTime(iso: string) {
   const d = new Date(iso)
@@ -56,7 +56,7 @@ function UnreadDivider() {
 export function renderMessageBody(
   body: string,
   blocks: Message['blocks'],
-  members?: ChannelMember[],
+  members?: MentionSourceMember[],
   aiPersonaName?: string,
 ): ReactNode {
   const mentions = (blocks ?? []).filter(
@@ -231,7 +231,7 @@ export default function MessageList({
   /** S-04スレッド返信欄では表示しない（画面モックアップに合わせる。既定はtrue） */
   showDaySeparators?: boolean
   /** F-41 @メンションの表示名解決に使う（チャンネル参加者一覧。DM会話では渡さない） */
-  members?: ChannelMember[]
+  members?: MentionSourceMember[]
   /** このメッセージの直前に「ここから未読メッセージ」区切り線を表示する（useUnreadDivider） */
   unreadDividerMessageId?: string | null
   /** S-05横断検索の結果クリックでジャンプしてきた発言。見つかり次第1回だけスクロールし、

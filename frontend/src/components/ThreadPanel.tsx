@@ -5,7 +5,7 @@ import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageLis
 import Composer, { type MentionCandidate } from './Composer'
 import ProfileCard from './ProfileCard'
 import { useToast } from './Toast'
-import type { AttachmentPayload, ChannelMember, MentionPayload, Message } from '../types'
+import type { AttachmentPayload, MentionPayload, MentionSourceMember, Message } from '../types'
 
 // S-04 スレッド表示（画面モックアップ S-04）。S-03/DmViewの右側に重ねて表示するパネル。
 // 元発言はChannelView/DmView側で既に読み込み済みのmessages一覧から渡してもらう
@@ -26,8 +26,8 @@ export default function ThreadPanel({
   messageId: string
   parentMessage: Message | null
   headerSub: string
-  /** F-41 @メンション用（チャンネルのスレッドのみ渡す。DMのスレッドでは渡さない） */
-  members?: ChannelMember[]
+  /** F-41 @メンション用。チャンネル・DMどちらのスレッドでも渡せる（バグ修正2026-09-04でDMも対応） */
+  members?: MentionSourceMember[]
   /** AIメンションのハイライト用（チャンネルのスレッドのみ渡す。DMのスレッドでは渡さない） */
   aiPersonaName?: string
   /** F-41メンション候補にチャンネルAIを含めるかどうか（ChannelViewのmentionCandidatesWithAiと

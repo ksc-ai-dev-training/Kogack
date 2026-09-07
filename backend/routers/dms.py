@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
 from auth_helpers import CurrentUser, require_auth, require_dm_member
 from database import get_pool
+from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 
 router = APIRouter(prefix="/api/dms", tags=["dms"])
 
@@ -23,13 +24,16 @@ async def _dm_out(pool, dm_id: int, created_at, self_user_id: int, unread_count:
     # 除外すると空になってしまうため、その場合のみ自分自身をmembersに含める
     target_ids = all_member_ids - {self_user_id} if not is_self else all_member_ids
     members = await pool.fetch(
-        "SELECT id, name, picture_url FROM users WHERE id = ANY($1::bigint[]) ORDER BY name",
+        "SELECT id, name, picture_url, is_active FROM users WHERE id = ANY($1::bigint[]) ORDER BY name",
         list(target_ids),
     )
     return {
         "id": str(dm_id),
+        # is_activeはF-41メンション候補の絞り込み（無効化アカウントを候補に出さない、
+        # ChannelMemberと同じ考え方）に使う（バグ修正2026-09-04でDMもメンション対応）
         "members": [
-            {"id": str(r["id"]), "name": r["name"], "picture_url": r["picture_url"]} for r in members
+            {"id": str(r["id"]), "name": r["name"], "picture_url": r["picture_url"], "is_active": r["is_active"]}
+            for r in members
         ],
         "is_self": is_self,
         "created_at": created_at.isoformat(),
@@ -120,7 +124,7 @@ async def mark_dm_read(dm_id: int, user: CurrentUser = Depends(require_dm_member
     return {"dm_id": str(dm_id), "read": True}
 
 
-def _message_out(row, attachments: list[dict] | None = None) -> dict:
+def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] | None = None) -> dict:
     return {
         "id": str(row["id"]),
         "dm_id": str(row["dm_id"]),
@@ -140,10 +144,9 @@ def _message_out(row, attachments: list[dict] | None = None) -> dict:
         # F-14 やりとりの要約はチャンネルのみ対応（A-15がチャンネル専用API）のためDMでは常にfalseだが、
         # 他2ルーターと同じ分岐に揃えておく
         "is_summary": row["is_summary"],
-        # F-41 @メンションはチャンネルのみ対応（候補元のA-46がチャンネル参加者一覧のため）。
-        # DM発言は常に空配列とし、フロント側でMessage型の形を揃える。添付ファイル（F-07）は
-        # メンションと異なり候補元に依存しないためDMでも対応する。
-        "blocks": [],
+        # F-41 @メンション（バグ修正2026-09-04でDMも対応。候補元はdirect_message_members）。
+        # 添付ファイル（F-07）はメンションより前から候補元に依存せずDMでも対応済み。
+        "blocks": blocks or [],
         "attachments": attachments or [],
         "created_at": row["created_at"].isoformat(),
         # channels.pyと同じ理由でsinceポーリングの差分取得判定に使う（下記list_messages参照）
@@ -208,17 +211,25 @@ async def list_messages(
                ORDER BY m.updated_at ASC""",
             dm_id, since_dt,
         )
+        blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
         return {
-            "items": [_message_out(r, attachments_by_message.get(r["id"])) for r in rows], "has_more": False,
+            "items": [
+                _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+            ],
+            "has_more": False,
         }
     if around:
         rows = await _around_rows(pool, dm_id, around)
         if rows is None:
             raise HTTPException(404, detail="発言が見つかりません")
+        blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
         return {
-            "items": [_message_out(r, attachments_by_message.get(r["id"])) for r in rows], "has_more": False,
+            "items": [
+                _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+            ],
+            "has_more": False,
         }
     rows = await pool.fetch(
         f"""{_MESSAGES_SELECT}
@@ -226,21 +237,29 @@ async def list_messages(
            ORDER BY m.created_at DESC LIMIT $2""",
         dm_id, limit,
     )
+    blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
     attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
     return {
-        "items": [_message_out(r, attachments_by_message.get(r["id"])) for r in reversed(rows)],
+        "items": [
+            _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]))
+            for r in reversed(rows)
+        ],
         "has_more": len(rows) == limit,
     }
 
 
 class PostMessageRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
+    mentions: list[MentionInput] = []
     attachments: list[AttachmentInput] = []
 
 
 @router.post("/{dm_id}/messages", status_code=201)
 async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser = Depends(require_dm_member)):
-    """A-19: メッセージ投稿。添付ファイル（F-07）はチャンネルと同じくA-21で保存済みの実体をT-06へ紐づける"""
+    """A-19: メッセージ投稿。添付ファイル（F-07）はチャンネルと同じくA-21で保存済みの実体をT-06へ紐づける。
+    @メンション（F-41）はバグ修正（2026-09-04）でDMも対応した（ユーザーからの明示的な要望）。
+    候補元はdirect_message_members（このDMの参加者）で、insert_mention_blocksがそのメンバーで
+    あるtarget_user_idのみをT-07へ保存する（channels.pyのA-11と同じ考え方）"""
     pool = get_pool()
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
@@ -248,8 +267,10 @@ async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser =
                VALUES ($1, 'human', $2, $3) RETURNING *""",
             dm_id, user.id, body.body,
         )
+        blocks = await insert_mention_blocks(conn, row["id"], body.mentions, dm_id=dm_id)
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
+        blocks,
         attachments,
     )

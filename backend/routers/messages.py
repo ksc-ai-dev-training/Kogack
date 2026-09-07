@@ -165,11 +165,12 @@ async def post_reply(
     message_id: int, body: PostReplyRequest, user: CurrentUser = Depends(require_thread_access),
 ):
     """A-14: スレッドへの返信投稿。channel_id/dm_idは元発言から引き継ぐ。@メンション（F-41）は
-    元発言がチャンネルの場合のみT-07へ保存する（DMは候補元のA-46が無いため対象外）。添付ファイル（F-07）は
-    チャンネル・DMどちらの返信でも対象（メンションと異なり候補元に依存しないため）。チャンネルAIへの
+    元発言がチャンネル・DMいずれの場合もT-07へ保存する（バグ修正2026-09-04でDMも対応。ユーザーからの
+    明示的な要望「DMでもメンションできるようにしたい」）。添付ファイル（F-07）はチャンネル・DM
+    どちらの返信でも対象（メンションと異なり候補元に依存しないため元々対応済み）。チャンネルAIへの
     メンション（本文中の「@ペルソナ名」）を検知した場合、A-11と同様にservices/ai_agent.pyの応答生成を
-    非同期タスクとして起動する（元発言がチャンネルの場合のみ。DMには対象外。ユーザーからの明示的な
-    要望で対応。応答は同じスレッドへの返信として投稿される）"""
+    非同期タスクとして起動する（元発言がチャンネルの場合のみ。DMにはチャンネルAI自体が存在しないため
+    引き続き対象外。応答は同じスレッドへの返信として投稿される）"""
     pool = get_pool()
     parent = await pool.fetchrow(
         "SELECT channel_id, dm_id, sender_type, bot_display_name FROM messages WHERE id = $1", message_id
@@ -185,9 +186,8 @@ async def post_reply(
                VALUES ($1, $2, $3, 'human', $4, $5) RETURNING *""",
             parent["channel_id"], parent["dm_id"], message_id, user.id, body.body,
         )
-        blocks = (
-            await insert_mention_blocks(conn, row["id"], parent["channel_id"], body.mentions)
-            if parent["channel_id"] is not None else []
+        blocks = await insert_mention_blocks(
+            conn, row["id"], body.mentions, channel_id=parent["channel_id"], dm_id=parent["dm_id"],
         )
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     if parent["channel_id"] is not None:

@@ -69,6 +69,7 @@
       <tr class="diff-new"><td>1.38</td><td>2026-09-04</td><td>スレッド返信（A-14）内でのチャンネルAIへのメンションに対応した（ユーザーからの明示的な要望）。AIサポート基盤の初回スライス（8.2節）時点から「次スライスでA-14にも同じ配線を追加する」と想定されていた対象外事項を実装した。8.1節に、スレッド内は反応モード（F-15）に関わらず常に明示的なメンションを要求する設計判断を追記した。要件定義書・画面モックアップ・詳細設計書は変更なし（当初から想定されていた実装のため）。</td></tr>
       <tr class="diff-new"><td>1.39</td><td>2026-09-04</td><td>ホスティング先をKoyebからFly.ioへ変更した（ユーザーの意向）。9.6節に設計判断として変更理由（Dockerfile新規作成、gitブランチ連動の自動デプロイが無くfly deployコマンドを明示実行する運用へ変更、本番/ステージングをアプリ単位で分離する方式へ変更）を追記し、2.1節のシステム構成図・技術スタック表・9.2/9.6節の各表のKoyeb表記をFly.ioへ更新した。リポジトリ直下にDockerfile・.dockerignore・fly.tomlを新規作成した（詳細はリポジトリのCLAUDE.md参照）。要件定義書・詳細設計書・画面モックアップは変更なし（ホスティング先はいずれの文書でも個別のIDに紐づく形では言及されていないため）。</td></tr>
       <tr class="diff-new"><td>1.40</td><td>2026-09-04</td><td>AIの生成を強制的に中断できる機能（A-74）と、バックエンドプロセス再起動時に「生成中」のまま取り残された発言を自動復旧する仕組みを追加した（ユーザーからの報告「AIが数十分も生成中のまま」を受けた調査・対応）。8.7節に、非同期タスク（asyncio.create_task）方式には生成中のプロセス再起動から復旧する手段が元々無かったという設計上の欠落と、その対策（手動中断はチャンネル参加者なら誰でも可、自動復旧はアプリ起動時に一括処理）を設計判断として追記した。詳細設計書API設計（A-74、v1.33）を一貫して更新した。要件定義書上のF-xxに対応付けられた変更ではないため（F-31の生成中表示に対する運用上の補完）、要件定義書・画面モックアップの改訂は無い。</td></tr>
+      <tr class="diff-new"><td>1.41</td><td>2026-09-07</td><td>F-41「@メンションの候補選択・ID参照化」をDMへも拡張した（ユーザーからの明示的な要望「DMでもメンションできるようにしたい」）。従来はメンション候補元（A-46）がチャンネル専用のためDM発言のmentionsは常に無視していたが、target_user_idの検証先をmessages.channel_id/dm_idに応じてchannel_membersまたはdirect_message_membersへ切り替える形に一般化し、DM本体・DMのスレッド返信のどちらでもメンションできるようにした。5.22節に設計判断を追記した。要件定義書v1.26・詳細設計書API設計（v1.34）を一貫して更新した。</td></tr>
     </tbody>
   </table>
 
@@ -678,16 +679,19 @@
   </div>
 
   <h3 class="diff-new">5.22 F-41 @メンションの候補選択・ID参照化</h3>
-  <p class="diff-new"><strong>処理概要:</strong> S-03/S-04の投稿欄で「@」を入力すると、A-46（当該チャンネルのメンバー一覧）とチャンネルAIの設定（A-23で取得済みのpersona_name）を候補としたオートコンプリートを表示する。利用者が候補を選択すると、エディタは表示名を挿入すると同時に、送信時にその選択情報（対象user_id、選択時点の表示名）を保持する。A-11（メッセージ投稿）は、本文（body）はこれまでどおり<code>@表示名</code>を含むプレーンテキストとして保存しつつ、選択されたメンションごとにT-07 message_blocksへblock_type='mention'の行を1件追加する（payload: 対象user_id、選択時点の表示名スナップショット）。発言の表示時、フロントエンドはmessage_blocksのuser_id参照をもとに<strong>現在の</strong>表示名・アイコンでメンション部分を描画し直す（本文中の静的テキストではなく、常に最新のプロフィールを反映する）。この方式により、（1）表示名が重複していても宛先が一意に定まる、（2）対象者が表示名を変更してもメンションの参照は壊れない、という2点をあわせて解決する。</p>
+  <p class="diff-new"><strong>処理概要:</strong> S-03/S-04の投稿欄で「@」を入力すると、A-46（当該チャンネルのメンバー一覧）とチャンネルAIの設定（A-23で取得済みのpersona_name）を候補としたオートコンプリートを表示する。<span class="diff-new">DMの投稿欄・DMのスレッド返信（補足02のDM会話・S-04相当）でも同様に「@」でオートコンプリートを表示するが、候補元はA-46ではなくそのDMの参加者一覧（A-16のmembers）とする（チャンネルAIはDMには存在しないため候補に含めない）。</span>利用者が候補を選択すると、エディタは表示名を挿入すると同時に、送信時にその選択情報（対象user_id、選択時点の表示名）を保持する。A-11（メッセージ投稿）<span class="diff-new">・A-19（DMメッセージ投稿）</span>は、本文（body）はこれまでどおり<code>@表示名</code>を含むプレーンテキストとして保存しつつ、選択されたメンションごとにT-07 message_blocksへblock_type='mention'の行を1件追加する（payload: 対象user_id、選択時点の表示名スナップショット）。発言の表示時、フロントエンドはmessage_blocksのuser_id参照をもとに<strong>現在の</strong>表示名・アイコンでメンション部分を描画し直す（本文中の静的テキストではなく、常に最新のプロフィールを反映する）。この方式により、（1）表示名が重複していても宛先が一意に定まる、（2）対象者が表示名を変更してもメンションの参照は壊れない、という2点をあわせて解決する。</p>
   <table class="diff-new">
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
-    <tbody><tr><td>S-03, S-04</td><td>A-11, A-46</td><td>T-05, T-07</td></tr></tbody>
+    <tbody><tr><td>S-03, S-04<span class="diff-new">、DM会話・DMのスレッド</span></td><td>A-11, A-46<span class="diff-new">、A-19, A-16</span></td><td>T-05, T-07<span class="diff-new">, T-17</span></td></tr></tbody>
   </table>
   <div class="callout diff-new">
     <strong>設計判断（新規テーブルを設けずT-07 message_blocksを再利用した理由）:</strong> message_blocksは元々AI発言の根拠カード等（citation/external_system/quote_reference/pending_action）を、種類ごとにテーブルを分けずblock_type＋JSONBペイロードの1テーブルに集約する設計だった（6.2節「設計判断」）。人間メンションの構造化参照も「発言に付随する種類別の追加情報」という点で性質が同じであり、専用のmentionsテーブルを新設するより既存の仕組みに1種類（'mention'）を追加するほうが一貫性がある。message_blocksはAI発言専用ではなく人間の発言（sender_type='human'）にも付与できる設計（message_idに紐づくのみでsender_typeを問わない）であるため、この拡張に制約はない。
   </div>
   <div class="callout diff-new">
     <strong>設計判断（AIへのメンションはID参照化の対象外とした理由）:</strong> ID参照化が必要なのは「複数の候補の中からどれを指すか曖昧になる」ケースであり、これはT-01 usersの氏名重複に起因する。チャンネルAIはチャンネルごとに1つしか存在せず（T-08 channel_ai_settings.channel_idはUNIQUE）、T-01 usersのレコードでもないため、同名の別候補と混同される余地がない。AIメンションの検知方式（本文中の<code>@チャンネルAI名</code>文字列一致）を変更する理由がなく、8章のAIエージェント処理・trigger_matcher.pyの既存実装（sender_type='human'の投稿のみを対象とする前提）にも影響を与えないため、従来方式を維持する。
+  </div>
+  <div class="callout diff-new">
+    <strong>設計判断（DMのメンション対象検証をdirect_message_membersで行う理由）:</strong> 当初、F-41はチャンネルのみを対象に実装しており、DM発言のmentionsは候補元（A-46）がチャンネル専用のため常に無視していた。ユーザーからの明示的な要望「DMでもメンションできるようにしたい」を受け、target_user_idの検証先をmessages.channel_id/dm_idに応じてchannel_membersまたはdirect_message_membersへ切り替える形に一般化した（<code>mentions.py</code>の<code>insert_mention_blocks</code>）。DMの参加者は開始時に固定（05-1 DB設計3.17節）でチャンネルのような入退室が無いため、この検証はDM開始時点の参加者集合と一致し続ける。F-35送信予約のDM宛てmentionsは引き続き無視する（4.10節・A-50の記載どおり、対象外のまま）。
   </div>
 
   <h3 class="diff-new">5.23 F-42 検索条件モディファイア</h3>
