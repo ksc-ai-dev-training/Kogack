@@ -49,7 +49,7 @@ def _next_run_after(current: datetime, anchor: datetime, frequency: str) -> date
 async def _dispatch_due_messages() -> None:
     pool = get_pool()
     rows = await pool.fetch(
-        """SELECT id, channel_id, dm_id, thread_parent_id, sender_user_id, body, mentions
+        """SELECT id, channel_id, dm_id, thread_parent_id, sender_user_id, body, mentions, scheduled_at
            FROM scheduled_messages WHERE status = 'pending' AND scheduled_at <= now()"""
     )
     for row in rows:
@@ -63,10 +63,16 @@ async def _dispatch_due_messages() -> None:
             )
             if claimed is None:
                 continue
+            # バグ修正（2026-09-04）: created_atを本来の予定時刻（scheduled_at）にする。
+            # _dispatch_recurring_postsと同じ理由（アプリの長時間停止からの復帰直後は、実際の
+            # ディスパッチ時刻ではなく予約時刻どおりに見えるべき）。updated_atはDEFAULT now()のまま
+            # （sinceポーリングの差分検知に使うため過去の時刻にしない）
             message_row = await conn.fetchrow(
-                """INSERT INTO messages (channel_id, dm_id, thread_parent_id, sender_type, sender_user_id, body)
-                   VALUES ($1, $2, $3, 'human', $4, $5) RETURNING id""",
+                """INSERT INTO messages
+                       (channel_id, dm_id, thread_parent_id, sender_type, sender_user_id, body, created_at)
+                   VALUES ($1, $2, $3, 'human', $4, $5, $6) RETURNING id""",
                 row["channel_id"], row["dm_id"], row["thread_parent_id"], row["sender_user_id"], row["body"],
+                row["scheduled_at"],
             )
             if row["channel_id"] is not None:
                 raw_mentions = row["mentions"]
@@ -107,12 +113,22 @@ async def _dispatch_recurring_posts() -> None:
                 )
             if claimed is None:
                 continue
+            # バグ修正（2026-09-04）: created_atを明示的に「本来の予定時刻」（この回でfireした
+            # next_run_at、＝row["next_run_at"]。上のnext_run_at変数はNEXT回用に計算し直した値
+            # なので混同しないこと）にする。アプリがauto_stop_machines等で長時間停止していた場合、
+            # 欠落回をスキップせずまとめて追いつかせて送信する設計（このファイル冒頭コメント）と
+            # 組み合わさると、従来はcreated_atがDEFAULT now()のまま＝ディスパッチャが実際に動いた
+            # 瞬間（＝チャンネルを開いてアプリが起動した瞬間）になり、複数日分が同時刻に見えてしまう
+            # 不具合が実際に報告された。updated_atは意図的にDEFAULT now()のまま変更しない
+            # （sinceポーリングの差分検知はupdated_at基準のため、ここを過去の時刻にすると
+            # 逆にこの発言がポーリングで検知されなくなってしまう）
             await conn.execute(
                 """INSERT INTO messages
-                       (channel_id, sender_type, body, bot_display_name, bot_icon, bot_icon_url, recurring_post_id)
-                   VALUES ($1, 'bot', $2, $3, $4, $5, $6)""",
+                       (channel_id, sender_type, body, bot_display_name, bot_icon, bot_icon_url,
+                        recurring_post_id, created_at)
+                   VALUES ($1, 'bot', $2, $3, $4, $5, $6, $7)""",
                 row["channel_id"], row["body"], row["bot_display_name"], row["bot_icon"],
-                row["bot_icon_url"], row["id"],
+                row["bot_icon_url"], row["id"], row["next_run_at"],
             )
 
 

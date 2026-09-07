@@ -54,6 +54,13 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
       } else {
         s.messages = res.items
       }
+      // バグ修正（2026-09-04）: 定期投稿・送信予約はcreated_atを本来の予定時刻にさかのぼらせる
+      // ことがある（アプリの長時間停止からの復帰時に欠落回をまとめて追いつかせて送信する際、
+      // 実際のディスパッチ時刻ではなく予約時刻どおりに見せるため。scheduled_dispatcher.py参照）。
+      // sinceでの差分取得はid一致で上書き・新規行は末尾に追記するだけなので、そのままだと
+      // 過去の日時を持つ発言が画面の一番下に挿入されてしまう。created_at昇順に並べ替えることで、
+      // 実際の会話の流れに沿った位置に表示する
+      s.messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       s.since = res.items[res.items.length - 1].updated_at
     }
     return s.messages
