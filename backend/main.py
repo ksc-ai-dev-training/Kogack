@@ -73,6 +73,17 @@ if FRONTEND_DIST.is_dir():
     _INDEX_HTML = FRONTEND_DIST / "index.html"
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
+    # バグ修正（2026-09-04）: index.html（およびdist直下のfavicon.ico等、ファイル名にビルドハッシュを
+    # 含まない実ファイル）にCache-Controlヘッダーが一切付いておらず、ブラウザの既定のヒューリスティック
+    # キャッシュに委ねられていた。デプロイ後もブラウザがindex.htmlの古いキャッシュを使い続け、実際には
+    # 修正済みのはずのJSバンドル（/assets/index-*.js、こちらはファイル名自体がコンテンツハッシュのため
+    # 長期キャッシュしても安全）を指す古いURLを参照し続けてしまい、「デプロイしたのに直っていないように
+    # 見える」事象をユーザーからの報告で確認した（サーバー側は最新のビルドを返していたことを直接確認
+    # 済み）。no-cache（保存はしてよいが、使う前に毎回サーバーへ検証させる）を明示することで、
+    # FileResponseが自動付与するLast-Modified/ETagによる条件付きGETが効くようにしつつ、
+    # 検証無しに古い内容を使われることを防ぐ
+    _NO_CACHE_HEADERS = {"Cache-Control": "no-cache"}
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
         """SPAフォールバック。/api 配下以外はビルド済みの index.html を返し、
@@ -82,8 +93,8 @@ if FRONTEND_DIST.is_dir():
         candidate = (FRONTEND_DIST / full_path).resolve()
         # ディレクトリトラバーサル対策: dist配下に収まる実在ファイルのみ直接返す
         if full_path and candidate.is_file() and candidate.is_relative_to(FRONTEND_DIST.resolve()):
-            return FileResponse(candidate)
-        return FileResponse(_INDEX_HTML)
+            return FileResponse(candidate, headers=_NO_CACHE_HEADERS)
+        return FileResponse(_INDEX_HTML, headers=_NO_CACHE_HEADERS)
 
 
 if __name__ == "__main__":
