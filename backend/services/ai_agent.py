@@ -101,11 +101,24 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 
 def _build_system_prompt(
     settings: dict, auto_response_section: str = "", skills_section: str = "", requester_name: str = "",
+    channel_context: dict | None = None,
 ) -> str:
     persona_name = settings["persona_name"] or "Kogack AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
     behavior = (settings["behavior_prompt"] or "").strip()
     lines = [f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}']
+    if channel_context and channel_context.get("name"):
+        # バグ修正（2026-09-07）: 従来はチャンネル自身の名前・説明文・作成者を渡しておらず、
+        # 「このチャンネルについて説明して」のような質問に「わかりません」としか答えられなかった
+        # （ユーザーからの指摘）。振る舞い定義（behavior）を書くほどではない基本的な自己紹介として、
+        # ここで都度渡す。チャンネル名・topicは非公開情報ではなく参加者には既に見えている情報のため、
+        # AIへ渡すこと自体に問題は無い
+        context_line = f'あなたが常駐しているチャンネルは「{channel_context["name"]}」です。'
+        if channel_context.get("topic"):
+            context_line += f'説明文: {channel_context["topic"]}'
+        if channel_context.get("creator_name"):
+            context_line += f'（作成者: {channel_context["creator_name"]}）'
+        lines.append(context_line)
     if requester_name:
         # バグ修正（2026-09-04）: 利用者が表示名を変更した後も、AIの返答が変更前の名前で
         # 呼びかけ続ける事象が実際に発生した。会話履歴中の人間発言のラベル（_rows_to_chat_messages）は
@@ -226,6 +239,24 @@ async def _fetch_settings(channel_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+async def _fetch_channel_context(channel_id: int) -> dict:
+    """バグ修正（2026-09-07）: 従来はチャンネル自身の名前・説明文（topic）・作成者を一切AIへ
+    渡しておらず、「このチャンネルについて説明して」のような素朴な質問にも「わかりません」としか
+    答えられなかった（ユーザーからの指摘、実機テストでも再現を確認）。chadminが振る舞い定義に
+    手動で書けば伝わるが、書かなければ完全に無知という状態だった。channels.name/topic・
+    作成者名（いずれも非公開情報ではなく、参加者には既にチャンネル情報タブ等で見えている）を
+    都度取得し、_build_system_promptへ渡す"""
+    row = await get_pool().fetchrow(
+        """SELECT c.name, c.topic, u.name AS creator_name
+           FROM channels c LEFT JOIN users u ON u.id = c.created_by
+           WHERE c.id = $1""",
+        channel_id,
+    )
+    if row is None:
+        return {"name": "", "topic": None, "creator_name": None}
+    return dict(row)
+
+
 async def _resolve_sender_names(rows) -> dict[int, str]:
     """履歴整形用にsender_user_idのnameだけ別途取得する（_generate_and_post・要約生成で共有）"""
     user_ids = {r["sender_user_id"] for r in rows if r["sender_user_id"] is not None}
@@ -336,13 +367,14 @@ async def _generate_and_post(
         requester_name = names.get(requested_by) or await pool.fetchval(
             "SELECT name FROM users WHERE id = $1", requested_by
         )
+        channel_context = await _fetch_channel_context(channel_id)
         auto_response_section = await _build_auto_response_section(channel_id, settings)
         skills_section = await _build_skills_section(channel_id, settings)
         messages: list[dict] = [
             {
                 "role": "system",
                 "content": _build_system_prompt(
-                    settings, auto_response_section, skills_section, requester_name or "",
+                    settings, auto_response_section, skills_section, requester_name or "", channel_context,
                 ),
             }
         ]
