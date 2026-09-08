@@ -445,6 +445,23 @@ CREATE TABLE IF NOT EXISTS channel_auto_response_rules (
     UNIQUE (channel_id, request_category)
 );
 ALTER TABLE channel_auto_response_rules ENABLE ROW LEVEL SECURITY;
+
+-- T-23 google_drive_tokens: 層2ドキュメントQ&A（F-19〜F-22）向け、利用者ごとのGoogle Drive
+-- アクセストークン保存先（05-1_詳細設計書_DB設計.html 3.23節）。access_tokenは短命（通常1時間）
+-- なため、refresh_tokenを使って必要な時にサーバー側で更新する（google_auth.pyのrefresh_access_token
+-- 参照）。user_idを主キーにし、1利用者につき最新の1組のみ保持する（履歴は持たない。再ログイン・
+-- 再同意のたびに洗い替える）。refresh_tokenはGoogleがaccess_type=offline+prompt=consentの初回
+-- 同意時のみ返す値のため、理論上は常に取得できるはずだがNULL許容にして防御的に扱う
+-- （無い場合はaccess_token期限切れ時に再ログインが必要になるだけで、既存機能への影響は無い）
+CREATE TABLE IF NOT EXISTS google_drive_tokens (
+    user_id        BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    access_token   TEXT NOT NULL,
+    refresh_token  TEXT,
+    expires_at     TIMESTAMPTZ NOT NULL,
+    scope          TEXT NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE google_drive_tokens ENABLE ROW LEVEL SECURITY;
 """
 
 

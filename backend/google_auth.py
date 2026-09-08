@@ -59,17 +59,27 @@ def redirect_uri_for(request) -> str:
 
 
 def build_auth_url(state: str, redirect_uri: str) -> str:
-    """Google の認可エンドポイントURLを組み立てる（A-01）"""
+    """Google の認可エンドポイントURLを組み立てる（A-01）。
+
+    層2ドキュメントQ&A（F-19〜F-22）向けにdrive.readonlyスコープを恒久的に含める
+    （2026-09-07、GCP側のDrive API有効化・スコープの全社展開について千田氏の許可を得て対応。
+    従来はPoC検証用の一時的な追加としてstashに残していたが、正式な実装として組み込む）。
+    access_type=offline + prompt=consentは、refresh_tokenを確実に受け取るために必須
+    （Googleはaccess_type=offlineが無いとrefresh_tokenを返さず、prompt=consentが無いと
+    2回目以降の同意で（同じスコープに対して）refresh_tokenを再発行しないことがあるため）。
+    """
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": "openid email profile",
+        "scope": "openid email profile https://www.googleapis.com/auth/drive.readonly",
         "state": state,
         # UX向上のためのドメインヒント。実際の検証はサーバー側（verify_domain）で行う
         "hd": ALLOWED_DOMAINS[0] if ALLOWED_DOMAINS else "",
-        # 常にアカウント選択を出す（複数アカウント運用での誤ログインを防ぐ）
-        "prompt": "select_account",
+        # select_account: 複数アカウント運用での誤ログインを防ぐため常にアカウント選択を出す。
+        # consent: refresh_tokenを毎回確実に受け取るため、既に同意済みの利用者にも再度同意画面を出す
+        "prompt": "select_account consent",
+        "access_type": "offline",
     }
     return f"{AUTH_ENDPOINT}?{urlencode({k: v for k, v in params.items() if v})}"
 
@@ -90,6 +100,27 @@ async def exchange_code(code: str, redirect_uri: str) -> dict:
         )
     if res.status_code != 200:
         raise ValueError(f"トークン交換に失敗しました: {res.status_code} {res.text[:200]}")
+    return res.json()
+
+
+async def refresh_access_token(refresh_token: str) -> dict:
+    """refresh_tokenを使ってaccess_tokenを更新する（層2ドキュメントQ&A、T-23 google_drive_tokens用）。
+    Googleはrefresh_token更新のレスポンスに新しいrefresh_tokenを含めないのが通常のため、
+    呼び出し元は既存のrefresh_tokenをそのまま使い続ける（レスポンスのaccess_token・expires_inのみ
+    更新して保存する）。"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        res = await client.post(
+            TOKEN_ENDPOINT,
+            data={
+                "refresh_token": refresh_token,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "grant_type": "refresh_token",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    if res.status_code != 200:
+        raise ValueError(f"トークン更新に失敗しました: {res.status_code} {res.text[:200]}")
     return res.json()
 
 

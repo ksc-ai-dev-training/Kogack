@@ -42,6 +42,7 @@
       <tr class="diff-new"><td>1.11</td><td>2026-09-02</td><td>T-08 channel_ai_settings.persona_nameの既定値を'AI'から'Kogack AI'へ変更した（ユーザーからの明示的な要望。実機検証で実際にAIと会話した際、発言者名が「AI」だけでは製品名との結びつきが弱いと判断）。カラム定義・制約自体の変更は無い。</td></tr>
       <tr class="diff-new"><td>1.12</td><td>2026-09-03</td><td>T-05 messagesに新規is_summary列（BOOLEAN、既定false）を追加した。F-14要約ボタン（A-15）で生成された発言のときのみtrueとし、通常のAIメンション応答と会話上で見分けられるようにする（ユーザーからの明示的な要望）。要約はチャンネル本体の新規発言として投稿される場合、thread_parent_idが通常のAI応答と同じくNULLになり既存の列だけでは区別できないため、専用フラグ列とした。</td></tr>
       <tr class="diff-new"><td>1.13</td><td>2026-09-03</td><td>T-09 doc_foldersにitem_type・parent_folder_idを追加した。フォルダ内の特定ファイルだけを参照範囲に含める機能（ユーザーからの明示的な要望）で、実際のDrive APIによる自動列挙ではなく手動URL貼り付け方式を選択した設計判断を3.9節にcalloutとして追記した。</td></tr>
+      <tr class="diff-new"><td>1.14</td><td>2026-09-07</td><td>新規T-23 google_drive_tokensを追加した。層2ドキュメントQ&A（F-19〜F-22）に向けたGoogle Drive連携の最初のスライスとして、GCP側のDrive API有効化・OAuthスコープの全社展開について千田氏の許可を得て着手した。利用者ごとのGoogle Driveアクセストークン（access_token・refresh_token・有効期限）を保存し、期限切れ時はrefresh_tokenで自動更新する（services/google_drive.py）。索引作成・埋め込みベクトル化・検索本体は次のスライス。</td></tr>
     </tbody>
   </table>
 
@@ -367,9 +368,23 @@
   </table>
   <p class="muted">索引: <code>(user_id, channel_id)</code>・<code>(user_id, dm_id)</code>の部分UNIQUEインデックス（channel_id/dm_idがNULLでない方のみ対象。1利用者につき1チャンネル/DMあたり1行）。メッセージ単位の既読管理はせず「最後に読んだ時刻」のみを保持する簡易な方式（基本設計書6.2節「設計判断」）。行が存在しない参加者は、参加時刻（T-03.joined_at／T-17.joined_at）を既読時刻の代わりに使う。</p>
 
+  <h3 class="diff-new">3.18 T-23 google_drive_tokens（Google Driveアクセストークン、層2ドキュメントQ&A）</h3>
+  <table class="diff-new">
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>PRIMARY KEY、FK→users.id（ON DELETE CASCADE）</td></tr>
+      <tr><td>access_token</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>Drive APIへのリクエストにそのまま使う短命トークン（通常1時間）</td></tr>
+      <tr><td>refresh_token</td><td>TEXT</td><td>NULL可</td><td>-</td><td>access_token更新用。Googleがaccess_type=offline+prompt=consentの同意時のみ返す値のため、理論上は常に取得できるがNULL許容にして防御的に扱う</td></tr>
+      <tr><td>expires_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>-</td><td>access_tokenの失効時刻</td></tr>
+      <tr><td>scope</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>実際に許可されたスコープ（Googleからのレスポンスをそのまま保持）</td></tr>
+      <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>最終更新（再ログイン時の洗い替え・自動更新時に更新）</td></tr>
+    </tbody>
+  </table>
+  <p class="muted diff-new">1利用者につき最新の1組のみ保持する（履歴は持たない）。取得・更新は<code>services/google_drive.py</code>の<code>get_valid_access_token</code>に集約し、呼び出し時点で期限切れ間近（5分以内）であればrefresh_tokenを使って自動更新してから返す。保存自体はA-02（ログインコールバック）で、Google側から実際に返ってきたトークンをそのままUPSERTする（<code>routers/auth.py</code>）。索引作成・埋め込みベクトル化・検索本体（<code>search_documents</code>ツール）は次のスライスで、このトークンを使ってDrive APIを呼び出す形になる。</p>
+
   <footer class="doc-footer">
     <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 DB設計</span>
-    <span>Ver 1.0 / 2026-08-24</span>
+    <span>Ver 1.14 / 2026-09-07</span>
   </footer>
 </div>
 </body>
