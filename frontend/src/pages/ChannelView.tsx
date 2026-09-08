@@ -90,8 +90,27 @@ export default function ChannelView() {
   }, [channelId, messages.length])
 
   if (channelError instanceof ApiError && (channelError.status === 404 || channelError.status === 403)) {
-    // 総論5.9節: 参加していないチャンネルへの直接アクセスはワークスペースへ無言で戻す
-    return null
+    // 総論5.9節: 404（存在しない・削除済み・非公開チャンネルの非参加者）と403（公開チャンネルの
+    // 非参加者）を同じ文言で扱う。理由ごとに表示を出し分けると「削除済み」と「非公開で単に
+    // 参加していないだけ」を利用者が区別できてしまい、F-34「非公開チャンネルは非参加者に
+    // 存在自体を伏せる」設計が崩れるため、あえて一律の表示にする（バックエンドも両者を同じ
+    // 404で返しており区別する情報を持たない）。従来は無言でこの画面が空白のままだったが、
+    // 削除済みチャンネルのURLへうっかりアクセスした利用者に何のフィードバックも無く
+    // 分かりづらいとの指摘を受け、明示的なメッセージに差し替えた（無言リダイレクトにはしない）
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2.5 px-6 text-center">
+        <div className="text-[15px] font-bold text-ink">🗑 このチャンネルは削除されています</div>
+        <p className="max-w-[420px] text-[12.5px] leading-relaxed text-ink-subtle">
+          このチャンネルは存在しないか、削除されました。
+        </p>
+        <Link
+          to="/"
+          className="mt-1.5 rounded-lg border border-line-strong px-3.5 py-1.5 text-[12.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+        >
+          ← ワークスペースに戻る
+        </Link>
+      </div>
+    )
   }
   if (channel && !channel.is_member) {
     // A-06はシステム管理者に限り非参加の非公開チャンネルでもメタデータを返す（S-06用の
