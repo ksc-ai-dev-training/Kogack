@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAdminUsers } from '../hooks/useAdminUsers'
 import { useAuditLogs } from '../hooks/useAuditLogs'
@@ -337,6 +337,69 @@ function ViewerPicker({
   )
 }
 
+// 参照ドキュメントの実ファイルアップロード（Slice 3、2026-09-09）向けのドロップゾーン。
+// ユーザーからの明示的な要望「エクスプローラーからD&D、またはファイルを選択、という形にしたい」
+// を受けて、素の<input type="file">から差し替えた。クリックでもファイル選択ダイアログを
+// 開けるよう、非表示のinputへのrefをクリックで発火させる。
+function FileDropzone({ file, onChange }: { file: File | null; onChange: (f: File | null) => void }) {
+  const [dragOver, setDragOver] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const sizeLabel = (bytes: number) => {
+    const kb = bytes / 1024
+    if (kb < 1) return `${bytes}B`
+    return kb < 1024 ? `${kb.toFixed(0)}KB` : `${(kb / 1024).toFixed(1)}MB`
+  }
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault()
+        setDragOver(true)
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        setDragOver(false)
+        const dropped = e.dataTransfer.files?.[0]
+        if (dropped) onChange(dropped)
+      }}
+      onClick={() => inputRef.current?.click()}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') inputRef.current?.click()
+      }}
+      className={`cursor-pointer rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
+        dragOver ? 'border-accent-600 bg-accent-50' : 'border-line-strong bg-surface hover:border-accent-600'
+      }`}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+        className="hidden"
+      />
+      {file ? (
+        <div className="text-[13px] text-ink">
+          <div className="font-bold">📎 {file.name}</div>
+          <div className="mt-1 text-[11px] text-ink-subtle">
+            {sizeLabel(file.size)} ・ クリックまたはドラッグ＆ドロップで変更
+          </div>
+        </div>
+      ) : (
+        <div className="text-[12.5px] text-ink-subtle">
+          <div className="text-[22px]">📂</div>
+          <div className="mt-1">ここにファイルをドラッグ＆ドロップ</div>
+          <div className="mt-0.5 text-[11px]">
+            または<span className="font-semibold text-accent-700">クリックしてファイルを選択</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DocFoldersTab() {
   const { folders, mutate } = useDocFolders()
   const toast = useToast()
@@ -613,11 +676,7 @@ function DocFoldersTab() {
           {mode === 'upload' && (
             <div className="mb-3.5">
               <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">ファイル</label>
-              <input
-                type="file"
-                onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-                className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-              />
+              <FileDropzone file={uploadFile} onChange={setUploadFile} />
               <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
                 Googleドライブとは連携せず、このファイル自体をKogackのサーバーへ直接保存します（20MBまで）。表示名はファイル名がそのまま使われます。
               </div>
