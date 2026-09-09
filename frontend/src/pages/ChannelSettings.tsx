@@ -12,7 +12,9 @@ import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import type { AiSettings, AutoResponseRule, ChannelDetail, RecurringPost, Skill, TriggerRule } from '../types'
+import type {
+  AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, RecurringPost, Skill, TriggerRule,
+} from '../types'
 
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_ICON_BYTES = 5 * 1024 * 1024
@@ -62,8 +64,8 @@ export default function ChannelSettings() {
         {tab === 'prompt' && channelId && settings && (
           <PromptTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
-        {tab === 'docscope' && channelId && settings && (
-          <DocScopeTab channelId={channelId} settings={settings} mutate={mutateAi} />
+        {tab === 'docscope' && channelId && settings && channel && (
+          <DocScopeTab channelId={channelId} settings={settings} mutate={mutateAi} isPublic={channel.is_public} />
         )}
         {tab === 'skills' && channelId && settings && (
           <SkillsTab channelId={channelId} settings={settings} mutate={mutateAi} />
@@ -677,37 +679,65 @@ function DocScopeTab({
   channelId,
   settings,
   mutate,
+  isPublic,
 }: {
   channelId: string
   settings: AiSettings
   mutate: () => Promise<AiSettings | undefined>
+  isPublic: boolean
 }) {
   const toast = useToast()
+  const confirm = useConfirm()
   const { folders } = useDocFolders()
   const [selected, setSelected] = useState(() => new Set(settings.folder_ids))
   const [policy, setPolicy] = useState(settings.out_of_scope_policy)
   const [saving, setSaving] = useState(false)
 
-  const toggle = (id: string) => {
+  const toggle = (f: DocFolder) => {
+    // 閲覧権限モデル（Slice 2b、2026-09-09、(4)）: 公開チャンネルは限定公開フォルダを
+    // 一切選べない（保存時にサーバー側でも拒否されるが、選べてしまうこと自体が誤解を招くため
+    // フロント側でも選択自体をブロックする）
+    if (isPublic && f.is_restricted) {
+      toast('公開チャンネルには限定公開のフォルダを含められません', 'error')
+      return
+    }
     setSelected((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(f.id)) next.delete(f.id)
+      else next.add(f.id)
       return next
     })
   }
 
-  const save = async () => {
+  const save = async (force = false) => {
     setSaving(true)
     try {
       await apiFetch(`/api/channels/${channelId}/ai-settings/doc-scope`, {
         method: 'PUT',
-        body: JSON.stringify({ folder_ids: Array.from(selected), out_of_scope_policy: policy }),
+        body: JSON.stringify({ folder_ids: Array.from(selected), out_of_scope_policy: policy, force }),
       })
       await mutate()
       toast('参照ドキュメント範囲を保存しました')
     } catch (e) {
-      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+      if (e instanceof ApiError && e.status === 409 && e.detailObj) {
+        const detail = e.detailObj as DocPermissionConflict
+        const names = detail.affected
+          .flatMap((a) => a.members.map((m) => `${a.folder_name}: ${m.name}`))
+          .join('、')
+        const ok = await confirm({
+          title: '閲覧権限のない参加者がいます',
+          message: `次の参加者は追加しようとしている文書の閲覧権限がありません: ${names}。「はい」を押すと、これらの参加者をこのチャンネルから強制的に退出させたうえで参照範囲に追加します。よろしいですか？`,
+          confirmLabel: 'はい（強制退出させて保存）',
+          danger: true,
+        })
+        if (ok) {
+          setSaving(false)
+          await save(true)
+          return
+        }
+      } else {
+        toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+      }
     } finally {
       setSaving(false)
     }
@@ -727,38 +757,61 @@ function DocScopeTab({
           </p>
         ) : (
           <ul className="space-y-1 rounded-[10px] border border-line px-3.5 py-2.5">
+            {/* トップレベル項目（Driveフォルダ・アップロードした単独ファイルの両方、parent_folder_id無し） */}
             {folders
-              .filter((f) => f.item_type === 'folder')
+              .filter((f) => f.parent_folder_id === null)
               .map((f) => {
-                const children = folders.filter((c) => c.parent_folder_id === f.id)
+                const children = f.item_type === 'folder' ? folders.filter((c) => c.parent_folder_id === f.id) : []
+                const disabled = isPublic && f.is_restricted
                 return (
                   <li key={f.id}>
-                    <label className="flex items-center gap-2 py-1 text-[13px] text-ink">
+                    <label
+                      className={`flex items-center gap-2 py-1 text-[13px] text-ink ${disabled ? 'opacity-40' : ''}`}
+                      title={disabled ? '公開チャンネルには限定公開のフォルダを含められません' : undefined}
+                    >
                       <input
                         type="checkbox"
                         checked={selected.has(f.id)}
-                        onChange={() => toggle(f.id)}
+                        onChange={() => toggle(f)}
+                        disabled={disabled}
                         className="h-3.5 w-3.5"
                       />
-                      <span className="text-sm">📁</span>
+                      <span className="text-sm">{f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'}</span>
                       {f.drive_folder_name}
+                      {f.is_restricted && (
+                        <span className="rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
+                          🔒 限定公開
+                        </span>
+                      )}
                     </label>
                     {children.length > 0 && (
                       <ul className="ml-6 border-l border-line pl-2">
-                        {children.map((c) => (
-                          <li key={c.id}>
-                            <label className="flex items-center gap-2 py-1 text-[13px] text-ink">
-                              <input
-                                type="checkbox"
-                                checked={selected.has(c.id)}
-                                onChange={() => toggle(c.id)}
-                                className="h-3.5 w-3.5"
-                              />
-                              <span className="text-sm">📄</span>
-                              {c.drive_folder_name}
-                            </label>
-                          </li>
-                        ))}
+                        {children.map((c) => {
+                          const childDisabled = isPublic && c.is_restricted
+                          return (
+                            <li key={c.id}>
+                              <label
+                                className={`flex items-center gap-2 py-1 text-[13px] text-ink ${childDisabled ? 'opacity-40' : ''}`}
+                                title={childDisabled ? '公開チャンネルには限定公開のファイルを含められません' : undefined}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selected.has(c.id)}
+                                  onChange={() => toggle(c)}
+                                  disabled={childDisabled}
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span className="text-sm">📄</span>
+                                {c.drive_folder_name}
+                                {c.is_restricted && (
+                                  <span className="rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
+                                    🔒 限定公開
+                                  </span>
+                                )}
+                              </label>
+                            </li>
+                          )
+                        })}
                       </ul>
                     )}
                   </li>
@@ -795,7 +848,7 @@ function DocScopeTab({
       <button
         type="button"
         disabled={saving}
-        onClick={save}
+        onClick={() => save()}
         className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
       >
         保存

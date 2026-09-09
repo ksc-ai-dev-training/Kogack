@@ -341,6 +341,15 @@ export interface DocFolder {
   source: 'drive' | 'upload'
   byte_size: number | null
   mime_type: string | null
+  // 閲覧権限モデル（Slice 2b、2026-09-09）。is_restricted=falseならviewer_user_idsは常に空。
+  is_restricted: boolean
+  viewer_user_ids: string[]
+}
+
+// S-06参照範囲追加・S-08フォルダ閲覧者編集で、権限不足の参加者がいて要確認（409）のときの詳細。
+export interface DocPermissionConflict {
+  message: string
+  affected: { folder_id?: string; channel_id?: string; folder_name?: string; channel_name?: string; members: { id: string; name: string }[] }[]
 }
 
 export interface DocFoldersResponse {

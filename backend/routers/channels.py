@@ -17,7 +17,7 @@ from auth_helpers import (
 )
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
-from services import ai_agent, trigger_matcher
+from services import ai_agent, doc_permissions, trigger_matcher
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -242,6 +242,18 @@ async def join_channel(
     )
     if already:
         raise HTTPException(409, detail="既に参加しています")
+
+    # 閲覧権限モデル（Slice 2b、2026-09-09、(7)）: このチャンネルが参照範囲に持つ限定公開
+    # フォルダのうち、参加しようとしている本人が閲覧権限を持たないものが1件でもあれば参加を
+    # 拒否する（強制はできない——「権限を付与してから参加させる」以外の回避策は無い）。
+    # 公開チャンネルは限定公開フォルダを一切持てない（A-27でハードブロック済み）ため、この
+    # チェックは実質的に非公開チャンネルへの招待でのみ発動する。
+    blocking_folders = await doc_permissions.folders_user_cannot_view(pool, channel_id, target_id)
+    if blocking_folders:
+        names = "、".join(f["folder_name"] for f in blocking_folders)
+        raise HTTPException(
+            403, detail=f"このチャンネルが参照する次の文書の閲覧権限が無いため参加できません: {names}"
+        )
 
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(

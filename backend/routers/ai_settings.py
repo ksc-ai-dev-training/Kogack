@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 import audit_log
 from auth_helpers import CurrentUser, require_channel_admin
 from database import get_pool
+from services import doc_permissions
 
 router = APIRouter(prefix="/api/channels", tags=["ai-settings"])
 
@@ -158,6 +159,9 @@ async def update_prompt(
 class UpdateDocScopeRequest(BaseModel):
     folder_ids: list[str] = Field(default_factory=list)
     out_of_scope_policy: str = "strict"
+    # falseのまま409（要確認）を受け取った後、確認ダイアログで「はい」を押した場合のみtrueにして
+    # 再送信する（閲覧権限モデルSlice 2b、(5)）。この場合のみ権限を失う参加者を強制退出させる。
+    force: bool = False
 
 
 @router.put("/{channel_id}/ai-settings/doc-scope")
@@ -167,20 +171,71 @@ async def update_doc_scope(
     """A-27: 参照ドキュメント範囲（F-11・F-22）。folder_idsは送信された集合でT-10を洗い替える。
     S-08で削除済み・存在しないfolder_idは黙って無視する（F-41のメンション対象外指定と同じ考え方で、
     設定保存自体を失敗させない）。実際のDrive同期・索引・AI検索（search_documentsツール）は
-    次スライスで実装するため、この設定は現時点ではAI応答に反映されない（CLAUDE.md実装状況節）"""
+    次スライスで実装するため、この設定は現時点ではAI応答に反映されない（CLAUDE.md実装状況節）。
+
+    閲覧権限モデル（Slice 2b、2026-09-09、(4)(5)(6)）: 限定公開フォルダ（is_restricted）は
+    公開チャンネルの参照範囲には一切追加できない（ハードブロック、確認では回避できない）。
+    非公開チャンネルには追加できるが、新たに追加しようとするフォルダについて参加者全員が
+    閲覧権限を持っている必要がある。権限の無い参加者がいる場合、force=falseなら409で
+    対象者を返し（確認ダイアログの材料）、force=trueならその対象者を強制退出させたうえで
+    追加する。ただし対象に最後のチャンネル管理者が含まれる場合はforce=trueでも400で拒否する
+    （既存のA-48/A-72/A-73と同じ安全策）。この判定は「新たに追加しようとしているフォルダ」
+    （現在の設定に既に含まれているフォルダは対象外）のみ行う——既存の割当分は、招待時の
+    チェック（A-08、services/doc_permissions.py）により参加者全員の権限が既に保たれている
+    はずという不変条件を前提にしている。"""
     if body.out_of_scope_policy not in ("strict", "general"):
         raise HTTPException(422, detail="out_of_scope_policyはstrict/generalのいずれかです")
     try:
-        requested_ids = [int(x) for x in body.folder_ids]
+        requested_ids = {int(x) for x in body.folder_ids}
     except ValueError:
         raise HTTPException(422, detail="folder_idsは数値のIDです")
 
     await _get_or_create(channel_id)
     pool = get_pool()
     async with pool.acquire() as conn, conn.transaction():
-        valid_ids = {
-            r["id"] for r in await conn.fetch("SELECT id FROM doc_folders WHERE id = ANY($1::bigint[])", requested_ids)
-        }
+        channel = await conn.fetchrow("SELECT is_public FROM channels WHERE id = $1", channel_id)
+        if channel is None:
+            raise HTTPException(404, detail="見つかりません")
+        folders = await conn.fetch(
+            "SELECT id, is_restricted, drive_folder_name FROM doc_folders WHERE id = ANY($1::bigint[])",
+            list(requested_ids),
+        )
+        valid_ids = {r["id"] for r in folders}
+
+        if channel["is_public"]:
+            restricted_requested = [r for r in folders if r["is_restricted"]]
+            if restricted_requested:
+                names = "、".join(r["drive_folder_name"] for r in restricted_requested)
+                raise HTTPException(
+                    422, detail=f"公開チャンネルには限定公開のフォルダを含められません: {names}"
+                )
+        else:
+            current_ids = {int(x) for x in await _folder_ids(channel_id)}
+            newly_added = valid_ids - current_ids
+            affected: list[dict] = []
+            for r in folders:
+                if r["id"] not in newly_added or not r["is_restricted"]:
+                    continue
+                missing = await doc_permissions.members_missing_access(conn, channel_id, r["id"])
+                if missing:
+                    affected.append({"folder_id": str(r["id"]), "folder_name": r["drive_folder_name"], "members": missing})
+            if affected and not body.force:
+                raise HTTPException(409, detail={"message": "権限のない参加者がいます", "affected": affected})
+            if affected and body.force:
+                target_user_ids = {int(m["id"]) for a in affected for m in a["members"]}
+                removals = [(channel_id, uid) for uid in target_user_ids]
+                conflicts = await doc_permissions.check_last_admin_conflicts(conn, removals)
+                if conflicts:
+                    raise HTTPException(
+                        400,
+                        detail={
+                            "message": "最後のチャンネル管理者を退出させる操作は実行できません",
+                            "conflicts": conflicts,
+                        },
+                    )
+                for _, uid in removals:
+                    await doc_permissions.force_remove_member(conn, channel_id, uid)
+
         await conn.execute("DELETE FROM channel_doc_folders WHERE channel_id = $1", channel_id)
         if valid_ids:
             await conn.executemany(

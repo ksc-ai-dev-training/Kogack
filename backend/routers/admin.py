@@ -1,17 +1,18 @@
 # A-36〜A-44（詳細設計書 API設計4.8節、基本設計書3.3節・S-08管理コンソール）。
 # 利用者管理（A-36/A-37）・ドキュメント参照範囲のフォルダ登録（A-38〜A-40、F-22）・
 # AI利用状況・コスト（A-42/A-43、F-29）・監査ログ（A-44、T-16）を実装。
+import json
 import re
 from datetime import date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
-from services import doc_storage
+from services import doc_permissions, doc_storage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 JST = ZoneInfo("Asia/Tokyo")
@@ -117,16 +118,27 @@ def _extract_drive_id(raw: str, *, is_file: bool) -> str:
 
 
 def _doc_folders_query(where: str = "") -> str:
+    # channel_doc_folders・doc_folder_viewersの両方を素朴にLEFT JOINしてGROUP BYすると、
+    # 一方が複数件・もう一方も複数件の場合に行が掛け合わされてCOUNT/array_aggが不正確になる
+    # （典型的なJOINのfan-outバグ）。それぞれを先にサブクエリで集約してから外側でJOINすることで
+    # 回避している。
     return f"""
         SELECT f.id, f.drive_folder_id, f.drive_folder_name, f.created_at,
                f.item_type, f.parent_folder_id, f.source, f.byte_size, f.mime_type,
+               f.is_restricted,
                u.name AS added_by_name,
-               COUNT(cdf.channel_id) AS channel_count
+               COALESCE(cdf_agg.channel_count, 0) AS channel_count,
+               COALESCE(viewer_agg.viewer_ids, ARRAY[]::bigint[]) AS viewer_ids
         FROM doc_folders f
         JOIN users u ON u.id = f.added_by
-        LEFT JOIN channel_doc_folders cdf ON cdf.folder_id = f.id
+        LEFT JOIN (
+            SELECT folder_id, COUNT(*) AS channel_count FROM channel_doc_folders GROUP BY folder_id
+        ) cdf_agg ON cdf_agg.folder_id = f.id
+        LEFT JOIN (
+            SELECT folder_id, array_agg(user_id ORDER BY user_id) AS viewer_ids
+            FROM doc_folder_viewers GROUP BY folder_id
+        ) viewer_agg ON viewer_agg.folder_id = f.id
         {where}
-        GROUP BY f.id, u.name
         ORDER BY f.parent_folder_id NULLS FIRST, f.created_at
     """
 
@@ -145,7 +157,29 @@ def _doc_folder_out(row) -> dict:
         "source": row["source"],
         "byte_size": row["byte_size"],
         "mime_type": row["mime_type"],
+        # 閲覧権限モデル（Slice 2b、2026-09-09）。is_restricted=falseならviewer_user_idsは常に空。
+        "is_restricted": row["is_restricted"],
+        "viewer_user_ids": [str(uid) for uid in row["viewer_ids"]],
     }
+
+
+async def _set_viewers(conn, folder_id: int, is_restricted: bool, viewer_ids: set[int]) -> None:
+    """doc_folder_viewersを洗い替える（他のT-10等と同じ既存パターン）。is_restricted=falseの
+    場合は閲覧者リスト自体を持たせない（誰でも見られるため意味を持たない）。存在しない・
+    無効化済みの利用者idは黙って除外する（F-41メンション対象外指定と同じ考え方）。"""
+    await conn.execute("DELETE FROM doc_folder_viewers WHERE folder_id = $1", folder_id)
+    if is_restricted and viewer_ids:
+        valid_ids = {
+            r["id"]
+            for r in await conn.fetch(
+                "SELECT id FROM users WHERE id = ANY($1::bigint[]) AND is_active", list(viewer_ids)
+            )
+        }
+        if valid_ids:
+            await conn.executemany(
+                "INSERT INTO doc_folder_viewers (folder_id, user_id) VALUES ($1, $2)",
+                [(folder_id, uid) for uid in valid_ids],
+            )
 
 
 @router.get("/doc-folders")
@@ -170,6 +204,10 @@ class CreateDocFolderRequest(BaseModel):
     # 指定時は「このフォルダの中の特定ファイル」としての登録になる（フォルダ内の特定ファイルだけを
     # 参照範囲に含める機能。CLAUDE.md実装状況節）。省略時は従来どおりトップレベルのフォルダ登録。
     parent_folder_id: str | None = None
+    # 閲覧権限モデル（Slice 2b、2026-09-09）。is_restricted=falseなら誰でも参照範囲に含められる
+    # （既定）。is_restricted=trueの場合はviewer_user_idsに列挙された利用者のみ閲覧可。
+    is_restricted: bool = False
+    viewer_user_ids: list[str] = Field(default_factory=list)
 
 
 @router.post("/doc-folders", status_code=201)
@@ -195,11 +233,20 @@ async def create_doc_folder(body: CreateDocFolderRequest, user: CurrentUser = De
     exists = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM doc_folders WHERE drive_folder_id = $1)", drive_id)
     if exists:
         raise HTTPException(409, detail="このフォルダ・ファイルは既に登録されています")
-    new_id = await pool.fetchval(
-        """INSERT INTO doc_folders (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id""",
-        drive_id, body.drive_folder_name.strip(), user.id, "file" if is_file else "folder", parent_id,
-    )
+    try:
+        viewer_ids = {int(x) for x in body.viewer_user_ids}
+    except ValueError:
+        raise HTTPException(422, detail="viewer_user_idsは数値のIDです")
+
+    async with pool.acquire() as conn, conn.transaction():
+        new_id = await conn.fetchval(
+            """INSERT INTO doc_folders
+                   (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id, is_restricted)
+               VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+            drive_id, body.drive_folder_name.strip(), user.id, "file" if is_file else "folder", parent_id,
+            body.is_restricted,
+        )
+        await _set_viewers(conn, new_id, body.is_restricted, viewer_ids)
     row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), new_id)
     return _doc_folder_out(row)
 
@@ -209,15 +256,23 @@ _DOC_UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20MB（A-21添付ファイルと同�
 
 @router.post("/doc-folders/upload", status_code=201)
 async def upload_doc_file(
-    file: UploadFile = File(...), user: CurrentUser = Depends(require_roles("admin"))
+    file: UploadFile = File(...),
+    is_restricted: bool = Form(False),
+    viewer_user_ids_json: str = Form("[]"),
+    user: CurrentUser = Depends(require_roles("admin")),
 ):
     """新規: 参照ドキュメントの実ファイルアップロード（source='upload'、2026-09-09）。
     Google Workspace管理コンソールの制限でDrive API自体が呼び出せない状態が続いているため、
     URL/ID貼り付け（A-39、source='drive'）に加え、実ファイルを直接アップロードする経路を追加した。
-    保存先はFly Volume（services/doc_storage.py）。フォルダでの整理・限定公開（is_restricted）・
-    閲覧者ACLは次のスライスで追加する予定で、このスライスでは既存のDrive候補と同じく
-    「全社公開」相当（S-06の参照範囲に追加すればそのチャンネルの参加者全員が対象）として扱う。
-    形式の制限は無い（F-07添付ファイルと同じ方針）が、サイズは20MBまで。"""
+    保存先はFly Volume（services/doc_storage.py）。閲覧権限モデル（Slice 2b）はcreate_doc_folder
+    と同じ考え方だが、multipart/form-dataではlist[str]をそのままJSON同様には受け取りにくいため、
+    viewer_user_ids_jsonとしてJSON文字列（数値idの配列）で受け取る（フロントはJSON.stringifyで
+    送る）。形式の制限は無い（F-07添付ファイルと同じ方針）が、サイズは20MBまで。"""
+    try:
+        viewer_ids = {int(x) for x in json.loads(viewer_user_ids_json)}
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise HTTPException(422, detail="viewer_user_ids_jsonの形式が不正です")
+
     data = await file.read()
     if len(data) > _DOC_UPLOAD_MAX_BYTES:
         raise HTTPException(400, detail="ファイルサイズは20MBまでです")
@@ -229,13 +284,15 @@ async def upload_doc_file(
     storage_path = doc_storage.save(data, ext=ext)
 
     pool = get_pool()
-    new_id = await pool.fetchval(
-        """INSERT INTO doc_folders
-               (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id,
-                source, storage_path, byte_size, mime_type)
-           VALUES (NULL, $1, $2, 'file', NULL, 'upload', $3, $4, $5) RETURNING id""",
-        original_name, user.id, storage_path, len(data), file.content_type,
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        new_id = await conn.fetchval(
+            """INSERT INTO doc_folders
+                   (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id,
+                    source, storage_path, byte_size, mime_type, is_restricted)
+               VALUES (NULL, $1, $2, 'file', NULL, 'upload', $3, $4, $5, $6) RETURNING id""",
+            original_name, user.id, storage_path, len(data), file.content_type, is_restricted,
+        )
+        await _set_viewers(conn, new_id, is_restricted, viewer_ids)
     row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), new_id)
     return _doc_folder_out(row)
 
@@ -254,6 +311,62 @@ async def delete_doc_folder(folder_id: int, user: CurrentUser = Depends(require_
         raise HTTPException(404, detail="見つかりません")
     if deleted["source"] == "upload" and deleted["storage_path"]:
         doc_storage.delete(deleted["storage_path"])
+
+
+class UpdateDocFolderViewersRequest(BaseModel):
+    is_restricted: bool
+    viewer_user_ids: list[str] = Field(default_factory=list)
+    # falseのまま409（要確認）を受け取った後、確認ダイアログで「はい」を押した場合のみtrueにして
+    # 再送信する（(5)(8)。この場合のみ、権限を失う参加者を実際に強制退出させる）。
+    force: bool = False
+
+
+@router.put("/doc-folders/{folder_id}/viewers")
+async def update_doc_folder_viewers(
+    folder_id: int, body: UpdateDocFolderViewersRequest, user: CurrentUser = Depends(require_roles("admin"))
+):
+    """新規: 限定公開フォルダの閲覧者編集（Slice 2b、(2)(8)）。is_restricted=falseにする場合は
+    viewer_user_idsを無視して全社公開にする。新たに限定公開にする・閲覧者リストを絞ることで、
+    既にこのフォルダを参照しているチャンネルの参加者が閲覧権限を失う場合は、
+    force=falseなら409（{message, affected: [{channel_id, channel_name, members}]}）を返し
+    実際には何も変更しない（確認ダイアログの材料をフロントへ渡す）。force=trueなら、その対象者を
+    強制退出させたうえで閲覧者リストを更新する。ただし対象に「そのチャンネルの最後の管理者」が
+    含まれる場合は、force=trueであっても400で操作全体を拒否する（既存のA-48/A-72/A-73と同じ
+    安全策。services/doc_permissions.py参照）。"""
+    pool = get_pool()
+    exists = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM doc_folders WHERE id = $1)", folder_id)
+    if not exists:
+        raise HTTPException(404, detail="見つかりません")
+    try:
+        viewer_ids = {int(x) for x in body.viewer_user_ids}
+    except ValueError:
+        raise HTTPException(422, detail="viewer_user_idsは数値のIDです")
+
+    async with pool.acquire() as conn, conn.transaction():
+        effective_viewer_ids = viewer_ids if body.is_restricted else set()
+        affected = (
+            await doc_permissions.channels_missing_access_for_folder(conn, folder_id, effective_viewer_ids)
+            if body.is_restricted
+            else []
+        )
+        if affected and not body.force:
+            raise HTTPException(409, detail={"message": "権限のない参加者がいます", "affected": affected})
+        if affected and body.force:
+            removals = [(int(ch["channel_id"]), int(m["id"])) for ch in affected for m in ch["members"]]
+            conflicts = await doc_permissions.check_last_admin_conflicts(conn, removals)
+            if conflicts:
+                raise HTTPException(
+                    400,
+                    detail={"message": "最後のチャンネル管理者を退出させる操作は実行できません", "conflicts": conflicts},
+                )
+            for ch_id, u_id in removals:
+                await doc_permissions.force_remove_member(conn, ch_id, u_id)
+
+        await conn.execute("UPDATE doc_folders SET is_restricted = $2 WHERE id = $1", folder_id, body.is_restricted)
+        await _set_viewers(conn, folder_id, body.is_restricted, viewer_ids)
+
+    row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), folder_id)
+    return _doc_folder_out(row)
 
 
 def _month_range(month: str | None) -> tuple[datetime, datetime, str]:

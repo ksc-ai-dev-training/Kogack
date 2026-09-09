@@ -446,6 +446,23 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- 層2参照ドキュメントの閲覧権限モデル（Slice 2b、2026-09-09。ユーザーと合意した設計。
+-- CLAUDE.md実装状況節を参照）。doc_folders（フォルダ・ファイルどちらの行も）に
+-- is_restricted（限定公開かどうか）を追加し、限定公開の場合のみ新規T-24 doc_folder_viewersで
+-- 閲覧可能な利用者を管理する（全社公開のフォルダ・ファイルは従来どおり誰でも参照範囲に含められる）。
+-- 「フォルダ単位・ファイル単位のどちらでも制御できる」という要望は、doc_foldersが元々
+-- folder/file行を同じテーブルで扱う設計のため、行ごとにこの2列を持たせるだけで自然に満たせる
+-- （新しい別テーブルを分ける必要はない）。
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS is_restricted BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS doc_folder_viewers (
+    folder_id   BIGINT NOT NULL REFERENCES doc_folders(id) ON DELETE CASCADE,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (folder_id, user_id)
+);
+ALTER TABLE doc_folder_viewers ENABLE ROW LEVEL SECURITY;
+
 -- T-16 audit_logs（監査ログ、S-08「監査ログ」タブ。05-1_詳細設計書_DB設計.html 3.12節）。
 -- 「いつ・誰が・どの項目を」変更したかのみを記録し、変更内容そのもの（過去バージョン・差分）は
 -- 保持しない（summaryは種類の説明のみで実際の入力値は含めない）。event_type='login'はA-02

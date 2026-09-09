@@ -4,9 +4,14 @@
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, detail: string) {
+  // detailは通常文字列だが、閲覧権限モデル（Slice 2b、2026-09-09）の409/400のように、
+  // 確認ダイアログの材料（対象チャンネル・対象者等の構造化情報）を運ぶ場合はオブジェクトで返る。
+  // その場合はdetailObjに元のオブジェクトを保持し、messageには人間向けの文字列を入れる。
+  detailObj: unknown
+  constructor(status: number, detail: string, detailObj?: unknown) {
     super(detail)
     this.status = status
+    this.detailObj = detailObj
   }
 }
 
@@ -21,13 +26,19 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
   if (!res.ok) {
     let detail = 'エラーが発生しました'
+    let detailObj: unknown
     try {
       const body = await res.json()
-      if (body.detail) detail = body.detail
+      if (typeof body.detail === 'string') {
+        detail = body.detail
+      } else if (body.detail && typeof body.detail === 'object') {
+        detailObj = body.detail
+        if (typeof body.detail.message === 'string') detail = body.detail.message
+      }
     } catch {
       // JSONでないレスポンスは汎用メッセージのまま
     }
-    throw new ApiError(res.status, detail)
+    throw new ApiError(res.status, detail, detailObj)
   }
   if (res.status === 204) return undefined as T
   return res.json()
@@ -75,10 +86,15 @@ export async function uploadAttachment(
 }
 
 // 新規: 参照ドキュメントの実ファイルアップロード（S-08、doc_folders.source='upload'、2026-09-09）。
-// uploadIcon/uploadAttachmentと同じくFormDataのため専用実装。
-export async function uploadDocFile(file: File): Promise<import('../types').DocFolder> {
+// uploadIcon/uploadAttachmentと同じくFormDataのため専用実装。閲覧権限モデル（Slice 2b）の
+// is_restricted/viewer_user_idsもここで一緒に送る（新規フォルダのため確認ダイアログは不要）。
+export async function uploadDocFile(
+  file: File, isRestricted: boolean, viewerUserIds: string[],
+): Promise<import('../types').DocFolder> {
   const formData = new FormData()
   formData.append('file', file)
+  formData.append('is_restricted', isRestricted ? 'true' : 'false')
+  formData.append('viewer_user_ids_json', JSON.stringify(viewerUserIds))
   const res = await fetch('/api/admin/doc-folders/upload', { method: 'POST', credentials: 'same-origin', body: formData })
   if (!res.ok) {
     let detail = 'アップロードに失敗しました'
