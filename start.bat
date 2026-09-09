@@ -99,11 +99,14 @@ rem ==== PostgreSQL container (create if missing) ====
 rem Data is stored in the named volume kogack-db-data. Without an explicit named volume,
 rem postgres:16's default anonymous volume gets silently replaced by a fresh empty one
 rem whenever the kogack-db container itself has to be recreated, quietly losing all data.
+rem pgvector/pgvector:pg16 is used instead of plain postgres:16 (layer 2 document search,
+rem Slice 3) - it is postgres:16 with the pgvector extension precompiled in, otherwise
+rem identical, so existing kogack-db-data volumes keep working unchanged.
 rem (NOTE: keep this whole file ASCII-only - see the header comment at the top of this file.)
 docker start kogack-db >nul 2>&1
 if errorlevel 1 (
     echo Creating kogack-db container...
-    docker run -d --name kogack-db -e POSTGRES_PASSWORD=kogack -e POSTGRES_USER=kogack -e POSTGRES_DB=kogack -p %DB_PORT%:5432 -v kogack-db-data:/var/lib/postgresql/data postgres:16
+    docker run -d --name kogack-db -e POSTGRES_PASSWORD=kogack -e POSTGRES_USER=kogack -e POSTGRES_DB=kogack -p %DB_PORT%:5432 -v kogack-db-data:/var/lib/postgresql/data pgvector/pgvector:pg16
 )
 goto db_ready
 

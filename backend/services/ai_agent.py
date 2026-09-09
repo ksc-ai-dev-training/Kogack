@@ -5,9 +5,11 @@
 #     判定ロジック自体を設計書が規定していない（グレー）ため、ユーザー確認のうえ「人間の投稿には
 #     必ず応答する」（relevance判定の追加LLM呼び出しをしない、最もシンプルな方式）を採用した
 #     （04_基本設計書.html 8.1節に設計判断を追記）
-#   - Function Calling（search_documents / get_seat_availability）は対象外。ドキュメント索引
-#     （T-09/T-10のGoogle Drive連携）・座席予約システム連携のいずれも未実装のため、
-#     プレーンな会話応答のみを行う
+#   - Function Calling: search_documentsはSlice 3（2026-09-09）で実装した。get_seat_availability
+#     （座席予約システム連携）は引き続き未実装のため対象外。search_documentsはアップロードされた
+#     実ファイル（doc_folders.source='upload'）のみが検索対象で、Drive候補（source='drive'）は
+#     Google Workspace管理コンソールのdomainPolicyブロックにより実ファイルを取得できないため
+#     索引化できず、検索にヒットしない（services/doc_search.py参照）
 #   - スキル（T-11・F-12）とその引き継ぎ先（fallback_handoff_user_id・F-17）、自動対応範囲分類
 #     （T-12・F-16）はいずれもシステムプロンプトへ配線した（_build_skills_section・
 #     _build_auto_response_section）。自動対応範囲の「人が対応」区分は、基本設計書8.1節が
@@ -37,10 +39,11 @@
 # システムプロンプトと参照する発言範囲（チャンネル直近100件、またはthread_id指定時はスレッド全体）
 # が異なる。自動対応範囲・スキル等のスコープ外事項はこちらにも同様に適用される。
 import asyncio
+import json
 import traceback
 
 from database import get_pool
-from services import ai_client
+from services import ai_client, doc_search
 
 MAX_HISTORY_MESSAGES = 20  # AI API手順書の目安「直近10往復まで」（human+aiであわせて概ね20件。bot発言混在のため厳密な往復数ではない）
 MAX_SUMMARY_CHANNEL_MESSAGES = 100  # F-14: チャンネル本体を要約する場合の対象件数上限（スレッド全体は上限なし）
@@ -89,19 +92,73 @@ class SummaryUnavailable(Exception):
     何もしないのではなく理由を返す。"""
 
 # 全チャンネル共通のシステム指示（基本設計書8.3節・詳細設計書10.2節）。チャンネル管理者は編集できず
-# アプリ側で固定する。ドキュメント検索・座席予約が未実装であることも明示し、ハルシネーションで
-# 「できる」と案内しないようにする（詳細設計書10.7節のハルシネーション防止確認observationに対応）。
+# アプリ側で固定する。座席予約が未実装であることも明示し、ハルシネーションで「できる」と案内しない
+# ようにする（詳細設計書10.7節のハルシネーション防止確認observationに対応）。ドキュメント検索
+# （search_documents）はSlice 3で実装済みのため、この一律の「機能が無い」文言からは対象外にした
+# （チャンネルに索引済み文書があるかどうかで案内を出し分ける必要があり、_build_doc_scope_sectionで
+# 個別に指示する）。
 FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 - 過去のやり取りを参照する場合は「参考情報」であることを必ず明示し、断定しない
-- あなたには現時点で社内ドキュメントを検索する機能・座席予約システムを参照する機能が無い。
-  それらの機能が必要な依頼を受けたときは、正直に「その機能はまだ利用できません」と答え、
-  存在しない検索結果や空き状況を作り出さないこと
+- あなたには現時点で座席予約システムを参照する機能が無い。それが必要な依頼を受けたときは、
+  正直に「その機能はまだ利用できません」と答え、存在しない空き状況を作り出さないこと
 - 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない"""
+
+# search_documentsのOpenAI Function Calling定義（Slice 3、2026-09-09）。1回の応答生成につき
+# 複数回呼ばれる可能性があるが、ラウンド数はSEARCH_DOCUMENTS_MAX_ROUNDSで打ち切る
+# （無限ループ・コスト際限無い増大の防止）。
+SEARCH_DOCUMENTS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_documents",
+        "description": (
+            "このチャンネルが参照範囲に設定している社内ドキュメントの中から、質問に関連する内容を"
+            "検索する。ドキュメントの内容に基づいて回答する必要がある場合は、推測で答えず必ずこの"
+            "関数を使って実際の内容を確認すること。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "検索したい内容を表す検索語句（自然文でよい）"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+SEARCH_DOCUMENTS_MAX_ROUNDS = 3
+
+
+def _build_doc_scope_section(out_of_scope_policy: str) -> str:
+    """search_documentsツールを提示する際にあわせて渡す指示（Slice 3）。out_of_scope_policy
+    （S-06「参照範囲外の質問への対応」、これまで保存はされるが未使用だった設定）を初めて
+    AIの挙動へ反映する: 'strict'は検索結果が見つからない場合の一般知識での回答を明示的に禁止し、
+    'general'は許可する。"""
+    lines = [
+        "", "# 社内ドキュメントの参照について",
+        "あなたには search_documents という、このチャンネルが参照する社内ドキュメントを検索する"
+        "機能があります。ドキュメントの内容について聞かれた場合は、必ずこれを使って実際に検索してから"
+        "回答し、検索せずに推測で答えないこと。",
+    ]
+    if out_of_scope_policy == "strict":
+        lines.append(
+            "search_documentsの結果が「関連する内容が見つかりませんでした。」という文字列だった"
+            "場合に限り、あなたの返答は次の1文だけにすること: 「参照ドキュメントの範囲内に該当する"
+            "情報が見つかりませんでした。」この1文の後に、それ以上の文章（一般知識による補足を含む）を"
+            "一切続けないこと。\n"
+            "逆に、search_documentsの結果に実際の文書の内容（見つかりませんでしたという文言以外）が"
+            "1件でも含まれていた場合は、上記の1文は使わず、その内容に基づいて通常どおり具体的に回答すること。"
+        )
+    else:
+        lines.append(
+            "検索しても関連する内容が見つからなかった場合は、その旨を伝えたうえで、あなたの一般的な"
+            "知識で分かる範囲を補って回答してよい（ただし社内ドキュメントに基づく回答ではないことを"
+            "明示すること）。"
+        )
+    return "\n".join(lines)
 
 
 def _build_system_prompt(
     settings: dict, auto_response_section: str = "", skills_section: str = "", requester_name: str = "",
-    channel_context: dict | None = None,
+    channel_context: dict | None = None, doc_scope_section: str = "",
 ) -> str:
     persona_name = settings["persona_name"] or "Kogack AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
@@ -136,6 +193,8 @@ def _build_system_prompt(
         lines.append(auto_response_section)
     if skills_section:
         lines.append(skills_section)
+    if doc_scope_section:
+        lines.append(doc_scope_section)
     lines.append("")
     lines.append(FIXED_RULES)
     return "\n".join(lines)
@@ -334,6 +393,85 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
     return list(reversed(rows))
 
 
+async def _run_chat_with_tools(
+    messages: list[dict], model: str, channel_id: int, use_tools: bool,
+) -> tuple[str, dict, list[dict]]:
+    """search_documentsのFunction Callingを扱いながら1回の応答生成を完了させる（Slice 3、
+    2026-09-09）。use_tools=Falseの場合は最初からツール無しで単発呼び出しする（従来どおりの
+    プレーンな会話応答、_generate_summary_and_postと同じ形。use_tools=Trueの場合は最大
+    SEARCH_DOCUMENTS_MAX_ROUNDS回まで、モデルからの検索要求→doc_search.search()実行→
+    結果をtoolメッセージとして返す、を繰り返す。最後の1ラウンドはtools自体を渡さず、
+    モデルに必ずテキストで最終回答させる（ラウンド上限に達しても検索要求だけが続き
+    テキストの回答が返らない、という空振りを防ぐ）。
+    戻り値: (最終応答テキスト, 集計済みusage{prompt_tokens,completion_tokens},
+    citations[{folder_id,folder_name}]（実際に検索結果として使われた文書、重複排除済み）)"""
+    client = ai_client.get_client()
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    citations: dict[int, str] = {}
+    tools = [SEARCH_DOCUMENTS_TOOL] if use_tools else None
+    max_rounds = SEARCH_DOCUMENTS_MAX_ROUNDS if use_tools else 0
+
+    for round_num in range(max_rounds + 1):
+        res = await client.chat.completions.create(
+            model=model, messages=messages, max_completion_tokens=MAX_OUTPUT_TOKENS,
+            tools=tools if round_num < max_rounds else None,
+            **_completion_extra_kwargs(model),
+        )
+        if res.usage:
+            total_prompt_tokens += res.usage.prompt_tokens
+            total_completion_tokens += res.usage.completion_tokens
+        message = res.choices[0].message
+        tool_calls = message.tool_calls
+        if not tool_calls:
+            reply = (message.content or "").strip() or "（回答を生成できませんでした）"
+            usage = {"prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens}
+            citation_list = [{"folder_id": fid, "folder_name": name} for fid, name in citations.items()]
+            return reply, usage, citation_list
+
+        messages.append({
+            "role": "assistant",
+            "content": message.content,
+            "tool_calls": [tc.model_dump() for tc in tool_calls],
+        })
+        for tc in tool_calls:
+            if tc.function.name != "search_documents":
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": "不明な関数です"})
+                continue
+            try:
+                query = json.loads(tc.function.arguments).get("query", "")
+            except (json.JSONDecodeError, AttributeError):
+                query = ""
+            results = await doc_search.search(channel_id, query) if query else []
+            for r in results:
+                citations[r["folder_id"]] = r["folder_name"]
+            content = (
+                "\n\n---\n\n".join(f"[{r['folder_name']}]\n{r['content']}" for r in results)
+                if results
+                else "関連する内容が見つかりませんでした。"
+            )
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
+
+    # ここには到達しない想定（最後のラウンドはtools=Noneのためtool_callsが必ず空になり、
+    # ループ内のreturnで抜ける）。到達した場合の安全側フォールバックとして残す。
+    usage = {"prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens}
+    citation_list = [{"folder_id": fid, "folder_name": name} for fid, name in citations.items()]
+    return "（回答を生成できませんでした）", usage, citation_list
+
+
+async def _insert_citation_blocks(pool, message_id: int, citations: list[dict]) -> None:
+    """search_documentsが実際に参照した文書を、F-20「回答根拠の提示」としてmessage_blocksへ
+    保存する（block_type='citation'、T-07。フォルダ単位で重複排除済みのcitationsを受け取る想定）。
+    メッセージ本文の更新とは別の独立した書き込みとして扱う（引用の記録に失敗しても回答本文自体は
+    表示できるべきなので、あえて同一トランザクションにしない）"""
+    for i, c in enumerate(citations):
+        payload = {"folder_id": c["folder_id"], "folder_name": c["folder_name"]}
+        await pool.execute(
+            "INSERT INTO message_blocks (message_id, block_type, payload, sort_order) VALUES ($1, 'citation', $2::jsonb, $3)",
+            message_id, json.dumps(payload), i,
+        )
+
+
 async def _generate_and_post(
     channel_id: int, settings: dict, requested_by: int, thread_id: int | None = None,
 ) -> None:
@@ -370,24 +508,24 @@ async def _generate_and_post(
         channel_context = await _fetch_channel_context(channel_id)
         auto_response_section = await _build_auto_response_section(channel_id, settings)
         skills_section = await _build_skills_section(channel_id, settings)
+        # search_documentsツールは、このチャンネルの参照範囲に索引済み文書が1件でもある場合のみ
+        # 提示する（Slice 3、2026-09-09）。無ければツール自体を持たせず、doc_scope_sectionも省略
+        # （検索対象が無いのにツールだけ提示しても、モデルが空振りの検索を試みるだけで無駄）
+        use_tools = await doc_search.channel_has_indexed_documents(channel_id)
+        doc_scope_section = _build_doc_scope_section(settings["out_of_scope_policy"]) if use_tools else ""
         messages: list[dict] = [
             {
                 "role": "system",
                 "content": _build_system_prompt(
                     settings, auto_response_section, skills_section, requester_name or "", channel_context,
+                    doc_scope_section,
                 ),
             }
         ]
         messages += _rows_to_chat_messages(history_rows, names)
 
-        client = ai_client.get_client()
         model = ai_client.get_model()
-        res = await client.chat.completions.create(
-            model=model, messages=messages,
-            max_completion_tokens=MAX_OUTPUT_TOKENS,
-            **_completion_extra_kwargs(model),
-        )
-        reply = (res.choices[0].message.content or "").strip() or "（回答を生成できませんでした）"
+        reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_tools)
 
         # WHERE generation_status='generating' は、生成の完了とほぼ同時にcancel_generationが
         # 呼ばれた場合の競合対策（cancel_generation側が既にキャンセル済みメッセージへ更新していれば
@@ -397,15 +535,17 @@ async def _generate_and_post(
                WHERE id = $1 AND generation_status = 'generating'""",
             message_id, reply,
         )
+        if citations:
+            await _insert_citation_blocks(pool, message_id, citations)
 
-        if res.usage:
-            cost = ai_client.estimate_cost_yen(model, res.usage.prompt_tokens, res.usage.completion_tokens)
+        if usage["prompt_tokens"] or usage["completion_tokens"]:
+            cost = ai_client.estimate_cost_yen(model, usage["prompt_tokens"], usage["completion_tokens"])
             await pool.execute(
                 """INSERT INTO ai_usage_logs
                        (channel_id, requested_by, model, input_tokens, output_tokens, estimated_cost_yen)
                    VALUES ($1, $2, $3, $4, $5, $6)""",
                 channel_id, requested_by, model,
-                res.usage.prompt_tokens, res.usage.completion_tokens, cost,
+                usage["prompt_tokens"], usage["completion_tokens"], cost,
             )
     except asyncio.CancelledError:
         # cancel_generation()が呼ばれた場合。中断後のメッセージ本文は呼び出し元（cancel_generation）が

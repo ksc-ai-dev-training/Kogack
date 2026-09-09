@@ -5,7 +5,7 @@ import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageLis
 import Composer, { type MentionCandidate } from './Composer'
 import ProfileCard from './ProfileCard'
 import { useToast } from './Toast'
-import type { AttachmentPayload, MentionPayload, MentionSourceMember, Message } from '../types'
+import type { AttachmentPayload, CitationPayload, MentionPayload, MentionSourceMember, Message } from '../types'
 
 // S-04 スレッド表示（画面モックアップ S-04）。S-03/DmViewの右側に重ねて表示するパネル。
 // 元発言はChannelView/DmView側で既に読み込み済みのmessages一覧から渡してもらう
@@ -163,6 +163,19 @@ export default function ThreadPanel({
                 // 別途対応が必要（AI発言に人間がスレッド返信した場合、元発言側にも表示する）
                 <div className="mt-[7px] flex items-center gap-[5px] text-[11px] text-ink-subtle">
                   ⚠ AIの回答には誤りが含まれる場合があります。
+                </div>
+              )}
+              {/* F-20 回答根拠の提示（Slice 3、2026-09-09。MessageList.tsxと同じ理由で個別に描画） */}
+              {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (parentMessage.blocks ?? []).some((b) => b.block_type === 'citation') && (
+                <div className="mt-[5px] flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-ink-subtle">
+                  <span>📄 参照:</span>
+                  {(parentMessage.blocks ?? [])
+                    .filter((b) => b.block_type === 'citation')
+                    .map((b, i) => (
+                      <span key={i} className="rounded bg-bot-bg px-1.5 py-0.5 text-bot-text">
+                        {(b.payload as CitationPayload).folder_name}
+                      </span>
+                    ))}
                 </div>
               )}
             </div>

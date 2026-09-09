@@ -493,6 +493,30 @@ function DocFoldersTab() {
                         🔒 限定公開
                       </span>
                     )}
+                    {/* 索引化の状態（Slice 3、2026-09-09）。source='drive'はnot_applicableのため表示しない */}
+                    {f.index_status === 'pending' && (
+                      <span className="ml-1.5 rounded-full bg-surface-subtle px-1.5 py-0.5 text-[10px] font-bold text-ink-subtle">
+                        索引化待ち
+                      </span>
+                    )}
+                    {f.index_status === 'indexing' && (
+                      <span className="ml-1.5 rounded-full bg-accent-50 px-1.5 py-0.5 text-[10px] font-bold text-accent-700">
+                        索引化中…
+                      </span>
+                    )}
+                    {f.index_status === 'ready' && (
+                      <span className="ml-1.5 rounded-full bg-ok-bg px-1.5 py-0.5 text-[10px] font-bold text-ok-text">
+                        ✓ AI検索可能
+                      </span>
+                    )}
+                    {f.index_status === 'failed' && (
+                      <span
+                        className="ml-1.5 rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text"
+                        title={f.index_error ?? undefined}
+                      >
+                        索引化失敗
+                      </span>
+                    )}
                   </div>
                   <div className="truncate text-[11.5px] text-ink-subtle">
                     {f.item_type === 'folder' && `登録ファイル${childrenOf(f.id).length}件 ・ `}

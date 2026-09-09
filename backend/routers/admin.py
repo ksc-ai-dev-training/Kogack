@@ -1,6 +1,7 @@
 # A-36〜A-44（詳細設計書 API設計4.8節、基本設計書3.3節・S-08管理コンソール）。
 # 利用者管理（A-36/A-37）・ドキュメント参照範囲のフォルダ登録（A-38〜A-40、F-22）・
 # AI利用状況・コスト（A-42/A-43、F-29）・監査ログ（A-44、T-16）を実装。
+import asyncio
 import json
 import re
 from datetime import date, datetime, time
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
-from services import doc_permissions, doc_storage
+from services import ai_client, doc_indexer, doc_permissions, doc_storage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 JST = ZoneInfo("Asia/Tokyo")
@@ -125,7 +126,7 @@ def _doc_folders_query(where: str = "") -> str:
     return f"""
         SELECT f.id, f.drive_folder_id, f.drive_folder_name, f.created_at,
                f.item_type, f.parent_folder_id, f.source, f.byte_size, f.mime_type,
-               f.is_restricted,
+               f.is_restricted, f.index_status, f.index_error,
                u.name AS added_by_name,
                COALESCE(cdf_agg.channel_count, 0) AS channel_count,
                COALESCE(viewer_agg.viewer_ids, ARRAY[]::bigint[]) AS viewer_ids
@@ -160,6 +161,10 @@ def _doc_folder_out(row) -> dict:
         # 閲覧権限モデル（Slice 2b、2026-09-09）。is_restricted=falseならviewer_user_idsは常に空。
         "is_restricted": row["is_restricted"],
         "viewer_user_ids": [str(uid) for uid in row["viewer_ids"]],
+        # 索引化（Slice 3、2026-09-09）。'not_applicable'（source='drive'、索引化非対応）/
+        # 'pending'/'indexing'/'ready'/'failed'
+        "index_status": row["index_status"],
+        "index_error": row["index_error"],
     }
 
 
@@ -288,11 +293,20 @@ async def upload_doc_file(
         new_id = await conn.fetchval(
             """INSERT INTO doc_folders
                    (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id,
-                    source, storage_path, byte_size, mime_type, is_restricted)
-               VALUES (NULL, $1, $2, 'file', NULL, 'upload', $3, $4, $5, $6) RETURNING id""",
+                    source, storage_path, byte_size, mime_type, is_restricted, index_status)
+               VALUES (NULL, $1, $2, 'file', NULL, 'upload', $3, $4, $5, $6, 'pending') RETURNING id""",
             original_name, user.id, storage_path, len(data), file.content_type, is_restricted,
         )
         await _set_viewers(conn, new_id, is_restricted, viewer_ids)
+    # 索引化（テキスト抽出・チャンク分割・埋め込み生成）はAI応答生成と同じfire-and-forget方式で
+    # バックグラウンド実行し、アップロードのレスポンス自体は待たせない（Slice 3、2026-09-09）。
+    if ai_client.is_configured():
+        asyncio.create_task(doc_indexer.index_folder(new_id))
+    else:
+        await pool.execute(
+            "UPDATE doc_folders SET index_status = 'failed', index_error = $2 WHERE id = $1",
+            new_id, "OPENAI_API_KEYが設定されていないため索引化できません",
+        )
     row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), new_id)
     return _doc_folder_out(row)
 

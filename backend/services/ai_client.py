@@ -63,3 +63,24 @@ def get_client() -> AsyncOpenAI:
 def estimate_cost_yen(model: str, input_tokens: int, output_tokens: int) -> float:
     rate = MODEL_COSTS.get(model, MODEL_COSTS[DEFAULT_MODEL])
     return round(input_tokens / 1000 * rate["input"] + output_tokens / 1000 * rate["output"], 4)
+
+
+# 層2ドキュメントQ&A（Slice 3、2026-09-09）の埋め込み生成に使うモデル。応答生成用モデル
+# （AI_MODEL環境変数）とは独立で固定する（利用者が切り替える対象ではなく、doc_chunks.embedding
+# のvector(1536)次元と直結しているため、切り替えるとテーブル定義ごと変更が必要になる）。
+EMBEDDING_MODEL = "text-embedding-3-small"
+_EMBEDDING_COST_PER_1K = 0.0031  # $0.02/1Mトークン（2026-09-09時点のOpenAI公式単価）を同じ換算レートで円/1000トークンへ
+
+
+def estimate_embedding_cost_yen(tokens: int) -> float:
+    return round(tokens / 1000 * _EMBEDDING_COST_PER_1K, 4)
+
+
+async def embed_texts(texts: list[str]) -> tuple[list[list[float]], int]:
+    """textsをまとめて埋め込みベクトル化する（OpenAI Embeddings APIは1リクエストで複数件を
+    受け付けるため、チャンク数分のリクエストを個別に投げない）。戻り値は
+    (各テキストに対応するベクトルのリスト, 消費トークン数)。"""
+    client = get_client()
+    res = await client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+    vectors = [d.embedding for d in res.data]
+    return vectors, res.usage.total_tokens

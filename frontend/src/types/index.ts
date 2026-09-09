@@ -107,16 +107,22 @@ export interface MentionSourceMember {
   is_active: boolean
 }
 
-/** T-07 message_blocks（05-1詳細設計書DB設計3.7節）。このスライスで実際に作成されるのは
- * block_type='mention'のみ（citation/external_system/quote_reference/pending_actionはAIサポート未実装）。 */
+/** T-07 message_blocks（05-1詳細設計書DB設計3.7節）。実際に作成されるのはblock_type='mention'
+ * （F-41 @メンション）と'citation'（F-20 回答根拠の提示、Slice 3・2026-09-09で追加）の2種類。
+ * external_system/quote_reference/pending_actionはAIサポート未実装のため引き続き未使用。 */
 export interface MentionPayload {
   target_user_id: string
   display_name_snapshot: string
 }
 
+export interface CitationPayload {
+  folder_id: string
+  folder_name: string
+}
+
 export interface MessageBlock {
   block_type: string
-  payload: MentionPayload | Record<string, unknown>
+  payload: MentionPayload | CitationPayload | Record<string, unknown>
   sort_order: number
 }
 
@@ -344,6 +350,9 @@ export interface DocFolder {
   // 閲覧権限モデル（Slice 2b、2026-09-09）。is_restricted=falseならviewer_user_idsは常に空。
   is_restricted: boolean
   viewer_user_ids: string[]
+  // 索引化（Slice 3、2026-09-09）。'not_applicable'（source='drive'）/'pending'/'indexing'/'ready'/'failed'
+  index_status: 'not_applicable' | 'pending' | 'indexing' | 'ready' | 'failed'
+  index_error: string | null
 }
 
 // S-06参照範囲追加・S-08フォルダ閲覧者編集で、権限不足の参加者がいて要確認（409）のときの詳細。

@@ -5,7 +5,7 @@ import { apiFetch } from '../lib/api'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
-import type { MentionSourceMember, Message } from '../types'
+import type { CitationPayload, MentionSourceMember, Message } from '../types'
 
 export function formatTime(iso: string) {
   const d = new Date(iso)
@@ -400,6 +400,20 @@ export default function MessageList({
                   // 実装した（要約ボタン経由の発言（is_summary）も同じAI発言のため対象に含める）
                   <div className="mt-[7px] flex items-center gap-[5px] text-[11px] text-ink-subtle">
                     ⚠ AIの回答には誤りが含まれる場合があります。
+                  </div>
+                )}
+                {/* F-20 回答根拠の提示（Slice 3、2026-09-09）。search_documentsが実際に参照した
+                    文書をblock_type='citation'として表示する。生成中は（まだ根拠が確定していないため）表示しない */}
+                {m.sender_type === 'ai' && m.generation_status !== 'generating' && (m.blocks ?? []).some((b) => b.block_type === 'citation') && (
+                  <div className="mt-[5px] flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-ink-subtle">
+                    <span>📄 参照:</span>
+                    {(m.blocks ?? [])
+                      .filter((b) => b.block_type === 'citation')
+                      .map((b, i) => (
+                        <span key={i} className="rounded bg-bot-bg px-1.5 py-0.5 text-bot-text">
+                          {(b.payload as CitationPayload).folder_name}
+                        </span>
+                      ))}
                   </div>
                 )}
                 <AttachmentList attachments={m.attachments} />

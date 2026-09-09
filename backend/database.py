@@ -463,6 +463,37 @@ CREATE TABLE IF NOT EXISTS doc_folder_viewers (
 );
 ALTER TABLE doc_folder_viewers ENABLE ROW LEVEL SECURITY;
 
+-- 層2参照ドキュメントの索引化・AI検索（Slice 3、2026-09-09。CLAUDE.md実装状況節を参照）。
+-- Drive連携はdomainPolicyのブロックが続いており実ファイルを取得できないため、このスライスで
+-- 実際に索引化できるのはsource='upload'の行のみ（source='drive'はindex_status='not_applicable'
+-- のまま据え置く）。pgvector（Supabaseで利用可能、事前にCREATE EXTENSIONで有効化済み）で
+-- 埋め込みベクトルを保持する。
+CREATE EXTENSION IF NOT EXISTS vector;
+
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS index_status TEXT NOT NULL DEFAULT 'not_applicable';
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS index_error TEXT;
+DO $$ BEGIN
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_index_status_check
+        CHECK (index_status IN ('not_applicable', 'pending', 'indexing', 'ready', 'failed'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- T-25 doc_chunks: 1ファイルを複数のチャンク（断片）に分割し、それぞれの埋め込みベクトルを
+-- 保持する。text-embedding-3-small（1536次元）を使う前提で固定次元にしている（モデルを
+-- 変える場合はこの次元数も合わせて変更が必要）。folder_id削除時にON DELETE CASCADEで
+-- 連動削除される。
+CREATE TABLE IF NOT EXISTS doc_chunks (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    folder_id   BIGINT NOT NULL REFERENCES doc_folders(id) ON DELETE CASCADE,
+    chunk_index INT NOT NULL,
+    content     TEXT NOT NULL,
+    embedding   vector(1536) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (folder_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_chunks_folder_id ON doc_chunks (folder_id);
+ALTER TABLE doc_chunks ENABLE ROW LEVEL SECURITY;
+
 -- T-16 audit_logs（監査ログ、S-08「監査ログ」タブ。05-1_詳細設計書_DB設計.html 3.12節）。
 -- 「いつ・誰が・どの項目を」変更したかのみを記録し、変更内容そのもの（過去バージョン・差分）は
 -- 保持しない（summaryは種類の説明のみで実際の入力値は含めない）。event_type='login'はA-02
