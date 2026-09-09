@@ -327,7 +327,10 @@ export default function Composer({
         return
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Enterキー＝改行・Ctrl+Enter（Macは⌘+Enter）＝送信（Slackと同じ挙動。ユーザーからの明示的な
+    // 要望による変更、従来はEnter単体で即送信・Shift+Enterで改行だった）。Enter単体はここでは
+    // 何もせず（preventDefaultしない）、textarea標準の改行動作にそのまま委ねる。
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       send()
     }
@@ -518,6 +521,7 @@ export default function Composer({
         )}
         <button
           type="button"
+          title="Ctrl+Enter（Macは⌘+Enter）でも送信できます"
           disabled={sending || uploading || !body.trim()}
           onClick={send}
           className={`rounded-[7px] bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40 ${
