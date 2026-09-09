@@ -24,6 +24,7 @@ function avatarSourceFor(item: SearchResultItem): AvatarSource {
 
 type ModifierType = 'in' | 'from' | 'with'
 type DateModifierType = 'before' | 'after' | 'on' | 'during'
+type AnyModifierType = ModifierType | DateModifierType
 interface ResolvedFilter {
   id: string
   label: string
@@ -35,21 +36,37 @@ interface Candidate {
 }
 
 const MODIFIER_LABEL: Record<ModifierType, string> = { in: 'チャンネル', from: '投稿者', with: 'DM相手' }
-const CHIP_LABEL: Record<ModifierType | DateModifierType, string> = {
+const DATE_MODIFIER_TYPES: DateModifierType[] = ['before', 'after', 'on', 'during']
+// 日付系モディファイアの説明・入力例（着手の発端になったユーザーからの質問「使い方が分からない」への
+// 対応。カレンダー入力欄（<input type="date"/"month">）のvalueはブラウザのロケールに関わらず常に
+// YYYY-MM-DD（during:のみYYYY-MM）を返すため、backend/routers/search.pyの_as_date/_as_monthが
+// 期待するISO形式とそのまま一致する
+const DATE_MODIFIER_LABEL: Record<DateModifierType, string> = {
+  before: 'この日より前', after: 'この日以降', on: 'この日', during: 'この月',
+}
+const DATE_MODIFIER_EXAMPLE: Record<DateModifierType, string> = {
+  before: '2026-09-09', after: '2026-09-09', on: '2026-09-09', during: '2026-09',
+}
+function isDateModifierType(type: AnyModifierType): type is DateModifierType {
+  return (DATE_MODIFIER_TYPES as string[]).includes(type)
+}
+const CHIP_LABEL: Record<AnyModifierType, string> = {
   in: 'in', from: 'from', with: 'with', before: 'before', after: 'after', on: 'on', during: 'during',
 }
 
-// 検索欄の生文字列とカーソル位置から、直前に確定していないin:/from:/with:トークンがあるかを
-// 検出する（F-42、詳細設計書API設計6.5節）。Composer.tsxのdetectMentionQuery（F-41）と全く同じ
-// 考え方: トリガー文字列の直前が空白または先頭でなければ開始とみなさず、クエリに空白が
-// 混じったら（＝候補選択前に次の語へ進んだら）該当トークンの入力は終わったとみなす。
+// 検索欄の生文字列とカーソル位置から、直前に確定していないin:/from:/with:/before:/after:/on:/during:
+// トークンがあるかを検出する（F-42、詳細設計書API設計6.5節）。Composer.tsxのdetectMentionQuery
+// （F-41）と全く同じ考え方: トリガー文字列の直前が空白または先頭でなければ開始とみなさず、
+// クエリに空白が混じったら（＝候補選択前に次の語へ進んだら）該当トークンの入力は終わったとみなす。
+// 日付系（before:等）もここで検出することで、候補一覧の代わりにカレンダー入力欄を出すポップオーバー
+// を開けるようにした（ユーザーからの要望。従来はin:/from:/with:のみ候補ポップオーバーの対象だった）
 function detectModifierQuery(
   text: string,
   cursor: number,
-): { type: ModifierType; tokenIndex: number; query: string } | null {
+): { type: AnyModifierType; tokenIndex: number; query: string } | null {
   const uptoCursor = text.slice(0, cursor)
-  let best: { type: ModifierType; tokenIndex: number; query: string } | null = null
-  for (const type of ['in', 'from', 'with'] as ModifierType[]) {
+  let best: { type: AnyModifierType; tokenIndex: number; query: string } | null = null
+  for (const type of ['in', 'from', 'with', ...DATE_MODIFIER_TYPES] as AnyModifierType[]) {
     const needle = `${type}:`
     const idx = uptoCursor.lastIndexOf(needle)
     if (idx === -1) continue
@@ -60,6 +77,31 @@ function detectModifierQuery(
     if (!best || idx > best.tokenIndex) best = { type, tokenIndex: idx, query }
   }
   return best
+}
+
+// 検索欄に入力中の本文で、確定済み・入力済みのモディファイアトークンを青くハイライトする
+// （ユーザーからの要望。Composer.tsxの@メンションハイライトと同じ透明input+オーバーレイ方式）。
+// in:/from:/with:は確定済み（resolvedにある）ラベルの完全一致だけをハイライト対象にする
+// （入力途中の候補選択前の文字列は対象外、確定した瞬間に色がつく）。before:/after:/on:/during:は
+// 値部分に空白を含まない前提のため\S+パターンでそのまま検出する
+function findModifierHighlights(
+  text: string,
+  resolved: Partial<Record<ModifierType, ResolvedFilter>>,
+): { start: number; end: number }[] {
+  const matches: { start: number; end: number }[] = []
+  for (const type of ['in', 'from', 'with'] as ModifierType[]) {
+    const r = resolved[type]
+    if (!r) continue
+    const needle = `${type}:${r.label}`
+    const idx = text.indexOf(needle)
+    if (idx !== -1) matches.push({ start: idx, end: idx + needle.length })
+  }
+  const dateRe = /(?:before|after|on|during):\S+/g
+  for (const m of text.matchAll(dateRe)) {
+    matches.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length })
+  }
+  matches.sort((a, b) => a.start - b.start)
+  return matches
 }
 
 // URLの検索条件（in/in_label等）から検索欄の初期表示テキストを組み立てる（buildQueryの逆変換）。
@@ -193,11 +235,12 @@ export default function SearchView() {
 
   const [input, setInput] = useState(() => composeInputText(searchParams))
   const [resolved, setResolved] = useState(() => composeResolved(searchParams))
-  const [pickerType, setPickerType] = useState<ModifierType | null>(null)
+  const [pickerType, setPickerType] = useState<AnyModifierType | null>(null)
   const [pickerQuery, setPickerQuery] = useState('')
   const [userResults, setUserResults] = useState<UserSearchResult[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (pickerType !== 'from' && pickerType !== 'with') {
@@ -227,7 +270,8 @@ export default function SearchView() {
       : pickerType === 'from' || pickerType === 'with'
         ? userResults.map((u) => ({ id: u.id, label: u.name, sublabel: u.email }))
         : []
-  const pickerOpen = pickerType !== null && candidates.length > 0
+  // 日付系（before:等）は候補一覧の代わりにカレンダー入力欄を出すため、candidatesの件数に関わらず開く
+  const pickerOpen = pickerType !== null && (isDateModifierType(pickerType) || candidates.length > 0)
 
   const q = searchParams.get('q') ?? ''
   const hasQuery = !!(
@@ -268,7 +312,7 @@ export default function SearchView() {
   }
 
   const selectCandidate = (candidate: Candidate) => {
-    if (!pickerType) return
+    if (!pickerType || isDateModifierType(pickerType)) return
     const el = inputRef.current
     const cursor = el?.selectionStart ?? input.length
     const match = detectModifierQuery(input, cursor)
@@ -278,6 +322,27 @@ export default function SearchView() {
     const insertText = `${pickerType}:${candidate.label} `
     setInput(before + insertText + after)
     setResolved((prev) => ({ ...prev, [pickerType]: { id: candidate.id, label: candidate.label } }))
+    setPickerType(null)
+    requestAnimationFrame(() => {
+      const pos = before.length + insertText.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+
+  // before:/after:/on:/during: のカレンダー入力欄で日付が選択されたときの確定処理
+  // （ユーザーからの明示的な要望。<input type="date"/"month">のvalueはYYYY-MM-DD/YYYY-MMの
+  // ISO形式そのままなので、値をそのままinsertTextに使える）
+  const selectDate = (value: string) => {
+    if (!pickerType || !isDateModifierType(pickerType)) return
+    const el = inputRef.current
+    const cursor = el?.selectionStart ?? input.length
+    const match = detectModifierQuery(input, cursor)
+    if (!match) return
+    const before = input.slice(0, match.tokenIndex)
+    const after = input.slice(cursor)
+    const insertText = `${pickerType}:${value} `
+    setInput(before + insertText + after)
     setPickerType(null)
     requestAnimationFrame(() => {
       const pos = before.length + insertText.length
@@ -320,7 +385,10 @@ export default function SearchView() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (pickerOpen) {
+    // 日付系（before:等）はカレンダー入力欄を出すだけで候補一覧を持たないため、矢印キー・Enter/Tabでの
+    // 候補選択ロジックの対象外にする（candidates.length===0のままこのロジックを通すと0除算や
+    // 存在しない候補の選択でクラッシュする）。Escapeで閉じる操作だけは共通のまま
+    if (pickerOpen && pickerType && !isDateModifierType(pickerType)) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setActiveIndex((i) => (i + 1) % candidates.length)
@@ -336,10 +404,10 @@ export default function SearchView() {
         selectCandidate(candidates[activeIndex])
         return
       }
-      if (e.key === 'Escape') {
-        setPickerType(null)
-        return
-      }
+    }
+    if (pickerOpen && e.key === 'Escape') {
+      setPickerType(null)
+      return
     }
     if (e.key === 'Enter') submit()
   }
@@ -362,59 +430,121 @@ export default function SearchView() {
       <div className="flex-none px-7 pt-4">
         <div className="flex gap-2">
           <div className="relative w-full max-w-md">
-            <div className="flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2">
+            <div className="relative flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2">
               <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="flex-none">
                 <circle cx="9" cy="9" r="6.2" stroke="#8a8f98" strokeWidth="1.6" />
                 <path d="M17 17l-3.6-3.6" stroke="#8a8f98" strokeWidth="1.6" strokeLinecap="round" />
               </svg>
-              {/* placeholderはこの検索欄（max-w-md、実測クライアント幅約400px）に収まる長さに
-                  留める。ユーザーからの報告で、元の文言「メッセージを検索（in:チャンネル
-                  from:投稿者 のように条件を指定できます）」（実測描画幅約457px）が欄の幅を
-                  超えて末尾が見切れ、読めなくなっていたことが判明した。placeholderは
-                  ネイティブ<input>の仕様上折り返し・省略記号なしに切れるため、他の文言を
-                  当てる際も同様に描画幅を確認すること */}
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-                placeholder="メッセージを検索（in:チャンネル from:投稿者）"
-                className="w-full text-[13px] text-ink outline-none placeholder:text-ink-subtle"
-                autoFocus
-              />
+              <div className="relative min-w-0 flex-1">
+                {/* 入力中のモディファイアトークン（in:xxx・before:2026-09-09等）を青くハイライトする
+                    （ユーザーからの要望）。Composer.tsxの@メンションハイライトと同じ透明input+
+                    オーバーレイ方式: input自体はtext-transparentで文字を見せず、背後に重ねたdivに
+                    同じ文字列をハイライト付きで描画する。フォント・パディングを完全に一致させないと
+                    文字がずれるため、オーバーレイ側に背景色・文字色以外の装飾は加えない */}
+                <div
+                  ref={highlightRef}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre text-[13px] text-ink"
+                >
+                  {(() => {
+                    const matches = findModifierHighlights(input, resolved)
+                    if (matches.length === 0) return input
+                    const nodes: ReactNode[] = []
+                    let cursor = 0
+                    matches.forEach((m, i) => {
+                      if (m.start > cursor) nodes.push(input.slice(cursor, m.start))
+                      nodes.push(
+                        <span key={i} className="rounded-[3px] bg-accent-100 text-accent-700">
+                          {input.slice(m.start, m.end)}
+                        </span>,
+                      )
+                      cursor = m.end
+                    })
+                    if (cursor < input.length) nodes.push(input.slice(cursor))
+                    return nodes
+                  })()}
+                  {'​'}
+                </div>
+                {/* placeholderはこの検索欄（max-w-md、実測クライアント幅約400px）に収まる長さに
+                    留める。ユーザーからの報告で、元の文言「メッセージを検索（in:チャンネル
+                    from:投稿者 のように条件を指定できます）」（実測描画幅約457px）が欄の幅を
+                    超えて末尾が見切れ、読めなくなっていたことが判明した。placeholderは
+                    ネイティブ<input>の仕様上折り返し・省略記号なしに切れるため、他の文言を
+                    当てる際も同様に描画幅を確認すること */}
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={handleChange}
+                  onKeyDown={handleKeyDown}
+                  onScroll={(e) => {
+                    if (highlightRef.current) highlightRef.current.scrollLeft = e.currentTarget.scrollLeft
+                  }}
+                  placeholder="メッセージを検索（in:チャンネル from:投稿者）"
+                  className="relative w-full bg-transparent text-[13px] text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                  autoFocus
+                />
+              </div>
             </div>
 
             {pickerOpen && pickerType && (
               <div className="absolute left-0 top-full z-40 mt-1.5 max-h-[280px] w-[320px] overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
-                <div className="px-2 pb-1 pt-1 text-[10.5px] font-bold text-ink-subtle">
-                  {MODIFIER_LABEL[pickerType]}の候補（F-42）
-                </div>
-                {candidates.map((c, i) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      selectCandidate(c)
-                    }}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
-                      i === activeIndex ? 'bg-surface-subtle' : 'hover:bg-surface-subtle'
-                    }`}
-                  >
-                    <span
-                      className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
-                      style={{ background: avatarColorFor(c.id) }}
-                    >
-                      {pickerType === 'in' ? '#' : c.label.slice(0, 1)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12.5px] font-bold text-ink">
-                        {pickerType === 'in' ? `# ${c.label}` : c.label}
-                      </span>
-                      {c.sublabel && <span className="block truncate text-[10.5px] text-ink-subtle">{c.sublabel}</span>}
-                    </span>
-                  </button>
-                ))}
+                {isDateModifierType(pickerType) ? (
+                  // 日付系はカレンダー入力欄（<input type="date"/"month">）で選ぶ（ユーザーからの
+                  // 明示的な要望）。valueは常にYYYY-MM-DD/YYYY-MM形式で返るため、そのままトークンに
+                  // 使える。直接テキスト入力（例: before:2026-09-09）も引き続き使える旨を明記する
+                  <div className="p-2">
+                    <div className="mb-1.5 text-[10.5px] font-bold text-ink-subtle">
+                      {CHIP_LABEL[pickerType]}: — {DATE_MODIFIER_LABEL[pickerType]}
+                    </div>
+                    <input
+                      type={pickerType === 'during' ? 'month' : 'date'}
+                      autoFocus
+                      onChange={(e) => {
+                        if (e.target.value) selectDate(e.target.value)
+                      }}
+                      className="w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+                    />
+                    <div className="mt-1.5 text-[10.5px] leading-relaxed text-ink-subtle">
+                      カレンダーから選ぶか、
+                      <code className="rounded bg-surface-muted px-1 text-accent-700">
+                        {pickerType}:{DATE_MODIFIER_EXAMPLE[pickerType]}
+                      </code>
+                      の形式で直接入力してください。
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="px-2 pb-1 pt-1 text-[10.5px] font-bold text-ink-subtle">
+                      {MODIFIER_LABEL[pickerType]}の候補（F-42）
+                    </div>
+                    {candidates.map((c, i) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          selectCandidate(c)
+                        }}
+                        className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
+                          i === activeIndex ? 'bg-surface-subtle' : 'hover:bg-surface-subtle'
+                        }`}
+                      >
+                        <span
+                          className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
+                          style={{ background: avatarColorFor(c.id) }}
+                        >
+                          {pickerType === 'in' ? '#' : c.label.slice(0, 1)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[12.5px] font-bold text-ink">
+                            {pickerType === 'in' ? `# ${c.label}` : c.label}
+                          </span>
+                          {c.sublabel && <span className="block truncate text-[10.5px] text-ink-subtle">{c.sublabel}</span>}
+                        </span>
+                      </button>
+                    ))}
+                  </>
+                )}
                 <div className="border-t border-line px-2 pb-1 pt-1.5 text-[10.5px] leading-relaxed text-ink-subtle">
                   <code className="rounded bg-surface-muted px-1 text-accent-700">in:</code>チャンネル
                   <code className="rounded bg-surface-muted px-1 text-accent-700">from:</code>投稿者
@@ -423,7 +553,8 @@ export default function SearchView() {
                   <code className="rounded bg-surface-muted px-1 text-accent-700">before:</code>/
                   <code className="rounded bg-surface-muted px-1 text-accent-700">after:</code>/
                   <code className="rounded bg-surface-muted px-1 text-accent-700">on:</code>/
-                  <code className="rounded bg-surface-muted px-1 text-accent-700">during:</code>日付
+                  <code className="rounded bg-surface-muted px-1 text-accent-700">during:</code>日付（例:
+                  2026-09-09、during:は2026-09）
                   <code className="rounded bg-surface-muted px-1 text-accent-700">"…"</code>完全一致
                 </div>
               </div>
@@ -472,6 +603,21 @@ export default function SearchView() {
             検索対象は、あなたが参加しているチャンネル・DMの発言・添付ファイルに限定されます。
             <span className="mt-0.5 block text-[11px] text-ink-subtle">
               ドキュメント根拠の検索（Google Drive文書、層2）は未実装です。
+            </span>
+            {/* 検索条件モディファイアのヒントを常時表示する（ユーザーからの明示的な要望
+                「ヒント文章を常にどこかしらに表示させておきたい」。従来はポップオーバーを開いた
+                ときのみ見える形だったため見つけにくかった） */}
+            <span className="mt-1.5 block text-[11px] leading-relaxed text-ink-subtle">
+              <code className="rounded bg-surface px-1 text-accent-700">in:</code>チャンネル{' '}
+              <code className="rounded bg-surface px-1 text-accent-700">from:</code>投稿者{' '}
+              <code className="rounded bg-surface px-1 text-accent-700">with:</code>DM相手{' '}
+              <code className="rounded bg-surface px-1 text-accent-700">before:</code>/
+              <code className="rounded bg-surface px-1 text-accent-700">after:</code>/
+              <code className="rounded bg-surface px-1 text-accent-700">on:</code>/
+              <code className="rounded bg-surface px-1 text-accent-700">during:</code>日付（例:
+              before:2026-09-09、during:2026-09）{' '}
+              <code className="rounded bg-surface px-1 text-accent-700">"…"</code>完全一致
+              を検索欄に入力すると絞り込めます。
             </span>
           </span>
         </div>
