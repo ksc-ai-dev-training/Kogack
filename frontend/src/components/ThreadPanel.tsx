@@ -155,7 +155,7 @@ export default function ThreadPanel({
                 </span>
                 <span className="text-[11px] text-ink-subtle">{formatTime(parentMessage.created_at)}</span>
               </div>
-              <div className="whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
+              <div className="whitespace-pre-wrap break-words text-[13.5px] leading-[1.75] text-ink">
                 {renderMessageBody(parentMessage.body, parentMessage.blocks, members, aiPersonaName)}
               </div>
               {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (

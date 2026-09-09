@@ -438,7 +438,7 @@ export default function Composer({
           placeholder={placeholder}
           rows={MIN_ROWS}
           maxLength={4000}
-          className="relative w-full resize-none border-none bg-transparent text-[13px] text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+          className="relative w-full resize-none break-words border-none bg-transparent text-[13px] text-transparent caret-ink outline-none placeholder:text-ink-subtle"
         />
       </div>
       {(attachments.length > 0 || uploading) && (

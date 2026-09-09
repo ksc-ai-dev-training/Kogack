@@ -388,7 +388,7 @@ export default function MessageList({
                     </button>
                   </div>
                 ) : (
-                  <div className="mt-0.5 whitespace-pre-wrap text-[13.5px] leading-[1.75] text-ink">
+                  <div className="mt-0.5 whitespace-pre-wrap break-words text-[13.5px] leading-[1.75] text-ink">
                     {renderMessageBody(m.body, m.blocks, members, aiPersonaName)}
                   </div>
                 )}
