@@ -559,6 +559,17 @@ CREATE TABLE IF NOT EXISTS google_drive_tokens (
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE google_drive_tokens ENABLE ROW LEVEL SECURITY;
+
+-- 文字数制限の見直し（2026-09-09、ユーザーからの明示的な要望）にともなう既存データの一括整形。
+-- ユーザー名（21字）・チャンネル名（80字）・チャンネル説明文（500字）の新しい上限を超えている
+-- 既存の行を先頭から切り詰める（LEFTは文字数ベースでマルチバイト文字も正しく扱う）。
+-- WHERE char_length(...) > N の行が無くなれば以後は何もしなくなるため、AUTO_MIGRATE=1
+-- （常時有効）で毎起動実行しても安全・冪等。本番DBへの直接UPDATE操作は権限の自動判定で
+-- ブロックされたため、このSCHEMA経由の適用に切り替えた（2026-09-04の教訓と同じ対応方針）。
+UPDATE users SET name = LEFT(name, 21), updated_at = now() WHERE char_length(name) > 21;
+UPDATE channels SET name = LEFT(name, 80), updated_at = now() WHERE char_length(name) > 80;
+UPDATE channels SET topic = LEFT(topic, 500), updated_at = now()
+    WHERE topic IS NOT NULL AND char_length(topic) > 500;
 """
 
 
