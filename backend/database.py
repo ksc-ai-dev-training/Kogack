@@ -390,10 +390,59 @@ DO $$ BEGIN
         CHECK (item_type IN ('folder', 'file'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+-- フォルダ（トップレベル候補）はparent_folder_id NULL、ファイルは必ずどのフォルダの子かを持つ、
+-- という制約は元々ここでdoc_folders_parent_matches_type_checkとして追加していたが、
+-- source='upload'（実ファイルアップロード、2026-09-09）の追加に伴いsource別の条件へ差し替える
+-- 必要が生じたため、この場所でのADD自体は行わず、後方のsource追加ブロックでDROP→
+-- doc_folders_parent_matches_type_check_v2として再作成する（SCHEMAは起動のたびに全文を
+-- 実行する設計のため、ここに`ADD CONSTRAINT doc_folders_parent_matches_type_check`を
+-- 残したままだと、既にv2へ差し替わった後の起動のたびに、v2制約下では許容されている
+-- upload行[item_type='file' AND parent_folder_id IS NULL]に対して旧制約が違反判定され
+-- CheckViolationErrorで起動そのものが失敗する。ローカルでの2回連続起動テストで実際に
+-- この失敗を確認した上でこの形にした）。
+
+-- doc_foldersに実ファイルアップロード（source='upload'）を追加し、URL貼り付け専用だった
+-- doc_foldersをDrive参照とアップロードの両対応にする（層2参照ドキュメント、2026-09-09。
+-- CLAUDE.md実装状況節を参照）。Google Workspace管理コンソールの制限でDrive API自体が
+-- 呼び出せない状態が続いているため、実ファイルを直接アップロードする経路を追加した。
+-- drive_folder_id/drive_folder_nameは既存パターン（種別問わず既存列を使い回す）を踏襲し、
+-- source='upload'ではdrive_folder_nameにアップロード時の元ファイル名を格納する。
+-- 保存先はFly Volume（/data、fly.tomlの[[mounts]]参照）で、storage_pathにそのマウント配下の
+-- 相対パスを持つ。drive_folder_idは元々NOT NULL UNIQUEだったが、source='upload'の行では
+-- 使わないためNOT NULLを外した（UNIQUE制約はNULL同士を区別しないPostgresの挙動により、
+-- 複数のupload行が共存しても違反にならない）。item_typeは'upload'では常に'file'固定とし
+-- （フォルダ単位の一括アップロードは今回のスライス対象外）、フォルダでの整理が必要になれば
+-- 次のスライスで検討する。
+ALTER TABLE doc_folders ALTER COLUMN drive_folder_id DROP NOT NULL;
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'drive';
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS storage_path TEXT;
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS byte_size BIGINT;
+ALTER TABLE doc_folders ADD COLUMN IF NOT EXISTS mime_type TEXT;
 DO $$ BEGIN
-    -- フォルダ（トップレベル候補）はparent_folder_id NULL、ファイルは必ずどのフォルダの子かを持つ
-    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_parent_matches_type_check
-        CHECK ((item_type = 'folder' AND parent_folder_id IS NULL) OR (item_type = 'file' AND parent_folder_id IS NOT NULL));
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_source_check CHECK (source IN ('drive', 'upload'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+-- 旧doc_folders_parent_matches_type_checkは「item_type='file'なら必ずparent_folder_idを持つ」
+-- という、Drive候補（フォルダ内の特定ファイルとして登録する方式）だけを前提にした制約だった。
+-- source='upload'の実ファイルはフォルダに紐づかないトップレベル項目のため、この制約を
+-- source別に緩めた形へ差し替える（DROP→再CREATEでのみ変更可能なため一旦削除する）。
+ALTER TABLE doc_folders DROP CONSTRAINT IF EXISTS doc_folders_parent_matches_type_check;
+DO $$ BEGIN
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_parent_matches_type_check_v2
+        CHECK (
+            (item_type = 'folder' AND parent_folder_id IS NULL)
+            OR (item_type = 'file' AND source = 'drive' AND parent_folder_id IS NOT NULL)
+            OR (item_type = 'file' AND source = 'upload' AND parent_folder_id IS NULL)
+        );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_source_matches_columns_check
+        CHECK (
+            (source = 'drive' AND drive_folder_id IS NOT NULL AND storage_path IS NULL)
+            OR
+            (source = 'upload' AND drive_folder_id IS NULL AND storage_path IS NOT NULL AND item_type = 'file')
+        );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 

@@ -330,13 +330,17 @@ export interface AdminUsersResponse {
  * parent_folder_idに登録先フォルダのidを持つ（フォルダ自身はparent_folder_id=null）。 */
 export interface DocFolder {
   id: string
-  drive_folder_id: string
+  drive_folder_id: string | null
   drive_folder_name: string
   added_by_name: string
   channel_count: number
   created_at: string
   item_type: 'folder' | 'file'
   parent_folder_id: string | null
+  // source='drive'（Google DriveのURL/ID貼り付け候補）/'upload'（実ファイルアップロード、2026-09-09）
+  source: 'drive' | 'upload'
+  byte_size: number | null
+  mime_type: string | null
 }
 
 export interface DocFoldersResponse {

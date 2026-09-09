@@ -44,10 +44,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./
 
 # コンテナの中を root ユーザーのままにしない（最小権限。もしアプリに
-# 脆弱性があっても、コンテナ内で管理者権限を奪われる被害を抑える）
+# 脆弱性があっても、コンテナ内で管理者権限を奪われる被害を抑える）。
+# ただし参照ドキュメント用のFly Volume（/data）はroot所有のままマウントされるため、
+# USER appuserをここで固定せず、entrypoint.sh側で「rootのまま起動→/dataの所有権を
+# appuserへ変更→su経由でappuserへ権限を落としてアプリ本体を実行」という手順を踏む
+# （2026-09-09、層2参照ドキュメントのFly Volume対応で追加。CLAUDE.md実装状況節参照）。
 RUN useradd --create-home --uid 10001 appuser \
-    && chown -R appuser:appuser /app
-USER appuser
+    && chown -R appuser:appuser /app \
+    && chmod +x entrypoint.sh
 
 # Fly.io のようなPaaSは「このコンテナは何番ポートで待ち受けているか」を
 # 起動時に環境変数 PORT で渡してくる（値は環境によって変わりうる）。
@@ -60,7 +64,6 @@ ENV PORT=8000
 # 一般的な作法として残してある。
 EXPOSE 8000
 
-# コンテナ起動時に実行されるコマンド。${PORT:-8000} は「環境変数 PORT が
-# 設定されていればその値、無ければ 8000」という意味（シェルの変数展開機能）。
-# シェル変数展開を使うため、あえて "sh -c" 経由で実行している。
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# コンテナ起動時に実行されるコマンド。entrypoint.sh が /data の所有権修正→appuserへの
+# 権限降格→uvicorn起動（${PORT:-8000}の展開含む）までを一貫して行う。
+ENTRYPOINT ["/app/backend/entrypoint.sh"]

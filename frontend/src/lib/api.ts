@@ -73,3 +73,22 @@ export async function uploadAttachment(
   }
   return res.json()
 }
+
+// 新規: 参照ドキュメントの実ファイルアップロード（S-08、doc_folders.source='upload'、2026-09-09）。
+// uploadIcon/uploadAttachmentと同じくFormDataのため専用実装。
+export async function uploadDocFile(file: File): Promise<import('../types').DocFolder> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch('/api/admin/doc-folders/upload', { method: 'POST', credentials: 'same-origin', body: formData })
+  if (!res.ok) {
+    let detail = 'アップロードに失敗しました'
+    try {
+      const body = await res.json()
+      if (body.detail) detail = body.detail
+    } catch {
+      // JSONでないレスポンスは汎用メッセージのまま
+    }
+    throw new ApiError(res.status, detail)
+  }
+  return res.json()
+}

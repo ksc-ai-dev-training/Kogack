@@ -29,3 +29,12 @@ primary_region = 'nrt'
   cpu_kind = 'shared'
   cpus = 1
   memory_mb = 1024
+
+# 層2参照ドキュメント（社内マニュアル等のアップロード先）の永続化用（2026-09-09）。
+# 事前に `fly volumes create kogack_docs --region nrt --size 1 --app kogack` でVolume自体を
+# 作成しておく必要がある（このfly.tomlだけでは自動作成されない）。プロフィール画像・添付ファイルは
+# 個人のSupabaseアカウントのFree枠（無料）へ、参照ドキュメントは会社カード契約のFly.io側へ、
+# という費用リスクに応じた使い分け（CLAUDE.md実装状況節を参照）。
+[[mounts]]
+  source = 'kogack_docs'
+  destination = '/data'

@@ -3,13 +3,15 @@
 # AI利用状況・コスト（A-42/A-43、F-29）・監査ログ（A-44、T-16）を実装。
 import re
 from datetime import date, datetime, time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
+from services import doc_storage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 JST = ZoneInfo("Asia/Tokyo")
@@ -117,7 +119,7 @@ def _extract_drive_id(raw: str, *, is_file: bool) -> str:
 def _doc_folders_query(where: str = "") -> str:
     return f"""
         SELECT f.id, f.drive_folder_id, f.drive_folder_name, f.created_at,
-               f.item_type, f.parent_folder_id,
+               f.item_type, f.parent_folder_id, f.source, f.byte_size, f.mime_type,
                u.name AS added_by_name,
                COUNT(cdf.channel_id) AS channel_count
         FROM doc_folders f
@@ -139,6 +141,10 @@ def _doc_folder_out(row) -> dict:
         "created_at": row["created_at"].isoformat(),
         "item_type": row["item_type"],
         "parent_folder_id": str(row["parent_folder_id"]) if row["parent_folder_id"] is not None else None,
+        # source='drive'（既存のURL/ID貼り付け候補）/'upload'（実ファイルアップロード、2026-09-09）
+        "source": row["source"],
+        "byte_size": row["byte_size"],
+        "mime_type": row["mime_type"],
     }
 
 
@@ -198,14 +204,56 @@ async def create_doc_folder(body: CreateDocFolderRequest, user: CurrentUser = De
     return _doc_folder_out(row)
 
 
+_DOC_UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20MB（A-21添付ファイルと同じ上限。F-07踏襲）
+
+
+@router.post("/doc-folders/upload", status_code=201)
+async def upload_doc_file(
+    file: UploadFile = File(...), user: CurrentUser = Depends(require_roles("admin"))
+):
+    """新規: 参照ドキュメントの実ファイルアップロード（source='upload'、2026-09-09）。
+    Google Workspace管理コンソールの制限でDrive API自体が呼び出せない状態が続いているため、
+    URL/ID貼り付け（A-39、source='drive'）に加え、実ファイルを直接アップロードする経路を追加した。
+    保存先はFly Volume（services/doc_storage.py）。フォルダでの整理・限定公開（is_restricted）・
+    閲覧者ACLは次のスライスで追加する予定で、このスライスでは既存のDrive候補と同じく
+    「全社公開」相当（S-06の参照範囲に追加すればそのチャンネルの参加者全員が対象）として扱う。
+    形式の制限は無い（F-07添付ファイルと同じ方針）が、サイズは20MBまで。"""
+    data = await file.read()
+    if len(data) > _DOC_UPLOAD_MAX_BYTES:
+        raise HTTPException(400, detail="ファイルサイズは20MBまでです")
+    if not data:
+        raise HTTPException(400, detail="空のファイルはアップロードできません")
+
+    original_name = file.filename or "ファイル"
+    ext = Path(original_name).suffix
+    storage_path = doc_storage.save(data, ext=ext)
+
+    pool = get_pool()
+    new_id = await pool.fetchval(
+        """INSERT INTO doc_folders
+               (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id,
+                source, storage_path, byte_size, mime_type)
+           VALUES (NULL, $1, $2, 'file', NULL, 'upload', $3, $4, $5) RETURNING id""",
+        original_name, user.id, storage_path, len(data), file.content_type,
+    )
+    row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), new_id)
+    return _doc_folder_out(row)
+
+
 @router.delete("/doc-folders/{folder_id}", status_code=204)
 async def delete_doc_folder(folder_id: int, user: CurrentUser = Depends(require_roles("admin"))):
     """A-40: フォルダ（またはフォルダ内の個別ファイル）候補の削除。使用中のチャンネル（T-10）が
     あってもそのまま削除する（ON DELETE CASCADEでchannel_doc_foldersの割当も連動削除される）。
-    フォルダを削除した場合、その配下に登録済みの個別ファイル候補も同じくCASCADEで連動削除される"""
-    deleted = await get_pool().fetchval("DELETE FROM doc_folders WHERE id = $1 RETURNING id", folder_id)
+    フォルダを削除した場合、その配下に登録済みの個別ファイル候補も同じくCASCADEで連動削除される。
+    source='upload'の場合はFly Volume上の実ファイルもあわせて削除する（孤立ファイルの蓄積を防ぐ）。"""
+    pool = get_pool()
+    deleted = await pool.fetchrow(
+        "DELETE FROM doc_folders WHERE id = $1 RETURNING id, source, storage_path", folder_id
+    )
     if deleted is None:
         raise HTTPException(404, detail="見つかりません")
+    if deleted["source"] == "upload" and deleted["storage_path"]:
+        doc_storage.delete(deleted["storage_path"])
 
 
 def _month_range(month: str | None) -> tuple[datetime, datetime, str]:
