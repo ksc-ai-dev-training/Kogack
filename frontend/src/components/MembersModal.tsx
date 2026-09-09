@@ -142,9 +142,9 @@ export default function MembersModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 px-[22px] pb-1 pt-4.5">
-          <div className="flex-1">
-            <h2 className="text-[15.5px] font-bold text-ink">{channel?.name ?? '読み込み中...'}</h2>
-            <div className="mt-0.5 text-[11.5px] text-ink-subtle">{subLabel}</div>
+          <div className="min-w-0 flex-1">
+            <h2 className="break-words text-[15.5px] font-bold text-ink">{channel?.name ?? '読み込み中...'}</h2>
+            <div className="mt-0.5 break-words text-[11.5px] text-ink-subtle">{subLabel}</div>
           </div>
           <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted">
             ✕

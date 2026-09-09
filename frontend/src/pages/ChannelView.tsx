@@ -181,11 +181,11 @@ export default function ChannelView() {
           <span className="text-base text-ink-subtle">{channel?.is_public === false ? '🔒' : '#'}</span>
           <span
             onClick={channel ? () => setMembersModalTab('info') : undefined}
-            className={`text-[15px] font-bold text-ink ${channel ? 'cursor-pointer hover:underline' : ''}`}
+            className={`min-w-0 flex-shrink truncate text-[15px] font-bold text-ink ${channel ? 'cursor-pointer hover:underline' : ''}`}
           >
             {channel?.name ?? '読み込み中...'}
           </span>
-          {channel?.topic && <span className="ml-1 truncate text-xs text-ink-subtle">{channel.topic}</span>}
+          {channel?.topic && <span className="ml-1 min-w-0 flex-shrink truncate text-xs text-ink-subtle">{channel.topic}</span>}
           {channel && (
             <button
               type="button"

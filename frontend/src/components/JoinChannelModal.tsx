@@ -121,7 +121,7 @@ export default function JoinChannelModal({ onClose }: { onClose: () => void }) {
                     #
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-bold text-ink">{c.name}</div>
+                    <div className="break-words text-[13px] font-bold text-ink">{c.name}</div>
                     {c.topic && <div className="truncate text-[11.5px] text-ink-subtle">{c.topic}</div>}
                   </div>
                   <button
