@@ -341,14 +341,70 @@ function ViewerPicker({
 // ユーザーからの明示的な要望「エクスプローラーからD&D、またはファイルを選択、という形にしたい」
 // を受けて、素の<input type="file">から差し替えた。クリックでもファイル選択ダイアログを
 // 開けるよう、非表示のinputへのrefをクリックで発火させる。
-function FileDropzone({ file, onChange }: { file: File | null; onChange: (f: File | null) => void }) {
+// 続けて「フォルダごと入れたら中のファイルは全部AIが読める？」との質問を受け、複数ファイル・
+// フォルダ（サブフォルダを含めて再帰的に）の選択にも対応させた（2026-09-09）。バックエンドの
+// アップロードAPI（A-39相当の新規エンドポイント）は1ファイルずつしか受け付けないため、複数選択時は
+// 呼び出し元（DocFoldersTab.add）がファイルごとに順番に呼び出す想定で、このコンポーネントは
+// 「選択されたFileの配列」を親へ渡すところまでを担当する。
+function FileDropzone({ files, onChange }: { files: File[]; onChange: (files: File[]) => void }) {
   const [dragOver, setDragOver] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
 
   const sizeLabel = (bytes: number) => {
     const kb = bytes / 1024
     if (kb < 1) return `${bytes}B`
     return kb < 1024 ? `${kb.toFixed(0)}KB` : `${(kb / 1024).toFixed(1)}MB`
+  }
+
+  // File and Directory Entries API（webkitGetAsEntry）は正式なW3C標準ではないが主要ブラウザ
+  // （Chrome/Edge/Safari/Firefox）はいずれも実装済み。ディレクトリのreadEntries()は1回の呼び出しで
+  // 全件を返すとは限らない（Chromeは実装上100件程度で打ち切ることがある）仕様のため、空配列が
+  // 返るまで繰り返し呼び出す
+  const readAllEntries = (reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> =>
+    new Promise((resolve, reject) => {
+      const all: FileSystemEntry[] = []
+      const readBatch = () => {
+        reader.readEntries((entries) => {
+          if (entries.length === 0) {
+            resolve(all)
+          } else {
+            all.push(...entries)
+            readBatch()
+          }
+        }, reject)
+      }
+      readBatch()
+    })
+
+  const walkEntry = async (entry: FileSystemEntry): Promise<File[]> => {
+    if (entry.isFile) {
+      return new Promise((resolve, reject) => {
+        ;(entry as FileSystemFileEntry).file((f) => resolve([f]), reject)
+      })
+    }
+    if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader()
+      const children = await readAllEntries(reader)
+      const nested = await Promise.all(children.map(walkEntry))
+      return nested.flat()
+    }
+    return []
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const items = e.dataTransfer.items
+    if (items && items.length > 0 && typeof items[0]?.webkitGetAsEntry === 'function') {
+      const entries = Array.from(items)
+        .map((item) => item.webkitGetAsEntry())
+        .filter((entry): entry is FileSystemEntry => entry !== null)
+      const nested = await Promise.all(entries.map(walkEntry))
+      onChange(nested.flat())
+    } else {
+      onChange(Array.from(e.dataTransfer.files ?? []))
+    }
   }
 
   return (
@@ -358,12 +414,7 @@ function FileDropzone({ file, onChange }: { file: File | null; onChange: (f: Fil
         setDragOver(true)
       }}
       onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault()
-        setDragOver(false)
-        const dropped = e.dataTransfer.files?.[0]
-        if (dropped) onChange(dropped)
-      }}
+      onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
       role="button"
       tabIndex={0}
@@ -377,23 +428,55 @@ function FileDropzone({ file, onChange }: { file: File | null; onChange: (f: Fil
       <input
         ref={inputRef}
         type="file"
-        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+        multiple
+        onChange={(e) => onChange(Array.from(e.target.files ?? []))}
         className="hidden"
       />
-      {file ? (
+      {/* webkitdirectoryは非標準だが主要ブラウザはいずれも対応。クリックでフォルダごと選ぶための
+          別枠の非表示input（型定義がlib.domに無いため属性名を文字列で渡す） */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        {...{ webkitdirectory: '' }}
+        onChange={(e) => onChange(Array.from(e.target.files ?? []))}
+        className="hidden"
+      />
+      {files.length > 0 ? (
         <div className="text-[13px] text-ink">
-          <div className="font-bold">📎 {file.name}</div>
-          <div className="mt-1 text-[11px] text-ink-subtle">
-            {sizeLabel(file.size)} ・ クリックまたはドラッグ＆ドロップで変更
+          {files.length === 1 ? (
+            <div className="font-bold">📎 {files[0].name}</div>
+          ) : (
+            <div className="font-bold">📎 {files.length}件のファイルを選択中</div>
+          )}
+          <div className="mt-1 max-h-[70px] overflow-y-auto text-[11px] text-ink-subtle">
+            {files.length > 1 &&
+              files
+                .slice(0, 8)
+                .map((f) => `${f.name}（${sizeLabel(f.size)}）`)
+                .join('、') + (files.length > 8 ? ` 他${files.length - 8}件` : '')}
+            {files.length === 1 && sizeLabel(files[0].size)}
           </div>
+          <div className="mt-1 text-[11px] text-ink-subtle">クリックまたはドラッグ＆ドロップで変更</div>
         </div>
       ) : (
         <div className="text-[12.5px] text-ink-subtle">
           <div className="text-[22px]">📂</div>
-          <div className="mt-1">ここにファイルをドラッグ＆ドロップ</div>
+          <div className="mt-1">ここにファイル・フォルダをドラッグ＆ドロップ</div>
           <div className="mt-0.5 text-[11px]">
             または<span className="font-semibold text-accent-700">クリックしてファイルを選択</span>
+            （複数選択可）
           </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              folderInputRef.current?.click()
+            }}
+            className="mt-1.5 bg-transparent text-[11px] font-semibold text-accent-700 hover:underline"
+          >
+            📁 フォルダごと選択（中のファイルをまとめて）
+          </button>
         </div>
       )}
     </div>
@@ -413,7 +496,8 @@ function DocFoldersTab() {
   // 0件であることを確認したうえで撤去した）。バックエンド（A-39、source='drive'）自体は
   // 削除していない。Drive連携が実際に機能するようになった時点で、このUIだけ復活させる想定。
   const [saving, setSaving] = useState(false)
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  // 複数ファイル・フォルダごとの選択に対応（2026-09-09、ユーザーからの明示的な要望）
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
   // 閲覧権限モデル（Slice 2b、2026-09-09）。新規登録時のみここで指定する（既存フォルダの
   // 閲覧者編集は一覧の「閲覧権限」ボタン→EditViewersModalで行う）
   const [isRestricted, setIsRestricted] = useState(false)
@@ -442,22 +526,36 @@ function DocFoldersTab() {
   }
 
   const add = async () => {
-    if (!uploadFile) {
+    if (uploadFiles.length === 0) {
       toast('アップロードするファイルを選んでください', 'error')
       return
     }
     setSaving(true)
-    try {
-      await uploadDocFile(uploadFile, isRestricted, [...viewerIds])
-      setUploadFile(null)
-      setIsRestricted(false)
-      setViewerIds(new Set())
-      await mutate()
-      toast('ファイルをアップロードしました')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'アップロードに失敗しました', 'error')
-    } finally {
-      setSaving(false)
+    // バックエンドは1ファイルずつしか受け付けないため（services/doc_storage.py参照）、複数選択・
+    // フォルダ選択時はここで順番に呼び出す。1件失敗しても残りは続行し（限定公開設定は全件に共通で
+    // 適用する）、最後に成功・失敗件数をまとめて報告する。並列にしないのは、フォルダごと選択した
+    // 場合に一度に大量のアップロードリクエストが飛ぶのを避けるため
+    let succeeded = 0
+    let failed = 0
+    for (const file of uploadFiles) {
+      try {
+        await uploadDocFile(file, isRestricted, [...viewerIds])
+        succeeded++
+      } catch {
+        failed++
+      }
+    }
+    setUploadFiles([])
+    setIsRestricted(false)
+    setViewerIds(new Set())
+    await mutate()
+    setSaving(false)
+    if (failed === 0) {
+      toast(succeeded === 1 ? 'ファイルをアップロードしました' : `${succeeded}件のファイルをアップロードしました`)
+    } else if (succeeded === 0) {
+      toast('アップロードに失敗しました', 'error')
+    } else {
+      toast(`${succeeded}件アップロードしました（${failed}件は失敗しました）`, 'error')
     }
   }
 
@@ -591,7 +689,7 @@ function DocFoldersTab() {
           </div>
           <div className="mb-3.5">
             <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">ファイル</label>
-            <FileDropzone file={uploadFile} onChange={setUploadFile} />
+            <FileDropzone files={uploadFiles} onChange={setUploadFiles} />
             <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
               このファイル自体をKogackのサーバーへ直接保存し、自動でAI検索できる状態にします（20MBまで）。表示名はファイル名がそのまま使われます。
             </div>
