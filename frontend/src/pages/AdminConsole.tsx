@@ -404,19 +404,14 @@ function DocFoldersTab() {
   const { folders, mutate } = useDocFolders()
   const toast = useToast()
   const confirm = useConfirm()
-  const [input, setInput] = useState('')
-  const [name, setName] = useState('')
-  // フォルダ内の特定ファイルだけを参照範囲に含める機能（ユーザーからの明示的な要望）。
-  // 実際のDrive APIでフォルダの中身を自動列挙する方式は、Drive OAuthスコープの全社展開・
-  // GCP側のDrive API有効化のいずれも未解決のため見送り、フォルダ登録と同じ「URL/IDの
-  // 手動貼り付け」方式のまま個別ファイルも登録できるようにした（CLAUDE.md実装状況節）。
-  // 'upload'は実ファイルアップロード（source='upload'、2026-09-09）。Google Workspace管理
-  // コンソールの制限でDrive API自体が呼び出せない状態が続いているため、URL/ID貼り付けに
-  // 加えて追加した経路（CLAUDE.md実装状況節）。フォルダでの整理は次のスライスの対象のため、
-  // アップロードしたファイルは常にトップレベル項目として扱う。
-  const [mode, setMode] = useState<'folder' | 'file' | 'upload'>('folder')
-  const topFolders = folders.filter((f) => f.item_type === 'folder')
-  const [parentId, setParentId] = useState('')
+  // 「フォルダ全体」「フォルダ内の特定ファイル」（Drive候補のURL/ID貼り付け登録）は2026-09-09に
+  // UIから外した（ユーザーからの指摘）。Drive連携はGoogle Workspace管理コンソールの制限で
+  // domainPolicyブロックが続いており、たとえ解消しても実際にDriveから文書を取得・索引化する
+  // 仕組み自体を作っていない（Slice 3はsource='upload'のみを検索対象にする設計）ため、
+  // この2方式で候補を登録してもAI検索には一切使われず、S-06参照範囲でチェックしても
+  // 何も起きないという分かりにくい罠になっていた（実際に本番へ登録済みのDrive候補が
+  // 0件であることを確認したうえで撤去した）。バックエンド（A-39、source='drive'）自体は
+  // 削除していない。Drive連携が実際に機能するようになった時点で、このUIだけ復活させる想定。
   const [saving, setSaving] = useState(false)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   // 閲覧権限モデル（Slice 2b、2026-09-09）。新規登録時のみここで指定する（既存フォルダの
@@ -447,54 +442,20 @@ function DocFoldersTab() {
   }
 
   const add = async () => {
-    if (mode === 'upload') {
-      if (!uploadFile) {
-        toast('アップロードするファイルを選んでください', 'error')
-        return
-      }
-      setSaving(true)
-      try {
-        await uploadDocFile(uploadFile, isRestricted, [...viewerIds])
-        setUploadFile(null)
-        setIsRestricted(false)
-        setViewerIds(new Set())
-        await mutate()
-        toast('ファイルをアップロードしました')
-      } catch (e) {
-        toast(e instanceof Error ? e.message : 'アップロードに失敗しました', 'error')
-      } finally {
-        setSaving(false)
-      }
-      return
-    }
-    if (!input.trim() || !name.trim()) {
-      toast('DriveのURLまたはIDと、表示名の両方を入力してください', 'error')
-      return
-    }
-    if (mode === 'file' && !parentId) {
-      toast('登録先のフォルダを選んでください', 'error')
+    if (!uploadFile) {
+      toast('アップロードするファイルを選んでください', 'error')
       return
     }
     setSaving(true)
     try {
-      await apiFetch('/api/admin/doc-folders', {
-        method: 'POST',
-        body: JSON.stringify({
-          drive_folder_id: input.trim(),
-          drive_folder_name: name.trim(),
-          ...(mode === 'file' ? { parent_folder_id: parentId } : {}),
-          is_restricted: isRestricted,
-          viewer_user_ids: [...viewerIds],
-        }),
-      })
-      setInput('')
-      setName('')
+      await uploadDocFile(uploadFile, isRestricted, [...viewerIds])
+      setUploadFile(null)
       setIsRestricted(false)
       setViewerIds(new Set())
       await mutate()
-      toast(mode === 'file' ? 'ファイルを追加しました' : 'フォルダを追加しました')
+      toast('ファイルをアップロードしました')
     } catch (e) {
-      toast(e instanceof Error ? e.message : '追加に失敗しました', 'error')
+      toast(e instanceof Error ? e.message : 'アップロードに失敗しました', 'error')
     } finally {
       setSaving(false)
     }
@@ -531,7 +492,7 @@ function DocFoldersTab() {
           <span className="text-[16px] font-bold text-ink">ドキュメント参照範囲</span>
         </div>
         <p className="mt-1.5 max-w-[640px] text-[12.5px] leading-relaxed text-ink-muted">
-          チャンネルAIが回答の根拠として参照できるGoogleドライブのフォルダ・ファイル候補を登録します（F-22）。フォルダ内の特定ファイルだけを候補にすることもできます。各チャンネルは登録済みの候補の中から使用する範囲を「チャンネル設定」の「参照ドキュメント範囲」タブで選びます。
+          チャンネルAIが回答の根拠として参照できる社内ドキュメントを登録します（F-22）。アップロードしたファイルは自動でテキスト抽出・索引化され、AIが質問に応じて検索できるようになります。各チャンネルは登録済みの候補の中から使用する範囲を「チャンネル設定」の「参照ドキュメント範囲」タブで選びます。
         </p>
       </div>
 
@@ -607,53 +568,8 @@ function DocFoldersTab() {
           </div>
         )}
 
-        <div className="mb-6 flex max-w-[640px] items-center justify-between rounded-[10px] border border-line bg-surface-subtle px-4 py-3">
-          <span className="text-[12px] text-ink-muted">最終同期: 未実施 ・ 対象{folders.length}件</span>
-          <button
-            type="button"
-            disabled
-            title="索引・AI検索は次のスライスで実装予定です"
-            className="flex-none rounded-md border border-line-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-bold text-ink-subtle opacity-50"
-          >
-            今すぐ同期
-          </button>
-        </div>
-        <p className="mb-6 max-w-[640px] text-[11px] leading-relaxed text-ink-subtle">
-          「今すぐ同期」は実際のDrive同期・文書の索引化・チャンネルAIからの検索を行うボタンですが、このスライスでは未実装です（次のスライスで対応予定）。同期を実行した時点の内容が回答に反映される想定で、質問者本人がGoogleドライブ上で閲覧権限を持たない文書は、ここで対象に含めていても回答からは除外されます（5.1節）。
-        </p>
-
         <div className="max-w-[640px] rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
-          <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しい候補を追加</div>
-          <div className="mb-3.5 flex gap-4">
-            <label className="flex items-center gap-1.5 text-[12.5px] text-ink">
-              <input
-                type="radio"
-                checked={mode === 'folder'}
-                onChange={() => setMode('folder')}
-                className="h-3.5 w-3.5"
-              />
-              フォルダ全体
-            </label>
-            <label className="flex items-center gap-1.5 text-[12.5px] text-ink">
-              <input
-                type="radio"
-                checked={mode === 'file'}
-                onChange={() => setMode('file')}
-                disabled={topFolders.length === 0}
-                className="h-3.5 w-3.5"
-              />
-              フォルダ内の特定ファイル
-            </label>
-            <label className="flex items-center gap-1.5 text-[12.5px] text-ink">
-              <input
-                type="radio"
-                checked={mode === 'upload'}
-                onChange={() => setMode('upload')}
-                className="h-3.5 w-3.5"
-              />
-              ファイルをアップロード
-            </label>
-          </div>
+          <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ ファイルを追加</div>
           <div className="mb-3.5 rounded-lg border border-line bg-surface px-3 py-2.5">
             <label className="flex items-center gap-1.5 text-[12.5px] font-bold text-ink">
               <input
@@ -673,71 +589,20 @@ function DocFoldersTab() {
               </div>
             )}
           </div>
-          {mode === 'upload' && (
-            <div className="mb-3.5">
-              <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">ファイル</label>
-              <FileDropzone file={uploadFile} onChange={setUploadFile} />
-              <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
-                Googleドライブとは連携せず、このファイル自体をKogackのサーバーへ直接保存します（20MBまで）。表示名はファイル名がそのまま使われます。
-              </div>
+          <div className="mb-3.5">
+            <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">ファイル</label>
+            <FileDropzone file={uploadFile} onChange={setUploadFile} />
+            <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
+              このファイル自体をKogackのサーバーへ直接保存し、自動でAI検索できる状態にします（20MBまで）。表示名はファイル名がそのまま使われます。
             </div>
-          )}
-          {mode === 'file' && (
-            <div className="mb-3.5">
-              <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">登録先のフォルダ</label>
-              <select
-                value={parentId}
-                onChange={(e) => setParentId(e.target.value)}
-                className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-              >
-                <option value="">選択してください</option>
-                {topFolders.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.drive_folder_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          {mode !== 'upload' && (
-            <>
-              <div className="mb-3.5">
-                <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">
-                  Googleドライブの{mode === 'file' ? 'ファイル' : 'フォルダ'}URLまたはID
-                </label>
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={
-                    mode === 'file'
-                      ? 'https://drive.google.com/file/d/...'
-                      : 'https://drive.google.com/drive/folders/...'
-                  }
-                  className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-                />
-                <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
-                  このスライスはURL・IDの手動入力のみに対応します（Googleドライブのフォルダ・ファイル選択画面からの選択は、Drive連携拡張とあわせて次のスライスで対応予定です）。
-                </div>
-              </div>
-              <div className="mb-3.5">
-                <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">表示名</label>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={mode === 'file' ? '例: デプロイ手順書' : '例: 開発部 ドキュメント'}
-                  maxLength={200}
-                  className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-                />
-              </div>
-            </>
-          )}
+          </div>
           <button
             type="button"
             disabled={saving}
             onClick={add}
             className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
           >
-            {mode === 'upload' ? '📎 アップロード' : `＋ ${mode === 'file' ? 'ファイル' : 'フォルダ'}を追加`}
+            📎 アップロード
           </button>
         </div>
       </div>
