@@ -503,14 +503,27 @@ function DocFoldersTab() {
   const [isRestricted, setIsRestricted] = useState(false)
   const [viewerIds, setViewerIds] = useState<Set<string>>(new Set())
   const [editingViewersFor, setEditingViewersFor] = useState<DocFolder | null>(null)
+  // フォルダ名クリックで中の登録ファイルを展開/折りたたみする（ユーザーからの明示的な要望
+  // 「フォルダ名をクリックするとその中のファイルが表示されて」。S-06 DocScopeTabと同じ挙動）
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
+  const toggleExpand = (id: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const childrenOf = (folderId: string) => folders.filter((f) => f.parent_folder_id === folderId)
-  // 画面モックアップ（S-08）は入れ子表示ではなく、フォルダ→その子ファイルの順に並べたフラットな
-  // 一覧＋「親フォルダ名 ＞ 項目名」のパンくず表記。ツリー表示（字下げ）はS-06側の踏襲とし、
-  // S-08は一覧の見た目をモックアップに合わせる（ユーザーからの明示的な要望）。アップロードした
-  // ファイル（parent_folder_id無し）もDriveフォルダと同じくトップレベル項目として並べる。
+  // トップレベル項目（Driveフォルダ・アップロードした単独ファイルの両方、parent_folder_id無し）を
+  // 並べ、フォルダは展開中（expandedFolders）のときだけ直下に子ファイルを字下げして続ける
+  // （S-06 DocScopeTabと同じ構造）。パンくず名（nameOf）は削除確認ダイアログ等、文脈が無い場面向けに
+  // 残しつつ、一覧上の子ファイル行はどのフォルダの下にあるか目視で分かるため単純な名前で表示する。
   const topLevelItems = folders.filter((f) => f.parent_folder_id === null)
-  const flatRows = topLevelItems.flatMap((f) => [f, ...childrenOf(f.id)])
+  const flatRows = topLevelItems.flatMap((f) =>
+    expandedFolders.has(f.id) ? [f, ...childrenOf(f.id)] : [f],
+  )
   const nameOf = (f: DocFolder) => {
     if (f.item_type !== 'file' || f.parent_folder_id === null) return f.drive_folder_name
     const parent = folders.find((p) => p.id === f.parent_folder_id)
@@ -599,17 +612,17 @@ function DocFoldersTab() {
           <p className="mb-6 max-w-[640px] text-[12px] text-ink-subtle">登録済みの候補はありません。</p>
         ) : (
           <div className="mb-4 max-w-[640px] overflow-hidden rounded-[10px] border border-line">
-            {flatRows.map((f) => (
-              <div
-                key={f.id}
-                className="flex items-center gap-2.5 border-b border-line px-3.5 py-2.5 last:border-b-0"
-              >
-                <span className="text-base">
-                  {f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'}
-                </span>
+            {flatRows.map((f) => {
+              const isChild = f.parent_folder_id !== null
+              const childCount = f.item_type === 'folder' ? childrenOf(f.id).length : 0
+              const expanded = expandedFolders.has(f.id)
+              const nameBlock = (
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13px] font-bold text-ink">
-                    {nameOf(f)}
+                    {isChild ? f.drive_folder_name : nameOf(f)}
+                    {!isChild && childCount > 0 && (
+                      <span className="ml-1.5 text-[11px] font-normal text-ink-subtle">（{childCount}件登録済み）</span>
+                    )}
                     {f.is_restricted && (
                       <span className="ml-1.5 rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
                         🔒 限定公開
@@ -641,16 +654,43 @@ function DocFoldersTab() {
                     )}
                   </div>
                   <div className="truncate text-[11.5px] text-ink-subtle">
-                    {f.item_type === 'folder' && `登録ファイル${childrenOf(f.id).length}件 ・ `}
                     {f.source === 'upload' && `${sizeOf(f)} ・ `}
                     追加: {f.added_by_name} ・ {dateOf(f)} ・ 使用中のチャンネル{f.channel_count}件
                     {f.is_restricted && ` ・ 閲覧可能${f.viewer_user_ids.length}名`}
                   </div>
                 </div>
+              )
+              const icon = isChild ? (f.source === 'upload' ? '📎' : '📄') : f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'
+              return (
+              <div
+                key={f.id}
+                className={`flex items-center gap-2.5 border-b border-line py-2.5 pr-3.5 last:border-b-0 ${isChild ? 'bg-surface-subtle pl-[46px]' : 'px-3.5'}`}
+              >
+                {/* フォルダ名クリックで中の登録ファイルを展開/折りたたみする（ユーザーからの明示的な
+                    要望「フォルダ名をクリックするとその中のファイルが表示されて」）。矢印・アイコン・
+                    名前を1つのbuttonにまとめ、名前部分のどこをクリックしても展開できるようにする
+                    （矢印だけがクリック対象だと見つけにくいバグを実機検証で発見し修正した） */}
+                {!isChild && childCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(f.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2.5 bg-transparent text-left"
+                  >
+                    <span className="flex-none text-[11px] text-ink-subtle">{expanded ? '▼' : '▶'}</span>
+                    <span className="flex-none text-base">{icon}</span>
+                    {nameBlock}
+                  </button>
+                ) : (
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                    {!isChild && <span className="w-2.5 flex-none" />}
+                    <span className="flex-none text-base">{icon}</span>
+                    {nameBlock}
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => setEditingViewersFor(f)}
-                  className="ml-auto flex-none bg-transparent text-[11.5px] text-accent-700 hover:underline"
+                  className="flex-none bg-transparent text-[11.5px] text-accent-700 hover:underline"
                 >
                   閲覧権限
                 </button>
@@ -662,7 +702,8 @@ function DocFoldersTab() {
                   削除
                 </button>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
 

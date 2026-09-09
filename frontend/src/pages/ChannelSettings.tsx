@@ -686,12 +686,53 @@ function DocScopeTab({
   mutate: () => Promise<AiSettings | undefined>
   isPublic: boolean
 }) {
+  // 「選択済みファイルを含むフォルダは初期状態から展開しておく」という初期化ロジックが`folders`
+  // （useDocFolders、settingsとは別のフック）に依存するため、folders未ロードのままだと
+  // expandedFoldersのuseState初期値が「空」のまま固定されてしまう不具合を実機検証で発見した
+  // （GlobalLimitForm等と同じ「非同期データが揃ってから条件付きレンダーし、propsからuseStateの
+  // 初期値を直接設定する」パターンで解消する）。
+  const { folders, isLoading } = useDocFolders()
+  if (isLoading) return <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
+  return <DocScopeTabBody channelId={channelId} settings={settings} mutate={mutate} isPublic={isPublic} folders={folders} />
+}
+
+function DocScopeTabBody({
+  channelId,
+  settings,
+  mutate,
+  isPublic,
+  folders,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+  isPublic: boolean
+  folders: DocFolder[]
+}) {
   const toast = useToast()
   const confirm = useConfirm()
-  const { folders } = useDocFolders()
   const [selected, setSelected] = useState(() => new Set(settings.folder_ids))
   const [policy, setPolicy] = useState(settings.out_of_scope_policy)
   const [saving, setSaving] = useState(false)
+  // フォルダ名クリックで中身を展開/折りたたみする（ユーザーからの明示的な要望「フォルダ名をクリックすると
+  // その中のファイルが表示されて、一つずつチェックボックスで選択できるみたいな感じ」）。既に選択済みの
+  // ファイルを含むフォルダは初期状態から展開しておく（保存済みの選択が畳まれて見えなくなるのを防ぐ）
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
+    const withSelectedChildren = new Set<string>()
+    for (const f of settings.folder_ids) {
+      const child = folders.find((x) => x.id === f)
+      if (child?.parent_folder_id) withSelectedChildren.add(child.parent_folder_id)
+    }
+    return withSelectedChildren
+  })
+  const toggleExpand = (id: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const toggle = (f: DocFolder) => {
     // 閲覧権限モデル（Slice 2b、2026-09-09、(4)）: 公開チャンネルは限定公開フォルダを
@@ -762,7 +803,9 @@ function DocScopeTab({
                 の.doc-tree/.doc-row/.doc-row.childと同じ構造）。子行は字下げ＋背景色を変え、
                 「このファイルがどのフォルダの中にあるか」を一目で分かるようにする。境界線はネストではなく
                 flatRows全体に対して最後の行だけborder-b-0にする（ネストしたlast-childでは
-                フォルダブロックの区切りごとに線が抜けてしまうため） */}
+                フォルダブロックの区切りごとに線が抜けてしまうため）。フォルダ名クリックで子ファイルを
+                展開/折りたたみする（ユーザーからの明示的な要望）。チェックボックスは選択専用、
+                フォルダ名部分（▶/▼ボタン）は展開専用と役割を分けている */}
             {(() => {
               type Row = { folder: DocFolder; isChild: boolean; childCount: number }
               const flatRows: Row[] = []
@@ -771,13 +814,16 @@ function DocScopeTab({
                 .forEach((f) => {
                   const children = f.item_type === 'folder' ? folders.filter((c) => c.parent_folder_id === f.id) : []
                   flatRows.push({ folder: f, isChild: false, childCount: children.length })
-                  children.forEach((c) => flatRows.push({ folder: c, isChild: true, childCount: 0 }))
+                  if (expandedFolders.has(f.id)) {
+                    children.forEach((c) => flatRows.push({ folder: c, isChild: true, childCount: 0 }))
+                  }
                 })
               return flatRows.map(({ folder: f, isChild, childCount }, idx) => {
                 const disabled = isPublic && f.is_restricted
                 const isLast = idx === flatRows.length - 1
+                const expanded = !isChild && expandedFolders.has(f.id)
                 return (
-                  <label
+                  <div
                     key={f.id}
                     className={`flex items-center gap-2 text-ink ${isLast ? '' : 'border-b border-line'} ${
                       isChild
@@ -797,26 +843,38 @@ function DocScopeTab({
                       disabled={disabled}
                       className="h-3.5 w-3.5 flex-none accent-accent-600"
                     />
-                    <span className="flex-none text-sm">
-                      {isChild ? '📄' : f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'}
-                    </span>
-                    <span>{f.drive_folder_name}</span>
-                    {!isChild && childCount > 0 && (
-                      <span className="text-[11px] text-ink-subtle">（{childCount}件登録済み）</span>
+                    {!isChild && childCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(f.id)}
+                        className="flex min-w-0 flex-1 items-center gap-2 bg-transparent text-left"
+                      >
+                        <span className="flex-none text-[10px] text-ink-subtle">{expanded ? '▼' : '▶'}</span>
+                        <span className="flex-none text-sm">📁</span>
+                        <span className="truncate">{f.drive_folder_name}</span>
+                        <span className="flex-none text-[11px] text-ink-subtle">（{childCount}件登録済み）</span>
+                      </button>
+                    ) : (
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="flex-none text-sm">
+                          {isChild ? '📄' : f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'}
+                        </span>
+                        <span className="truncate">{f.drive_folder_name}</span>
+                      </span>
                     )}
                     {f.is_restricted && (
-                      <span className="rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
+                      <span className="flex-none rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
                         🔒 限定公開
                       </span>
                     )}
-                  </label>
+                  </div>
                 )
               })
             })()}
           </div>
         )}
         <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
-          フォルダにチェックすると、そのフォルダ全体が参照範囲に含まれます。特定のファイルだけを含めたい場合は、そのフォルダの下に表示される個別ファイルだけを選んでください（フォルダ・ファイルの登録は管理コンソールから行います）。
+          フォルダ名（▶）をクリックすると中のファイルが表示されます。フォルダにチェックすると、そのフォルダ全体が参照範囲に含まれます。特定のファイルだけを含めたい場合は、展開した中の個別ファイルだけを選んでください（フォルダ・ファイルの登録は管理コンソールから行います）。
         </div>
       </div>
 
