@@ -756,68 +756,64 @@ function DocScopeTab({
             登録済みの候補がありません。管理コンソールの「ドキュメント参照範囲」タブから登録してください。
           </p>
         ) : (
-          <ul className="space-y-1 rounded-[10px] border border-line px-3.5 py-2.5">
-            {/* トップレベル項目（Driveフォルダ・アップロードした単独ファイルの両方、parent_folder_id無し） */}
-            {folders
-              .filter((f) => f.parent_folder_id === null)
-              .map((f) => {
-                const children = f.item_type === 'folder' ? folders.filter((c) => c.parent_folder_id === f.id) : []
+          <div className="overflow-hidden rounded-[10px] border border-line">
+            {/* トップレベル項目（Driveフォルダ・アップロードした単独ファイルの両方、parent_folder_id無し）の
+                直下に、そのフォルダに登録済みのファイルを並べた1本のフラットな行リストにする（画面モックアップ
+                の.doc-tree/.doc-row/.doc-row.childと同じ構造）。子行は字下げ＋背景色を変え、
+                「このファイルがどのフォルダの中にあるか」を一目で分かるようにする。境界線はネストではなく
+                flatRows全体に対して最後の行だけborder-b-0にする（ネストしたlast-childでは
+                フォルダブロックの区切りごとに線が抜けてしまうため） */}
+            {(() => {
+              type Row = { folder: DocFolder; isChild: boolean; childCount: number }
+              const flatRows: Row[] = []
+              folders
+                .filter((f) => f.parent_folder_id === null)
+                .forEach((f) => {
+                  const children = f.item_type === 'folder' ? folders.filter((c) => c.parent_folder_id === f.id) : []
+                  flatRows.push({ folder: f, isChild: false, childCount: children.length })
+                  children.forEach((c) => flatRows.push({ folder: c, isChild: true, childCount: 0 }))
+                })
+              return flatRows.map(({ folder: f, isChild, childCount }, idx) => {
                 const disabled = isPublic && f.is_restricted
+                const isLast = idx === flatRows.length - 1
                 return (
-                  <li key={f.id}>
-                    <label
-                      className={`flex items-center gap-2 py-1 text-[13px] text-ink ${disabled ? 'opacity-40' : ''}`}
-                      title={disabled ? '公開チャンネルには限定公開のフォルダを含められません' : undefined}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected.has(f.id)}
-                        onChange={() => toggle(f)}
-                        disabled={disabled}
-                        className="h-3.5 w-3.5"
-                      />
-                      <span className="text-sm">{f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'}</span>
-                      {f.drive_folder_name}
-                      {f.is_restricted && (
-                        <span className="rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
-                          🔒 限定公開
-                        </span>
-                      )}
-                    </label>
-                    {children.length > 0 && (
-                      <ul className="ml-6 border-l border-line pl-2">
-                        {children.map((c) => {
-                          const childDisabled = isPublic && c.is_restricted
-                          return (
-                            <li key={c.id}>
-                              <label
-                                className={`flex items-center gap-2 py-1 text-[13px] text-ink ${childDisabled ? 'opacity-40' : ''}`}
-                                title={childDisabled ? '公開チャンネルには限定公開のファイルを含められません' : undefined}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selected.has(c.id)}
-                                  onChange={() => toggle(c)}
-                                  disabled={childDisabled}
-                                  className="h-3.5 w-3.5"
-                                />
-                                <span className="text-sm">📄</span>
-                                {c.drive_folder_name}
-                                {c.is_restricted && (
-                                  <span className="rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
-                                    🔒 限定公開
-                                  </span>
-                                )}
-                              </label>
-                            </li>
-                          )
-                        })}
-                      </ul>
+                  <label
+                    key={f.id}
+                    className={`flex items-center gap-2 text-ink ${isLast ? '' : 'border-b border-line'} ${
+                      isChild
+                        ? 'bg-surface-subtle py-2 pl-[38px] pr-3.5 text-[12.5px]'
+                        : 'bg-surface px-3.5 py-2.5 text-[13px]'
+                    } ${disabled ? 'opacity-40' : ''}`}
+                    title={
+                      disabled
+                        ? `公開チャンネルには限定公開の${isChild ? 'ファイル' : 'フォルダ'}を含められません`
+                        : undefined
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(f.id)}
+                      onChange={() => toggle(f)}
+                      disabled={disabled}
+                      className="h-3.5 w-3.5 flex-none accent-accent-600"
+                    />
+                    <span className="flex-none text-sm">
+                      {isChild ? '📄' : f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'}
+                    </span>
+                    <span>{f.drive_folder_name}</span>
+                    {!isChild && childCount > 0 && (
+                      <span className="text-[11px] text-ink-subtle">（{childCount}件登録済み）</span>
                     )}
-                  </li>
+                    {f.is_restricted && (
+                      <span className="rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
+                        🔒 限定公開
+                      </span>
+                    )}
+                  </label>
                 )
-              })}
-          </ul>
+              })
+            })()}
+          </div>
         )}
         <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
           フォルダにチェックすると、そのフォルダ全体が参照範囲に含まれます。特定のファイルだけを含めたい場合は、そのフォルダの下に表示される個別ファイルだけを選んでください（フォルダ・ファイルの登録は管理コンソールから行います）。
