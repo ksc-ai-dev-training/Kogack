@@ -427,21 +427,38 @@ END $$;
 -- source='upload'の実ファイルはフォルダに紐づかないトップレベル項目のため、この制約を
 -- source別に緩めた形へ差し替える（DROP→再CREATEでのみ変更可能なため一旦削除する）。
 ALTER TABLE doc_folders DROP CONSTRAINT IF EXISTS doc_folders_parent_matches_type_check;
+-- アップロードのフォルダ単位グループ化（2026-09-09、ユーザーからの報告「フォルダごとD&Dしても
+-- ファイルがバラのまま管理される」への対応）にともない、_v2をさらに緩めて_v3へ差し替える。
+-- 従来はsource='upload'のfileが常にparent_folder_id IS NULL（フォルダに属せない）だったが、
+-- 「アップロードで作った仮想フォルダ（source='upload' AND item_type='folder'、ファイル実体を
+-- 持たない）の子」というケースを新たに許可する必要があるため、source='upload'のfileは
+-- parent_folder_idのNULL/NOT NULLどちらも許容する形に緩めた（親が実在しfolder種別であることは
+-- アプリ層でチェックする、create_doc_folderの既存パターンを踏襲）。
+-- _v2自体もDROPしてから作り直す（前回と同じ「旧ADD文を残すと次回起動でCheckViolationErrorになる」
+-- 教訓どおり、旧バージョンのADD文はここでは一切残さない）。
+ALTER TABLE doc_folders DROP CONSTRAINT IF EXISTS doc_folders_parent_matches_type_check_v2;
 DO $$ BEGIN
-    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_parent_matches_type_check_v2
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_parent_matches_type_check_v3
         CHECK (
             (item_type = 'folder' AND parent_folder_id IS NULL)
             OR (item_type = 'file' AND source = 'drive' AND parent_folder_id IS NOT NULL)
-            OR (item_type = 'file' AND source = 'upload' AND parent_folder_id IS NULL)
+            OR (item_type = 'file' AND source = 'upload')
         );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+-- 同じくアップロードのフォルダ単位グループ化にともない、doc_folders_source_matches_columns_checkも
+-- 「source='upload' AND item_type='folder'」（ファイル実体を持たない仮想フォルダ、drive_folder_id・
+-- storage_pathともNULL）を許容する形へ差し替える。旧バージョンのADD文はここでは残さない
+-- （同上の教訓）。
+ALTER TABLE doc_folders DROP CONSTRAINT IF EXISTS doc_folders_source_matches_columns_check;
 DO $$ BEGIN
-    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_source_matches_columns_check
+    ALTER TABLE doc_folders ADD CONSTRAINT doc_folders_source_matches_columns_check_v2
         CHECK (
             (source = 'drive' AND drive_folder_id IS NOT NULL AND storage_path IS NULL)
             OR
-            (source = 'upload' AND drive_folder_id IS NULL AND storage_path IS NOT NULL AND item_type = 'file')
+            (source = 'upload' AND drive_folder_id IS NULL AND item_type = 'folder' AND storage_path IS NULL)
+            OR
+            (source = 'upload' AND drive_folder_id IS NULL AND item_type = 'file' AND storage_path IS NOT NULL)
         );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;

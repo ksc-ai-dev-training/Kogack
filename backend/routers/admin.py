@@ -259,11 +259,50 @@ async def create_doc_folder(body: CreateDocFolderRequest, user: CurrentUser = De
 _DOC_UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20MB（A-21添付ファイルと同じ上限。F-07踏襲）
 
 
+class CreateUploadFolderRequest(BaseModel):
+    folder_name: str = Field(min_length=1, max_length=200)
+    is_restricted: bool = False
+    viewer_user_ids: list[str] = Field(default_factory=list)
+
+
+@router.post("/doc-folders/upload-folder", status_code=201)
+async def create_upload_folder(
+    body: CreateUploadFolderRequest, user: CurrentUser = Depends(require_roles("admin")),
+):
+    """新規: アップロードのフォルダ単位グループ化（2026-09-09、ユーザーからの報告「フォルダごと
+    D&Dしても中身がバラバラのファイルとしてしか管理されない」への対応）。ファイル実体を持たない
+    「仮想フォルダ」（source='upload', item_type='folder', drive_folder_id/storage_pathともNULL）
+    を1件作成する。フロントはフォルダをD&D・選択したとき、まずこのAPIでフォルダを作成してから、
+    続けてupload_doc_file（下記）へこのidをparent_folder_idとして渡しながら中の各ファイルを
+    アップロードする、という2段階フローを取る。これによりS-08・S-06の一覧表示は、既存のDrive
+    フォルダ登録（A-39、item_type='folder'→子file）と全く同じツリー構造で扱える
+    （フロント側のitem_type/parent_folder_idに基づく表示ロジックは変更不要）。"""
+    pool = get_pool()
+    try:
+        viewer_ids = {int(x) for x in body.viewer_user_ids}
+    except ValueError:
+        raise HTTPException(422, detail="viewer_user_idsは数値のIDです")
+    async with pool.acquire() as conn, conn.transaction():
+        new_id = await conn.fetchval(
+            """INSERT INTO doc_folders
+                   (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id,
+                    source, is_restricted, index_status)
+               VALUES (NULL, $1, $2, 'folder', NULL, 'upload', $3, 'not_applicable') RETURNING id""",
+            body.folder_name.strip(), user.id, body.is_restricted,
+        )
+        await _set_viewers(conn, new_id, body.is_restricted, viewer_ids)
+    row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), new_id)
+    return _doc_folder_out(row)
+
+
 @router.post("/doc-folders/upload", status_code=201)
 async def upload_doc_file(
     file: UploadFile = File(...),
     is_restricted: bool = Form(False),
     viewer_user_ids_json: str = Form("[]"),
+    # アップロードのフォルダ単位グループ化（上記create_upload_folder）で作成したフォルダのidを
+    # 指定すると、そのフォルダの子として登録される（省略時は従来どおりトップレベル項目）
+    parent_folder_id: str | None = Form(None),
     user: CurrentUser = Depends(require_roles("admin")),
 ):
     """新規: 参照ドキュメントの実ファイルアップロード（source='upload'、2026-09-09）。
@@ -278,6 +317,21 @@ async def upload_doc_file(
     except (ValueError, TypeError, json.JSONDecodeError):
         raise HTTPException(422, detail="viewer_user_ids_jsonの形式が不正です")
 
+    pool = get_pool()
+    parent_id: int | None = None
+    if parent_folder_id:
+        try:
+            parent_id = int(parent_folder_id)
+        except ValueError:
+            raise HTTPException(422, detail="parent_folder_idは数値のIDです")
+        parent = await pool.fetchrow("SELECT item_type, source FROM doc_folders WHERE id = $1", parent_id)
+        if parent is None:
+            raise HTTPException(404, detail="登録先のフォルダが見つかりません")
+        # create_upload_folderで作った仮想フォルダのみを親として許可する（Driveフォルダの子に
+        # アップロードファイルを混在させると索引化・権限モデルの前提が崩れるため）
+        if parent["item_type"] != "folder" or parent["source"] != "upload":
+            raise HTTPException(422, detail="登録先には、アップロードで作成したフォルダを指定してください")
+
     data = await file.read()
     if len(data) > _DOC_UPLOAD_MAX_BYTES:
         raise HTTPException(400, detail="ファイルサイズは20MBまでです")
@@ -288,14 +342,13 @@ async def upload_doc_file(
     ext = Path(original_name).suffix
     storage_path = doc_storage.save(data, ext=ext)
 
-    pool = get_pool()
     async with pool.acquire() as conn, conn.transaction():
         new_id = await conn.fetchval(
             """INSERT INTO doc_folders
                    (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id,
                     source, storage_path, byte_size, mime_type, is_restricted, index_status)
-               VALUES (NULL, $1, $2, 'file', NULL, 'upload', $3, $4, $5, $6, 'pending') RETURNING id""",
-            original_name, user.id, storage_path, len(data), file.content_type, is_restricted,
+               VALUES (NULL, $1, $2, 'file', $3, 'upload', $4, $5, $6, $7, 'pending') RETURNING id""",
+            original_name, user.id, parent_id, storage_path, len(data), file.content_type, is_restricted,
         )
         await _set_viewers(conn, new_id, is_restricted, viewer_ids)
     # 索引化（テキスト抽出・チャンク分割・埋め込み生成）はAI応答生成と同じfire-and-forget方式で
@@ -316,15 +369,21 @@ async def delete_doc_folder(folder_id: int, user: CurrentUser = Depends(require_
     """A-40: フォルダ（またはフォルダ内の個別ファイル）候補の削除。使用中のチャンネル（T-10）が
     あってもそのまま削除する（ON DELETE CASCADEでchannel_doc_foldersの割当も連動削除される）。
     フォルダを削除した場合、その配下に登録済みの個別ファイル候補も同じくCASCADEで連動削除される。
-    source='upload'の場合はFly Volume上の実ファイルもあわせて削除する（孤立ファイルの蓄積を防ぐ）。"""
+    source='upload'の場合はFly Volume上の実ファイルもあわせて削除する（孤立ファイルの蓄積を防ぐ）。
+    アップロードのフォルダ単位グループ化（2026-09-09）の追加にともない、フォルダ自身だけでなく
+    その子ファイル（parent_folder_id経由、DB行はCASCADEで消えるがFly Volume上の実体は個別削除が
+    必要）も削除対象に含める必要があるため、削除前にまとめて対象を集めておく。"""
     pool = get_pool()
-    deleted = await pool.fetchrow(
-        "DELETE FROM doc_folders WHERE id = $1 RETURNING id, source, storage_path", folder_id
+    targets = await pool.fetch(
+        """SELECT storage_path FROM doc_folders
+           WHERE (id = $1 OR parent_folder_id = $1) AND source = 'upload' AND storage_path IS NOT NULL""",
+        folder_id,
     )
+    deleted = await pool.fetchval("DELETE FROM doc_folders WHERE id = $1 RETURNING id", folder_id)
     if deleted is None:
         raise HTTPException(404, detail="見つかりません")
-    if deleted["source"] == "upload" and deleted["storage_path"]:
-        doc_storage.delete(deleted["storage_path"])
+    for t in targets:
+        doc_storage.delete(t["storage_path"])
 
 
 class UpdateDocFolderViewersRequest(BaseModel):

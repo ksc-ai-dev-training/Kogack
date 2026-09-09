@@ -89,12 +89,15 @@ export async function uploadAttachment(
 // uploadIcon/uploadAttachmentと同じくFormDataのため専用実装。閲覧権限モデル（Slice 2b）の
 // is_restricted/viewer_user_idsもここで一緒に送る（新規フォルダのため確認ダイアログは不要）。
 export async function uploadDocFile(
-  file: File, isRestricted: boolean, viewerUserIds: string[],
+  file: File, isRestricted: boolean, viewerUserIds: string[], parentFolderId?: string,
 ): Promise<import('../types').DocFolder> {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('is_restricted', isRestricted ? 'true' : 'false')
   formData.append('viewer_user_ids_json', JSON.stringify(viewerUserIds))
+  // フォルダ単位グループ化（2026-09-09）。createUploadDocFolderで先に作成したフォルダのidを
+  // 渡すと、そのフォルダの子として登録される
+  if (parentFolderId) formData.append('parent_folder_id', parentFolderId)
   const res = await fetch('/api/admin/doc-folders/upload', { method: 'POST', credentials: 'same-origin', body: formData })
   if (!res.ok) {
     let detail = 'アップロードに失敗しました'
@@ -107,4 +110,17 @@ export async function uploadDocFile(
     throw new ApiError(res.status, detail)
   }
   return res.json()
+}
+
+// アップロードのフォルダ単位グループ化（2026-09-09、ユーザーからの報告「フォルダごとD&Dしても
+// 中身がバラバラのファイルとしてしか管理されない」への対応）。ファイル実体を持たない「仮想フォルダ」
+// を1件作成し、続けてuploadDocFileへこのidをparentFolderIdとして渡しながら中の各ファイルを
+// アップロードする、という2段階フローで使う
+export async function createUploadDocFolder(
+  folderName: string, isRestricted: boolean, viewerUserIds: string[],
+): Promise<import('../types').DocFolder> {
+  return apiFetch('/api/admin/doc-folders/upload-folder', {
+    method: 'POST',
+    body: JSON.stringify({ folder_name: folderName, is_restricted: isRestricted, viewer_user_ids: viewerUserIds }),
+  })
 }

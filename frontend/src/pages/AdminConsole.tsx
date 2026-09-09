@@ -6,7 +6,7 @@ import { useDocFolders } from '../hooks/useDocFolders'
 import { useUsageStats } from '../hooks/useUsageStats'
 import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useMe } from '../hooks/useMe'
-import { apiFetch, ApiError, uploadDocFile } from '../lib/api'
+import { apiFetch, ApiError, uploadDocFile, createUploadDocFolder } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
@@ -337,16 +337,31 @@ function ViewerPicker({
   )
 }
 
+// フォルダごとD&D/選択したファイルの1件（2026-09-09、フォルダ単位グループ化）。folderNameは
+// トップレベルのフォルダ名（フォルダに属さない単独ファイルの場合はnull）、displayNameはそのフォルダ
+// 直下からの相対パス（サブフォルダがあれば「サブフォルダ名/ファイル名」、無ければfile.nameと同じ）。
+// サブフォルダは全てフラット化して親フォルダの直下の子として扱う方針（ユーザーとの合意）のため、
+// displayNameを実際のアップロードファイル名として使うことでサブフォルダ由来の同名ファイルが
+// 区別できるようにする
+export interface UploadEntry {
+  file: File
+  folderName: string | null
+  displayName: string
+}
+
 // 参照ドキュメントの実ファイルアップロード（Slice 3、2026-09-09）向けのドロップゾーン。
 // ユーザーからの明示的な要望「エクスプローラーからD&D、またはファイルを選択、という形にしたい」
 // を受けて、素の<input type="file">から差し替えた。クリックでもファイル選択ダイアログを
 // 開けるよう、非表示のinputへのrefをクリックで発火させる。
 // 続けて「フォルダごと入れたら中のファイルは全部AIが読める？」との質問を受け、複数ファイル・
-// フォルダ（サブフォルダを含めて再帰的に）の選択にも対応させた（2026-09-09）。バックエンドの
-// アップロードAPI（A-39相当の新規エンドポイント）は1ファイルずつしか受け付けないため、複数選択時は
-// 呼び出し元（DocFoldersTab.add）がファイルごとに順番に呼び出す想定で、このコンポーネントは
+// フォルダ（サブフォルダを含めて再帰的に）の選択にも対応させた（2026-09-09）。
+// **さらに「フォルダごとD&Dしても中身がバラバラのファイルとしてしか管理されない」との報告を受け、
+// 選択したファイルがどのフォルダに属していたかという情報（UploadEntry.folderName）を保持する
+// ように変更した（2026-09-09）**。バックエンドのアップロードAPIは1ファイルずつしか受け付けない
+// ため、複数選択時は呼び出し元（DocFoldersTab.add）がfolderNameでグループ化してから、フォルダ
+// ごとにcreateUploadDocFolder→uploadDocFile(parent_folder_id付き)の順で呼び出す想定で、この
 // 「選択されたFileの配列」を親へ渡すところまでを担当する。
-function FileDropzone({ files, onChange }: { files: File[]; onChange: (files: File[]) => void }) {
+function FileDropzone({ entries, onChange }: { entries: UploadEntry[]; onChange: (entries: UploadEntry[]) => void }) {
   const [dragOver, setDragOver] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -377,16 +392,18 @@ function FileDropzone({ files, onChange }: { files: File[]; onChange: (files: Fi
       readBatch()
     })
 
-  const walkEntry = async (entry: FileSystemEntry): Promise<File[]> => {
+  // フォルダの中身を再帰的に集める。prefixはそのフォルダ自身の名前を含まない、直下からの相対パス
+  // （呼び出し元でフォルダ自身の名前をfolderNameとして別管理するため、ここでは重複させない）
+  const walkEntry = async (entry: FileSystemEntry, prefix = ''): Promise<{ file: File; relativePath: string }[]> => {
     if (entry.isFile) {
       return new Promise((resolve, reject) => {
-        ;(entry as FileSystemFileEntry).file((f) => resolve([f]), reject)
+        ;(entry as FileSystemFileEntry).file((f) => resolve([{ file: f, relativePath: prefix + entry.name }]), reject)
       })
     }
     if (entry.isDirectory) {
       const reader = (entry as FileSystemDirectoryEntry).createReader()
       const children = await readAllEntries(reader)
-      const nested = await Promise.all(children.map(walkEntry))
+      const nested = await Promise.all(children.map((c) => walkEntry(c, `${prefix}${entry.name}/`)))
       return nested.flat()
     }
     return []
@@ -396,16 +413,56 @@ function FileDropzone({ files, onChange }: { files: File[]; onChange: (files: Fi
     e.preventDefault()
     setDragOver(false)
     const items = e.dataTransfer.items
+    const results: UploadEntry[] = []
     if (items && items.length > 0 && typeof items[0]?.webkitGetAsEntry === 'function') {
-      const entries = Array.from(items)
+      const topEntries = Array.from(items)
         .map((item) => item.webkitGetAsEntry())
         .filter((entry): entry is FileSystemEntry => entry !== null)
-      const nested = await Promise.all(entries.map(walkEntry))
-      onChange(nested.flat())
+      for (const entry of topEntries) {
+        if (entry.isDirectory) {
+          // ドロップされたフォルダ自身の名前をfolderNameとし、中身（サブフォルダも含めて
+          // フラット化）を子として展開する（ユーザーとの合意どおり、サブフォルダの階層構造は
+          // 持たせずdisplayNameに相対パスとして残す）
+          const reader = (entry as FileSystemDirectoryEntry).createReader()
+          const children = await readAllEntries(reader)
+          const nested = await Promise.all(children.map((c) => walkEntry(c)))
+          nested.flat().forEach(({ file, relativePath }) =>
+            results.push({ file, folderName: entry.name, displayName: relativePath }),
+          )
+        } else {
+          const files = await walkEntry(entry)
+          files.forEach(({ file }) => results.push({ file, folderName: null, displayName: file.name }))
+        }
+      }
     } else {
-      onChange(Array.from(e.dataTransfer.files ?? []))
+      Array.from(e.dataTransfer.files ?? []).forEach((file) =>
+        results.push({ file, folderName: null, displayName: file.name }),
+      )
     }
+    onChange(results)
   }
+
+  // webkitdirectoryで選択したファイルはwebkitRelativePath（例: "資料/サブ/a.pdf"）を持つ。
+  // 先頭セグメントをフォルダ名、残りをdisplayName（サブフォルダの相対パス込み）として使う
+  const entriesFromFileList = (fileList: FileList | null): UploadEntry[] =>
+    Array.from(fileList ?? []).map((file) => {
+      const relPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+      if (!relPath) return { file, folderName: null, displayName: file.name }
+      const parts = relPath.split('/')
+      return { file, folderName: parts[0], displayName: parts.slice(1).join('/') || file.name }
+    })
+
+  const folderGroups = new Map<string, UploadEntry[]>()
+  const standalone: UploadEntry[] = []
+  entries.forEach((e) => {
+    if (e.folderName) {
+      const list = folderGroups.get(e.folderName) ?? []
+      list.push(e)
+      folderGroups.set(e.folderName, list)
+    } else {
+      standalone.push(e)
+    }
+  })
 
   return (
     <div
@@ -429,7 +486,7 @@ function FileDropzone({ files, onChange }: { files: File[]; onChange: (files: Fi
         ref={inputRef}
         type="file"
         multiple
-        onChange={(e) => onChange(Array.from(e.target.files ?? []))}
+        onChange={(e) => onChange(entriesFromFileList(e.target.files))}
         className="hidden"
       />
       {/* webkitdirectoryは非標準だが主要ブラウザはいずれも対応。クリックでフォルダごと選ぶための
@@ -439,25 +496,38 @@ function FileDropzone({ files, onChange }: { files: File[]; onChange: (files: Fi
         type="file"
         multiple
         {...{ webkitdirectory: '' }}
-        onChange={(e) => onChange(Array.from(e.target.files ?? []))}
+        onChange={(e) => onChange(entriesFromFileList(e.target.files))}
         className="hidden"
       />
-      {files.length > 0 ? (
-        <div className="text-[13px] text-ink">
-          {files.length === 1 ? (
-            <div className="font-bold">📎 {files[0].name}</div>
-          ) : (
-            <div className="font-bold">📎 {files.length}件のファイルを選択中</div>
+      {entries.length > 0 ? (
+        <div className="text-left text-[13px] text-ink">
+          {[...folderGroups.entries()].map(([name, list]) => (
+            <div key={name} className="mb-1">
+              <div className="font-bold">📁 {name}（{list.length}件のファイルを含むフォルダ）</div>
+              <div className="mt-0.5 max-h-[70px] overflow-y-auto text-[11px] text-ink-subtle">
+                {list
+                  .slice(0, 8)
+                  .map((e) => `${e.displayName}（${sizeLabel(e.file.size)}）`)
+                  .join('、') + (list.length > 8 ? ` 他${list.length - 8}件` : '')}
+              </div>
+            </div>
+          ))}
+          {standalone.length > 0 && (
+            <div>
+              <div className="font-bold">
+                {standalone.length === 1 ? `📎 ${standalone[0].file.name}` : `📎 ${standalone.length}件のファイルを選択中`}
+              </div>
+              <div className="mt-0.5 max-h-[70px] overflow-y-auto text-[11px] text-ink-subtle">
+                {standalone.length > 1
+                  ? standalone
+                      .slice(0, 8)
+                      .map((e) => `${e.displayName}（${sizeLabel(e.file.size)}）`)
+                      .join('、') + (standalone.length > 8 ? ` 他${standalone.length - 8}件` : '')
+                  : sizeLabel(standalone[0].file.size)}
+              </div>
+            </div>
           )}
-          <div className="mt-1 max-h-[70px] overflow-y-auto text-[11px] text-ink-subtle">
-            {files.length > 1 &&
-              files
-                .slice(0, 8)
-                .map((f) => `${f.name}（${sizeLabel(f.size)}）`)
-                .join('、') + (files.length > 8 ? ` 他${files.length - 8}件` : '')}
-            {files.length === 1 && sizeLabel(files[0].size)}
-          </div>
-          <div className="mt-1 text-[11px] text-ink-subtle">クリックまたはドラッグ＆ドロップで変更</div>
+          <div className="mt-1.5 text-center text-[11px] text-ink-subtle">クリックまたはドラッグ＆ドロップで変更</div>
         </div>
       ) : (
         <div className="text-[12.5px] text-ink-subtle">
@@ -467,18 +537,22 @@ function FileDropzone({ files, onChange }: { files: File[]; onChange: (files: Fi
             または<span className="font-semibold text-accent-700">クリックしてファイルを選択</span>
             （複数選択可）
           </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              folderInputRef.current?.click()
-            }}
-            className="mt-1.5 bg-transparent text-[11px] font-semibold text-accent-700 hover:underline"
-          >
-            📁 フォルダごと選択（中のファイルをまとめて）
-          </button>
         </div>
       )}
+      {/* フォルダごと選択ボタンは常時表示にした（従来は未選択時のみ表示しており見落とされやすかった
+          というユーザーからの指摘を受けての変更。ブラウザ標準のファイル選択ダイアログはファイル
+          複数選択とフォルダ選択がOSレベルで別モードのため、通常のクリック選択ではフォルダ自体を
+          選べない制約があり、この専用ボタンが唯一の代替手段になる） */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          folderInputRef.current?.click()
+        }}
+        className="mt-1.5 bg-transparent text-[11px] font-semibold text-accent-700 hover:underline"
+      >
+        📁 フォルダごと選択（中のファイルをまとめてフォルダ単位で登録）
+      </button>
     </div>
   )
 }
@@ -496,8 +570,9 @@ function DocFoldersTab() {
   // 0件であることを確認したうえで撤去した）。バックエンド（A-39、source='drive'）自体は
   // 削除していない。Drive連携が実際に機能するようになった時点で、このUIだけ復活させる想定。
   const [saving, setSaving] = useState(false)
-  // 複数ファイル・フォルダごとの選択に対応（2026-09-09、ユーザーからの明示的な要望）
-  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  // 複数ファイル・フォルダごとの選択に対応（2026-09-09、ユーザーからの明示的な要望）。
+  // フォルダ単位グループ化（同日、追加の要望）にともないFile[]からUploadEntry[]へ変更した
+  const [uploadEntries, setUploadEntries] = useState<UploadEntry[]>([])
   // 閲覧権限モデル（Slice 2b、2026-09-09）。新規登録時のみここで指定する（既存フォルダの
   // 閲覧者編集は一覧の「閲覧権限」ボタン→EditViewersModalで行う）
   const [isRestricted, setIsRestricted] = useState(false)
@@ -539,7 +614,7 @@ function DocFoldersTab() {
   }
 
   const add = async () => {
-    if (uploadFiles.length === 0) {
+    if (uploadEntries.length === 0) {
       toast('アップロードするファイルを選んでください', 'error')
       return
     }
@@ -547,18 +622,60 @@ function DocFoldersTab() {
     // バックエンドは1ファイルずつしか受け付けないため（services/doc_storage.py参照）、複数選択・
     // フォルダ選択時はここで順番に呼び出す。1件失敗しても残りは続行し（限定公開設定は全件に共通で
     // 適用する）、最後に成功・失敗件数をまとめて報告する。並列にしないのは、フォルダごと選択した
-    // 場合に一度に大量のアップロードリクエストが飛ぶのを避けるため
+    // 場合に一度に大量のアップロードリクエストが飛ぶのを避けるため。
+    // フォルダ単位グループ化（2026-09-09）: folderNameでグループ化し、フォルダに属するエントリは
+    // 先にcreateUploadDocFolderでフォルダを1件作成してから、そのidをparent_folder_idとして
+    // 各ファイルをアップロードする。フォルダ作成自体が失敗した場合はそのグループ全体を失敗扱いにする
+    const folderGroups = new Map<string, UploadEntry[]>()
+    const standalone: UploadEntry[] = []
+    for (const entry of uploadEntries) {
+      if (entry.folderName) {
+        const list = folderGroups.get(entry.folderName) ?? []
+        list.push(entry)
+        folderGroups.set(entry.folderName, list)
+      } else {
+        standalone.push(entry)
+      }
+    }
+
     let succeeded = 0
     let failed = 0
-    for (const file of uploadFiles) {
+    const uploadOne = async (entry: UploadEntry, parentFolderId?: string) => {
+      // サブフォルダに由来するファイルは、displayNameに相対パス（例:「サブ/a.pdf」）を持たせて
+      // 同名ファイルの混同を避ける。file.nameから変わっている場合のみ、その名前で送信用ファイルを
+      // 作り直す（Fileオブジェクトのnameは読み取り専用のため、new File()で作り直す必要がある）
+      const uploadFile =
+        entry.displayName !== entry.file.name
+          ? new File([entry.file], entry.displayName, { type: entry.file.type })
+          : entry.file
+      await uploadDocFile(uploadFile, isRestricted, [...viewerIds], parentFolderId)
+    }
+
+    for (const [folderName, list] of folderGroups) {
       try {
-        await uploadDocFile(file, isRestricted, [...viewerIds])
+        const folder = await createUploadDocFolder(folderName, isRestricted, [...viewerIds])
+        for (const entry of list) {
+          try {
+            await uploadOne(entry, folder.id)
+            succeeded++
+          } catch {
+            failed++
+          }
+        }
+      } catch {
+        failed += list.length
+      }
+    }
+    for (const entry of standalone) {
+      try {
+        await uploadOne(entry)
         succeeded++
       } catch {
         failed++
       }
     }
-    setUploadFiles([])
+
+    setUploadEntries([])
     setIsRestricted(false)
     setViewerIds(new Set())
     await mutate()
@@ -730,7 +847,7 @@ function DocFoldersTab() {
           </div>
           <div className="mb-3.5">
             <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">ファイル</label>
-            <FileDropzone files={uploadFiles} onChange={setUploadFiles} />
+            <FileDropzone entries={uploadEntries} onChange={setUploadEntries} />
             <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
               このファイル自体をKogackのサーバーへ直接保存し、自動でAI検索できる状態にします（20MBまで）。表示名はファイル名がそのまま使われます。
             </div>
