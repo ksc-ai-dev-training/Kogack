@@ -65,8 +65,8 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
 
 
 class CreateChannelRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=256)
-    topic: str | None = None
+    name: str = Field(min_length=1, max_length=80)
+    topic: str | None = Field(default=None, max_length=500)
     is_public: bool = True
 
 
@@ -135,8 +135,8 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
 
 
 class UpdateChannelRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=256)
-    topic: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    topic: str | None = Field(default=None, max_length=500)
 
 
 @router.put("/{channel_id}")

@@ -105,7 +105,7 @@ async def update_general(
 
 
 class UpdateCharacterRequest(BaseModel):
-    persona_name: str = Field(min_length=1, max_length=100)
+    persona_name: str = Field(min_length=1, max_length=50)
     persona_icon_url: str | None = None
     persona_tone: str | None = Field(default=None, max_length=500)
 

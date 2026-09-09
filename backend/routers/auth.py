@@ -106,6 +106,11 @@ async def callback(
         return _login_error_redirect("domain_not_allowed")
 
     name = claims.get("name") or email.split("@")[0]
+    # ユーザー名の上限は21文字（users.UpdateMeRequestと同じ、ユーザーからの明示的な要望による制限）。
+    # Google側のプロフィール名は本人が入力したものではなく21文字を超える可能性があるため、
+    # 超過分は切り詰めて保存する（本人がA-62で変更する際に必ず21文字以内を満たせるようにするため）
+    if len(name) > 21:
+        name = name[:21]
     picture = claims.get("picture")
 
     # 4. T-01 users をメールアドレスで検索。未登録なら role='member' で自動登録（初回ログイン）

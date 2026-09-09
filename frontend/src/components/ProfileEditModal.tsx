@@ -136,7 +136,7 @@ export default function ProfileEditModal({ me, onClose }: { me: Me; onClose: () 
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              maxLength={100}
+              maxLength={21}
               className="w-full rounded-lg border-[1.5px] border-line-strong px-3 py-2 text-[13.5px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
             />
             <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">

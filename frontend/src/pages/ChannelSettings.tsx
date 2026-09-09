@@ -130,7 +130,7 @@ function ChannelInfoForm({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          maxLength={256}
+          maxLength={80}
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
       </div>
@@ -141,6 +141,7 @@ function ChannelInfoForm({
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           placeholder="このチャンネルの目的を入力"
+          maxLength={500}
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
       </div>
@@ -538,7 +539,7 @@ function CharacterTab({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          maxLength={100}
+          maxLength={50}
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
       </div>
@@ -1610,7 +1611,7 @@ function RecurringPostFormFields({
           value={displayName}
           onChange={(e) => onDisplayNameChange(e.target.value)}
           placeholder="例: お知らせBot"
-          maxLength={100}
+          maxLength={50}
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
       </div>
@@ -2049,7 +2050,7 @@ function TriggerRuleFormFields({
           value={displayName}
           onChange={(e) => onDisplayNameChange(e.target.value)}
           placeholder="例: ヘルプ案内Bot"
-          maxLength={100}
+          maxLength={50}
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
       </div>

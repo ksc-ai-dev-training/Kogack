@@ -144,7 +144,7 @@ export default function JoinChannelModal({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="例: 経理連絡"
                 className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle"
-                maxLength={256}
+                maxLength={80}
               />
             </div>
             <div className="mb-4">
@@ -154,6 +154,7 @@ export default function JoinChannelModal({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setTopic(e.target.value)}
                 placeholder="このチャンネルの目的を入力"
                 className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle"
+                maxLength={500}
               />
             </div>
             <div className="mb-4">

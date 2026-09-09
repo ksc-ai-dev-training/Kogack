@@ -39,7 +39,7 @@ class CreateTriggerRuleRequest(BaseModel):
     trigger_type: str = Field(pattern="^(keyword|emoji)$")
     trigger_value: str = Field(min_length=1, max_length=100)
     action_body: str = Field(min_length=1, max_length=4000)
-    bot_display_name: str | None = Field(default=None, max_length=100)
+    bot_display_name: str | None = Field(default=None, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
 
@@ -67,7 +67,7 @@ class UpdateTriggerRuleRequest(BaseModel):
     trigger_type: str | None = Field(default=None, pattern="^(keyword|emoji)$")
     trigger_value: str | None = Field(default=None, min_length=1, max_length=100)
     action_body: str | None = Field(default=None, min_length=1, max_length=4000)
-    bot_display_name: str | None = Field(default=None, min_length=1, max_length=100)
+    bot_display_name: str | None = Field(default=None, min_length=1, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
     is_active: bool | None = None

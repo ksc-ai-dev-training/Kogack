@@ -31,7 +31,7 @@ async def search_users(q: str = "", limit: int = 20, user: CurrentUser = Depends
 
 
 class UpdateMeRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
+    name: str | None = Field(default=None, min_length=1, max_length=21)
     picture_url: str | None = None
 
 

@@ -40,7 +40,7 @@ async def list_recurring_posts(channel_id: int, user: CurrentUser = Depends(requ
 
 class CreateRecurringPostRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
-    bot_display_name: str | None = Field(default=None, max_length=100)
+    bot_display_name: str | None = Field(default=None, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
     frequency: str = Field(pattern="^(once|daily|weekly|monthly)$")
@@ -78,7 +78,7 @@ async def create_recurring_post(
 
 class UpdateRecurringPostRequest(BaseModel):
     body: str | None = Field(default=None, min_length=1, max_length=4000)
-    bot_display_name: str | None = Field(default=None, min_length=1, max_length=100)
+    bot_display_name: str | None = Field(default=None, min_length=1, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
     frequency: str | None = Field(default=None, pattern="^(once|daily|weekly|monthly)$")
