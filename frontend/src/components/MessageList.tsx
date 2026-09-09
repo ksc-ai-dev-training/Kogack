@@ -48,11 +48,38 @@ function UnreadDivider() {
   )
 }
 
+// URLの自動リンク化（ユーザーからの明示的な要望「URLを送ったらクリックできるようになり、実際に
+// そのサイトに飛べるようにしたい」）。http(s)://から始まり、URLとして妥当な文字（RFC3986の
+// unreserved/reserved文字相当）が続く範囲を1つのURLとして検出する。日本語文字はこの文字クラスに
+// 含まれないため、「詳細はhttps://example.comを見てください」のような文中URLでも「を見てください」
+// まで巻き込むことはない。ただし文字クラス自体には「)」「.」「,」等の区切り文字も含むため、
+// 「(https://example.com)。」のように文の区切りとして使われた記号を誤って含めてしまうことがあり、
+// これを避けるため末尾の句読点的な記号は検出後に切り落とす（開き括弧との対応までは見ない簡易版、
+// Slack等の実装と同程度の精度）
+const URL_REGEX = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/g
+const URL_TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/
+
+function findUrlMatches(text: string): { start: number; end: number; url: string }[] {
+  const results: { start: number; end: number; url: string }[] = []
+  for (const m of text.matchAll(URL_REGEX)) {
+    let url = m[0]
+    let end = (m.index ?? 0) + url.length
+    const trailing = url.match(URL_TRAILING_PUNCTUATION)
+    if (trailing) {
+      url = url.slice(0, url.length - trailing[0].length)
+      end -= trailing[0].length
+    }
+    if (url.length > 0) results.push({ start: m.index ?? 0, end, url })
+  }
+  return results
+}
+
 // F-41 @メンションの描画。本文中の「@display_name_snapshot」を検出し、target_user_idを
 // 現在のチャンネル参加者一覧で解決した最新の表示名でハイライト表示する（05-1_詳細設計書_DB設計.html
 // 3.7節「表示時はtarget_user_idを解決して現在の表示名・アイコンを描画」）。A-62プロフィール編集の
 // 実装（F-39）により、対象者が後から表示名を変更した場合はdisplay_name_snapshotと現在名が食い違う
 // ことがあり、この場合も現在名の方で描画し直す（本文中の静的テキストは検索の起点にのみ使う）。
+// あわせてURLの自動リンク化（上記）もここで統合する。
 export function renderMessageBody(
   body: string,
   blocks: Message['blocks'],
@@ -64,12 +91,17 @@ export function renderMessageBody(
       b.block_type === 'mention',
   )
 
-  const matches: { start: number; end: number; label: string }[] = []
+  type Match =
+    | { start: number; end: number; kind: 'mention'; label: string }
+    | { start: number; end: number; kind: 'url'; url: string }
+  const matches: Match[] = []
   for (const block of mentions) {
     const current = members?.find((m) => m.id === block.payload.target_user_id)?.name
     const label = `@${current ?? block.payload.display_name_snapshot}`
     const idx = body.indexOf(`@${block.payload.display_name_snapshot}`)
-    if (idx !== -1) matches.push({ start: idx, end: idx + block.payload.display_name_snapshot.length + 1, label })
+    if (idx !== -1) {
+      matches.push({ start: idx, end: idx + block.payload.display_name_snapshot.length + 1, kind: 'mention', label })
+    }
   }
   // AIメンションはF-41と異なりID参照化されずmessage_blocksに残らない（基本設計書5.22節の設計判断、
   // services/ai_agent.detect_mentionと同じ本文中「@ペルソナ名」の文字列一致）ため、blocksとは別に
@@ -78,9 +110,12 @@ export function renderMessageBody(
     const needle = `@${aiPersonaName}`
     let idx = body.indexOf(needle)
     while (idx !== -1) {
-      matches.push({ start: idx, end: idx + needle.length, label: needle })
+      matches.push({ start: idx, end: idx + needle.length, kind: 'mention', label: needle })
       idx = body.indexOf(needle, idx + needle.length)
     }
+  }
+  for (const u of findUrlMatches(body)) {
+    matches.push({ start: u.start, end: u.end, kind: 'url', url: u.url })
   }
   if (matches.length === 0) return body
   matches.sort((a, b) => a.start - b.start)
@@ -90,11 +125,25 @@ export function renderMessageBody(
   matches.forEach((m, i) => {
     if (m.start < cursor) return
     if (m.start > cursor) nodes.push(body.slice(cursor, m.start))
-    nodes.push(
-      <span key={i} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
-        {m.label}
-      </span>,
-    )
+    if (m.kind === 'url') {
+      nodes.push(
+        <a
+          key={i}
+          href={m.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-all text-accent-700 underline hover:text-accent-800"
+        >
+          {m.url}
+        </a>,
+      )
+    } else {
+      nodes.push(
+        <span key={i} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
+          {m.label}
+        </span>,
+      )
+    }
     cursor = m.end
   })
   if (cursor < body.length) nodes.push(body.slice(cursor))
