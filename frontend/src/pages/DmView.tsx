@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import { useDms } from '../hooks/useDms'
 import { useMessages } from '../hooks/useMessages'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
@@ -63,8 +63,28 @@ export default function DmView() {
   }, [dmId, messages.length])
 
   if (!dmsLoading && !dm) {
-    // 総論5.9節: 参加していないDMへの直接アクセスはワークスペースへ無言で戻す
-    return null
+    // ChannelView.tsxのS-03版（2026-09-08・2026-09-10）と同じ考え方だが、DMには非公開チャンネル
+    // のような単体の詳細取得API（A-06相当）が無く、A-16（自分が参加しているDM一覧）から該当DMを
+    // 引けない場合、それが「そもそも存在しないID」なのか「存在するが自分が参加者ではない」のかを
+    // フロント側で区別する情報が無い（バックエンドも一覧に含めない、という形でしか表現していない）。
+    // 従来は無言でこの画面が空白のままだったが、ユーザーからの明示的な要望「自分が参加していない
+    // DM画面のURLを直接打ち込んだとき用にメッセージを表示させたい」を受け、チャンネル版と同じ
+    // 「既に存在しないか、参加権限がありません」という両論併記の考え方を踏襲した明示的な
+    // メッセージに差し替えた（無言リダイレクトにはしない）
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2.5 px-6 text-center">
+        <div className="text-[15px] font-bold text-ink">このダイレクトメッセージは表示できません</div>
+        <p className="max-w-[420px] text-[12.5px] leading-relaxed text-ink-subtle">
+          既に存在しないか、参加する権限がありません。心当たりがある場合は送信元にご確認ください。
+        </p>
+        <Link
+          to="/"
+          className="mt-1.5 rounded-lg border border-line-strong px-3.5 py-1.5 text-[12.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+        >
+          ← ワークスペースに戻る
+        </Link>
+      </div>
+    )
   }
 
   // 自分専用DM（F-05、is_self=true）はmembersに自分自身が1件だけ入るが、単に自分の氏名を
