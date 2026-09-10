@@ -8,6 +8,18 @@ const MIN_ROWS = 2
 const MAX_ROWS = 10
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024 // 20MB（F-07、05-1_詳細設計書_DB設計.html 3.6節）
 
+// 絵文字入力ボタン（ユーザーからの明示的な要望「Slackのように絵文字入力ボタンをメンションの
+// 横につけたい」）。フルの絵文字ピッカーライブラリは導入せず、業務チャットでよく使う絵文字を
+// 一覧から選んで挿入するだけの簡易版にした（検索・カテゴリ分け・スキントーン切替は対象外）。
+const EMOJI_LIST = [
+  '😀', '😄', '😅', '😂', '🙂', '😉', '😊', '😍', '🥰', '😘',
+  '😎', '🤔', '😮', '😢', '😭', '😡', '🥳', '😴', '🤗', '🙄',
+  '👍', '👎', '👏', '🙏', '💪', '🙌', '✌️', '🤝', '👋', '✍️',
+  '❤️', '💛', '💚', '💙', '💜', '🧡', '🖤', '💔', '💯', '✨',
+  '✅', '❌', '⚠️', '❓', '❗', '🔥', '🎉', '🎊', '🎁', '🚀',
+  '📌', '📅', '⏰', '💡', '🙇', '🙇‍♂️', '🙇‍♀️', '😇', '👀', '🤞',
+]
+
 export interface MentionCandidate {
   id: string
   name: string
@@ -114,6 +126,7 @@ export default function Composer({
   const [uploading, setUploading] = useState(false)
   const [pickerQuery, setPickerQuery] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
+  const [emojiOpen, setEmojiOpen] = useState(false)
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
   const [scheduleTime, setScheduleTime] = useState('')
@@ -180,8 +193,35 @@ export default function Composer({
       setScheduleDate((prev) => prev || d.date)
       setScheduleTime((prev) => prev || d.time)
       setPickerQuery(null)
+      setEmojiOpen(false)
     }
     setScheduleOpen((v) => !v)
+  }
+
+  // 絵文字入力（ユーザーからの明示的な要望「Slackのように絵文字入力ボタンをメンションの横に
+  // つけたい」）。カーソル位置にそのまま絵文字を挿入する（@メンションのようなトリガー文字・
+  // 候補絞り込みは不要な単純な挿入のみ）。ボタンクリック自体でフォーカスがボタンへ移ってしまうと
+  // （ブラウザの既定挙動）、textareaのonKeyDownに書いたEscapeでの閉じる処理が効かなくなるため、
+  // 開いたあとフォーカスをtextareaへ戻す（Playwrightでの実機検証で実際にEscapeが効かない不具合を
+  // 発見し、この対処で解消した）
+  const toggleEmojiPopover = () => {
+    if (!emojiOpen) {
+      setPickerQuery(null)
+      setScheduleOpen(false)
+    }
+    setEmojiOpen((v) => !v)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+  const insertEmoji = (emoji: string) => {
+    const el = textareaRef.current
+    const cursor = el?.selectionStart ?? body.length
+    setBody(body.slice(0, cursor) + emoji + body.slice(cursor))
+    setEmojiOpen(false)
+    requestAnimationFrame(() => {
+      const pos = cursor + emoji.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
   }
 
   // 本文から削除されたメンションは除外する（選択後にテキストを手で消した場合の整合性維持。
@@ -360,6 +400,7 @@ export default function Composer({
     setPickerQuery('')
     setActiveIndex(0)
     setScheduleOpen(false)
+    setEmojiOpen(false)
     requestAnimationFrame(() => {
       const pos = cursor + insertText.length
       el?.focus()
@@ -384,6 +425,10 @@ export default function Composer({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (emojiOpen && e.key === 'Escape') {
+      setEmojiOpen(false)
+      return
+    }
     if (pickerOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -488,6 +533,23 @@ export default function Composer({
                 </span>
               )}
               <span className="truncate text-[12.5px] font-bold text-ink">{c.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {emojiOpen && (
+        <div className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[220px] w-[264px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+          {EMOJI_LIST.map((emoji, i) => (
+            <button
+              key={`${emoji}-${i}`}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                insertEmoji(emoji)
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-[16px] hover:bg-surface-muted"
+            >
+              {emoji}
             </button>
           ))}
         </div>
@@ -661,6 +723,21 @@ export default function Composer({
               d="M13.5 7.5l-5 5a2.1 2.1 0 0 0 3 3l5.5-5.5a3.5 3.5 0 0 0-5-5L6.5 9.5a4.9 4.9 0 0 0 7 7"
               stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
             />
+          </svg>
+        </button>
+        <button
+          type="button"
+          title="絵文字を挿入"
+          onClick={toggleEmojiPopover}
+          className={`flex h-7 w-7 items-center justify-center rounded-md ${
+            emojiOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle hover:bg-surface-muted'
+          }`}
+        >
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="7.2" stroke="currentColor" strokeWidth="1.5" />
+            <circle cx="7.3" cy="8.3" r="0.9" fill="currentColor" />
+            <circle cx="12.7" cy="8.3" r="0.9" fill="currentColor" />
+            <path d="M6.8 12a4 4 0 0 0 6.4 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </button>
         {mentionCandidates && (
