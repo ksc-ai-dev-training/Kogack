@@ -299,7 +299,11 @@ export default function Composer({
   }
 
   // 箇条書きボタンは選択範囲を含む行全体を対象に行頭へ「- 」を付ける（既に全行付いていれば外す
-  // トグル動作）。空行はそのまま維持する
+  // トグル動作）。複数行の選択に含まれる空行（段落の区切り）はそのまま維持するが、対象が
+  // その空行1行だけ（何も入力していない行にカーソルがある状態でボタンを押した場合）は
+  // 「- 」を付ける（ユーザーからの要望「何も入力されていない行で箇条書きボタンを押しても
+  // 箇条書きのマークが出てくるようにしたい」）。allBulletedは空行を除いた行だけで判定する
+  // （空行しか無い1行だけの対象を「既に箇条書き済み」と誤判定して何もしなくなるのを防ぐため）
   const insertBulletList = () => {
     const el = textareaRef.current
     if (!el) return
@@ -309,11 +313,11 @@ export default function Composer({
     const nextNewline = body.indexOf('\n', end)
     const lineEnd = nextNewline === -1 ? body.length : nextNewline
     const lines = body.slice(lineStart, lineEnd).split('\n')
-    const allBulleted = lines.every((l) => l.trim() === '' || l.startsWith('- '))
+    const nonBlankLines = lines.filter((l) => l.trim() !== '')
+    const allBulleted = nonBlankLines.length > 0 && nonBlankLines.every((l) => l.startsWith('- '))
     const nextLines = lines.map((l) => {
-      if (l.trim() === '') return l
-      if (allBulleted) return l.replace(/^- /, '')
-      return l.startsWith('- ') ? l : `- ${l}`
+      if (l.trim() === '') return lines.length === 1 ? '- ' : l
+      return allBulleted ? l.replace(/^- /, '') : (l.startsWith('- ') ? l : `- ${l}`)
     })
     const nextBlock = nextLines.join('\n')
     setBody(body.slice(0, lineStart) + nextBlock + body.slice(lineEnd))
