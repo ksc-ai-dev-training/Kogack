@@ -492,6 +492,49 @@ export default function Composer({
           </div>
         </div>
       )}
+      {/* 書式ツールバー（太字・取り消し線・コード・箇条書き）は入力欄の「上」、ファイル添付・
+          メンションは入力欄の「下」に配置する（ユーザーからの明示的な要望「役割が違うことを
+          わかりやすくしたい」）。上段＝本文の見た目を変える書式、下段＝本文とは別に本文に
+          付随させるもの（添付ファイル・宛先の指定）、という役割の違いを配置で示す */}
+      <div className="mb-1.5 flex items-center gap-0.5">
+        <button
+          type="button"
+          title="太字（**で囲みます）"
+          onClick={() => wrapSelection('**', '**')}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          title="取り消し線（~~で囲みます）"
+          onClick={() => wrapSelection('~~', '~~')}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"
+        >
+          S
+        </button>
+        <button
+          type="button"
+          title="コード（複数行を選択するとコードブロックになります）"
+          onClick={wrapCode}
+          className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
+        >
+          {'</>'}
+        </button>
+        <button
+          type="button"
+          title="箇条書き（行頭に「- 」を付けます）"
+          onClick={insertBulletList}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+        >
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="4" cy="6" r="1.3" fill="currentColor" />
+            <circle cx="4" cy="10" r="1.3" fill="currentColor" />
+            <circle cx="4" cy="14" r="1.3" fill="currentColor" />
+            <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
       <div className="relative">
         <div
           ref={highlightRef}
@@ -563,43 +606,6 @@ export default function Composer({
               d="M13.5 7.5l-5 5a2.1 2.1 0 0 0 3 3l5.5-5.5a3.5 3.5 0 0 0-5-5L6.5 9.5a4.9 4.9 0 0 0 7 7"
               stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
             />
-          </svg>
-        </button>
-        <button
-          type="button"
-          title="太字（**で囲みます）"
-          onClick={() => wrapSelection('**', '**')}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted"
-        >
-          B
-        </button>
-        <button
-          type="button"
-          title="取り消し線（~~で囲みます）"
-          onClick={() => wrapSelection('~~', '~~')}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"
-        >
-          S
-        </button>
-        <button
-          type="button"
-          title="コード（複数行を選択するとコードブロックになります）"
-          onClick={wrapCode}
-          className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
-        >
-          {'</>'}
-        </button>
-        <button
-          type="button"
-          title="箇条書き（行頭に「- 」を付けます）"
-          onClick={insertBulletList}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-        >
-          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <circle cx="4" cy="6" r="1.3" fill="currentColor" />
-            <circle cx="4" cy="10" r="1.3" fill="currentColor" />
-            <circle cx="4" cy="14" r="1.3" fill="currentColor" />
-            <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </button>
         {mentionCandidates && (
