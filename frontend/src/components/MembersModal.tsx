@@ -176,7 +176,7 @@ export default function MembersModal({
           <div className="overflow-y-auto px-[22px] py-4">
             <div className="mb-4">
               <div className="mb-1 text-[11px] font-bold text-ink-muted">説明</div>
-              <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">
+              <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-ink">
                 {channel.topic || 'このチャンネルには説明が設定されていません。'}
               </div>
             </div>
