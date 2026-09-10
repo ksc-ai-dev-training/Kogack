@@ -61,25 +61,26 @@ def redirect_uri_for(request) -> str:
 def build_auth_url(state: str, redirect_uri: str) -> str:
     """Google の認可エンドポイントURLを組み立てる（A-01）。
 
-    層2ドキュメントQ&A（F-19〜F-22）向けにdrive.readonlyスコープを恒久的に含める
-    （2026-09-07、GCP側のDrive API有効化・スコープの全社展開について千田氏の許可を得て対応。
-    従来はPoC検証用の一時的な追加としてstashに残していたが、正式な実装として組み込む）。
-    access_type=offline + prompt=consentは、refresh_tokenを確実に受け取るために必須
-    （Googleはaccess_type=offlineが無いとrefresh_tokenを返さず、prompt=consentが無いと
-    2回目以降の同意で（同じスコープに対して）refresh_tokenを再発行しないことがあるため）。
+    層2ドキュメントQ&A（F-19〜F-22）向けに2026-09-07から一時的にdrive.readonlyスコープを
+    含めていたが、Google Workspace管理コンソールのdomainPolicyブロック（2026-09-08に判明。
+    千田氏もこの設定を変更できる権限を持たない）により実際にはDrive APIを呼び出せないままで、
+    2026-09-09に層2の実装自体を実ファイルアップロード方式（Drive非依存）へ切り替え済み。
+    Driveスコープを求め続けると、実際には使っていない権限をログインのたびに要求する不要な
+    同意画面が表示され続けるだけになる（ユーザーからの指摘で2026-09-10に判明し撤去した）ため、
+    ログインに必要な最小スコープへ戻した。access_type=offline・prompt=consentもrefresh_token
+    （Driveアクセストークンの自動更新用）を確実に受け取るためだけに付けていたものなので、
+    あわせて外した（毎回の同意画面もこれで無くなる）。
     """
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": "openid email profile https://www.googleapis.com/auth/drive.readonly",
+        "scope": "openid email profile",
         "state": state,
         # UX向上のためのドメインヒント。実際の検証はサーバー側（verify_domain）で行う
         "hd": ALLOWED_DOMAINS[0] if ALLOWED_DOMAINS else "",
-        # select_account: 複数アカウント運用での誤ログインを防ぐため常にアカウント選択を出す。
-        # consent: refresh_tokenを毎回確実に受け取るため、既に同意済みの利用者にも再度同意画面を出す
-        "prompt": "select_account consent",
-        "access_type": "offline",
+        # 複数アカウント運用での誤ログインを防ぐため常にアカウント選択を出す
+        "prompt": "select_account",
     }
     return f"{AUTH_ENDPOINT}?{urlencode({k: v for k, v in params.items() if v})}"
 

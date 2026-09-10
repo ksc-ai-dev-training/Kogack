@@ -4,7 +4,6 @@
 import os
 import secrets
 import traceback
-from datetime import datetime, timedelta, timezone
 
 import audit_log
 import google_auth
@@ -140,27 +139,12 @@ async def callback(
         pool, "login", row["id"], "初回ログイン（新規登録）でログインしました" if is_new else "ログインしました",
     )
 
-    # 層2ドキュメントQ&A（F-19〜F-22）向け、T-23 google_drive_tokensへの保存（2026-09-07、
-    # GCP側のDrive API有効化・スコープ全社展開について千田氏の許可を得て正式実装）。
-    # build_auth_urlでdrive.readonlyを要求しているため、ここまで到達した時点で（=codeが正常に
-    # 交換できた時点で）利用者は同意済み。access_type=offline+prompt=consentによりrefresh_tokenは
-    # 毎回返るはずだが、念のため無い場合は既存のrefresh_tokenを保持する（COALESCE）
-    drive_access_token = token.get("access_token")
-    if drive_access_token:
-        expires_in = int(token.get("expires_in") or 3600)
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-        await pool.execute(
-            """INSERT INTO google_drive_tokens (user_id, access_token, refresh_token, expires_at, scope)
-               VALUES ($1, $2, $3, $4, $5)
-               ON CONFLICT (user_id) DO UPDATE SET
-                   access_token = EXCLUDED.access_token,
-                   refresh_token = COALESCE(EXCLUDED.refresh_token, google_drive_tokens.refresh_token),
-                   expires_at = EXCLUDED.expires_at,
-                   scope = EXCLUDED.scope,
-                   updated_at = now()""",
-            row["id"], drive_access_token, token.get("refresh_token"), expires_at,
-            token.get("scope") or "",
-        )
+    # 層2ドキュメントQ&A向けのT-23 google_drive_tokensへの保存処理（2026-09-07実装）は
+    # 2026-09-10に削除した。build_auth_urlがdrive.readonlyスコープを要求しなくなった
+    # （google_auth.py参照）ため、ここで受け取るaccess_tokenはDrive権限を含まない通常の
+    # ログイン用トークンであり、保存しても無意味なデータになるため。T-23テーブル自体・
+    # services/google_drive.pyは、将来Workspace管理者が特定できDrive連携を再開する際の
+    # 土台として残置する。
 
     # 6. セッションJWTを HttpOnly Cookie に設定して / へ戻す
     token_jwt = issue_jwt(row["id"], row["role"])
