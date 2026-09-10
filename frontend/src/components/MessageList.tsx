@@ -28,6 +28,29 @@ function formatDaySeparator(iso: string) {
   return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
+// 絵文字だけのメッセージを大きく表示する（Slack・Discord等でよく見る「ジャンボ絵文字」表示。
+// ユーザーからの明示的な要望「文章無しで絵文字だけで送ったら少し大きく表示されてほしい」）。
+// 本文（前後の空白を除く）が絵文字・結合用の記号（異体字セレクタU+FE0F・ZWJ・肌の色modifier）
+// ・空白のみで構成されている場合に大きく表示する。あまりに多い絵文字を並べて大きくすると
+// かえって読みにくくなるため、EMOJI_ONLY_MAX_COUNT件を超える場合は対象外（通常サイズのまま）にする。
+// 既知の限界: 数字＋U+FE0F＋U+20E3（囲み文字）で構成されるキーキャップ絵文字（1️⃣等）は数字が
+// \p{Extended_Pictographic}に含まれないため判定対象外になる（この用途では稀なケースとして許容）
+const EMOJI_ZWJ = String.fromCharCode(0x200d) // ゼロ幅結合子（🙇‍♂️等の結合絵文字に使われる）
+const EMOJI_VARIATION_SELECTOR = String.fromCharCode(0xfe0f) // 異体字セレクタ（❤️等に使われる）
+const EMOJI_ONLY_REGEX = new RegExp(
+  `^(?:\\p{Extended_Pictographic}|\\p{Emoji_Modifier}|${EMOJI_ZWJ}|${EMOJI_VARIATION_SELECTOR}|\\s)+$`,
+  'u',
+)
+const EMOJI_COUNT_REGEX = /\p{Extended_Pictographic}/gu
+const EMOJI_ONLY_MAX_COUNT = 10
+
+export function isEmojiOnlyBody(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed || !EMOJI_ONLY_REGEX.test(trimmed)) return false
+  const count = (trimmed.match(EMOJI_COUNT_REGEX) ?? []).length
+  return count > 0 && count <= EMOJI_ONLY_MAX_COUNT
+}
+
 function DaySeparator({ label }: { label: string }) {
   return (
     <div className="mx-5 my-2.5 flex items-center gap-2.5 text-[11px] font-semibold text-ink-subtle">
@@ -635,7 +658,11 @@ export default function MessageList({
                     </button>
                   </div>
                 ) : (
-                  <div className="mt-0.5 whitespace-pre-wrap break-words text-[13.5px] leading-[1.75] text-ink">
+                  <div
+                    className={`mt-0.5 whitespace-pre-wrap break-words text-ink ${
+                      isEmojiOnlyBody(m.body) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
+                    }`}
+                  >
                     {renderMessageBody(m.body, m.blocks, members, aiPersonaName)}
                   </div>
                 )}

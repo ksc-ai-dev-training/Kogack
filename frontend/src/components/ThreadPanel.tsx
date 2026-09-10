@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useThread } from '../hooks/useThread'
 import { apiFetch } from '../lib/api'
-import MessageList, { Avatar, formatTime, renderMessageBody } from './MessageList'
+import MessageList, { Avatar, formatTime, isEmojiOnlyBody, renderMessageBody } from './MessageList'
 import Composer, { type MentionCandidate } from './Composer'
 import ProfileCard from './ProfileCard'
 import { useToast } from './Toast'
@@ -234,7 +234,11 @@ export default function ThreadPanel({
                 </span>
                 <span className="text-[11px] text-ink-subtle">{formatTime(parentMessage.created_at)}</span>
               </div>
-              <div className="whitespace-pre-wrap break-words text-[13.5px] leading-[1.75] text-ink">
+              <div
+                className={`whitespace-pre-wrap break-words text-ink ${
+                  isEmojiOnlyBody(parentMessage.body) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
+                }`}
+              >
                 {renderMessageBody(parentMessage.body, parentMessage.blocks, members, aiPersonaName)}
               </div>
               {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (
