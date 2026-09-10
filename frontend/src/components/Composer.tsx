@@ -251,6 +251,80 @@ export default function Composer({
     }
   }
 
+  // 書式ツールバー（太字・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望
+  // 「Slackのメッセージ入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような
+  // 機能を付けたい」による追加。実装方針は着手前にユーザーへ確認し、(1) GFM風のMarkdown記法
+  // （`**太字**`・`` `コード` ``・``` ```コードブロック``` ```・行頭「- 」の箇条書き）を採用（Slack
+  // 自体の単一`*`/`~`記法は、日本語の波ダッシュ「〜」や文中の`*`との誤検出が多いため避けた）、
+  // (2) 下線はSlack自体の書式メニューにも標準Markdownにも存在しないため取り消し線
+  // （`~~text~~`）に置き換える、の2点で合意した。投稿欄はキー入力中のリアルタイム装飾（太字等が
+  // 実際に太字に見える）までは行わず（ユーザーが選択した方式）、GitHubのコメント欄等と同じ
+  // 「選択範囲をボタンでマーカー文字列ごと囲む」挿入補助のみ提供する。実際の装飾表示は投稿後の
+  // 会話ログ（MessageList.tsx・ThreadPanel.tsxのrenderMessageBody）側で行う。
+  const wrapSelection = (prefix: string, suffix: string) => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? body.length
+    const end = el.selectionEnd ?? body.length
+    const before = body.slice(0, start)
+    const selected = body.slice(start, end)
+    const after = body.slice(end)
+    setBody(before + prefix + selected + suffix + after)
+    setPickerQuery(null)
+    requestAnimationFrame(() => {
+      el.focus()
+      if (selected) {
+        // 選択があった場合はマーカーを含めた範囲を選択し直す（続けて別の書式を重ねがけしやすいように）
+        el.setSelectionRange(start, start + prefix.length + selected.length + suffix.length)
+      } else {
+        // 選択が無ければカーソルをマーカーの間に置き、そのまま続けて入力できるようにする
+        const pos = start + prefix.length
+        el.setSelectionRange(pos, pos)
+      }
+    })
+  }
+
+  // コードボタンは選択範囲に改行を含むかで自動的にインラインコード/コードブロックを切り替える
+  // （GitHubのコメント欄と同じ挙動。ボタンを1つに減らせるうえ直感的なため）
+  const wrapCode = () => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? body.length
+    const end = el.selectionEnd ?? body.length
+    if (body.slice(start, end).includes('\n')) {
+      wrapSelection('```\n', '\n```')
+    } else {
+      wrapSelection('`', '`')
+    }
+  }
+
+  // 箇条書きボタンは選択範囲を含む行全体を対象に行頭へ「- 」を付ける（既に全行付いていれば外す
+  // トグル動作）。空行はそのまま維持する
+  const insertBulletList = () => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? body.length
+    const end = el.selectionEnd ?? body.length
+    const lineStart = body.lastIndexOf('\n', start - 1) + 1
+    const nextNewline = body.indexOf('\n', end)
+    const lineEnd = nextNewline === -1 ? body.length : nextNewline
+    const lines = body.slice(lineStart, lineEnd).split('\n')
+    const allBulleted = lines.every((l) => l.trim() === '' || l.startsWith('- '))
+    const nextLines = lines.map((l) => {
+      if (l.trim() === '') return l
+      if (allBulleted) return l.replace(/^- /, '')
+      return l.startsWith('- ') ? l : `- ${l}`
+    })
+    const nextBlock = nextLines.join('\n')
+    setBody(body.slice(0, lineStart) + nextBlock + body.slice(lineEnd))
+    setPickerQuery(null)
+    requestAnimationFrame(() => {
+      el.focus()
+      const pos = lineStart + nextBlock.length
+      el.setSelectionRange(pos, pos)
+    })
+  }
+
   const selectCandidate = (candidate: MentionCandidate) => {
     const el = textareaRef.current
     const cursor = el?.selectionStart ?? body.length
@@ -489,6 +563,43 @@ export default function Composer({
               d="M13.5 7.5l-5 5a2.1 2.1 0 0 0 3 3l5.5-5.5a3.5 3.5 0 0 0-5-5L6.5 9.5a4.9 4.9 0 0 0 7 7"
               stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
             />
+          </svg>
+        </button>
+        <button
+          type="button"
+          title="太字（**で囲みます）"
+          onClick={() => wrapSelection('**', '**')}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          title="取り消し線（~~で囲みます）"
+          onClick={() => wrapSelection('~~', '~~')}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"
+        >
+          S
+        </button>
+        <button
+          type="button"
+          title="コード（複数行を選択するとコードブロックになります）"
+          onClick={wrapCode}
+          className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
+        >
+          {'</>'}
+        </button>
+        <button
+          type="button"
+          title="箇条書き（行頭に「- 」を付けます）"
+          onClick={insertBulletList}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+        >
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="4" cy="6" r="1.3" fill="currentColor" />
+            <circle cx="4" cy="10" r="1.3" fill="currentColor" />
+            <circle cx="4" cy="14" r="1.3" fill="currentColor" />
+            <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </button>
         {mentionCandidates && (

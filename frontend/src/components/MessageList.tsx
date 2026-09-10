@@ -74,6 +74,192 @@ function findUrlMatches(text: string): { start: number; end: number; url: string
   return results
 }
 
+// 簡易書式（太字・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望「Slackのメッセージ
+// 入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような機能を付けたい」により追加。
+// 採用した記法はGFM（GitHub Flavored Markdown）風（`**太字**`・`` `コード` ``・
+// ``` ```コードブロック``` ```・行頭「- 」の箇条書き）。Slack自体のmrkdwn記法（単一`*`太字・単一`~`
+// 取り消し線）は、日本語の波ダッシュ「〜」や文中で単発の`*`を使う文章との誤検出が多いため意図的に
+// 避けた（着手前にユーザーへ確認し合意）。下線はSlack自体の書式メニューにも標準Markdownにも存在しない
+// ため、取り消し線で代替する方針で合意した。コードブロック・箇条書きは行を跨ぐ構造のため、
+// メンション・URL・太字・取り消し線・インラインコードと同じ「本文中の位置に対するmatches」方式では
+// 扱えず、まず本文をコードブロック単位（1階層目）→箇条書き行の連続単位（2階層目）に分割してから、
+// 残った通常の文章部分にだけ既存のインライン装飾（renderInlineSegment）を適用する2段階構成にした。
+// コードスパン・コードブロックの中身はMarkdownの一般的な挙動どおり、太字・取り消し線・メンション・
+// URLをさらに解釈しない（ネストした書式には対応しない、という簡易実装の範囲内の割り切り）。
+// コード表示の背景色はbg-surface-subtleではなくbg-surface-mutedを使う（発言行のホバー背景が
+// hover:bg-surface-subtleのため、同じ色にするとホバー時にコードの箱が消えて見えてしまうため）。
+const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
+const INLINE_CODE_REGEX = /`([^`\n]+)`/g
+const BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
+const STRIKE_REGEX = /~~([\s\S]+?)~~/g
+
+function splitCodeBlocks(text: string): { type: 'code' | 'text'; content: string }[] {
+  const segments: { type: 'code' | 'text'; content: string }[] = []
+  let cursor = 0
+  for (const m of text.matchAll(CODE_BLOCK_REGEX)) {
+    const idx = m.index ?? 0
+    if (idx > cursor) segments.push({ type: 'text', content: text.slice(cursor, idx) })
+    // 先頭・末尾の改行だけ1つ取り除く（```\nコード\n``` と書いたときの見た目上の余白を除去する、
+    // GFMの一般的な扱い）
+    segments.push({ type: 'code', content: m[1].replace(/^\n/, '').replace(/\n$/, '') })
+    cursor = idx + m[0].length
+  }
+  if (cursor < text.length) segments.push({ type: 'text', content: text.slice(cursor) })
+  return segments.length > 0 ? segments : [{ type: 'text', content: text }]
+}
+
+function splitBulletLists(
+  text: string,
+): ({ type: 'list'; items: string[] } | { type: 'text'; content: string })[] {
+  const segments: ({ type: 'list'; items: string[] } | { type: 'text'; content: string })[] = []
+  let textBuf: string[] = []
+  let listBuf: string[] = []
+  const flushText = () => {
+    if (textBuf.length > 0) segments.push({ type: 'text', content: textBuf.join('\n') })
+    textBuf = []
+  }
+  const flushList = () => {
+    if (listBuf.length > 0) segments.push({ type: 'list', items: listBuf })
+    listBuf = []
+  }
+  for (const line of text.split('\n')) {
+    const m = /^- (.+)$/.exec(line)
+    if (m) {
+      flushText()
+      listBuf.push(m[1])
+    } else {
+      flushList()
+      textBuf.push(line)
+    }
+  }
+  flushText()
+  flushList()
+  return segments
+}
+
+// 太字・取り消し線・インラインコード・メンション・URLの解決（優先度: コード＞太字/取り消し線＞
+// メンション＞URL）。同じ範囲に複数の候補が重なる場合は優先度が高い方を採用し、負けた側は
+// 描画しない（例: コードスパンの中に偶然「**」が含まれていても太字化しない）。usedMentionNeedles
+// は人間宛メンション（@display_name_snapshot）をメッセージ全体で1回だけハイライトするための
+// 呼び出し元との共有状態（コードブロック・箇条書きで本文が複数のセグメントに分かれても、
+// 従来どおり「最初に見つかった1箇所だけ」という挙動を保つため）
+function renderInlineSegment(
+  text: string,
+  mentionDefs: { needle: string; label: string }[],
+  usedMentionNeedles: Set<string>,
+  aiPersonaName: string | undefined,
+  keyPrefix: string,
+): ReactNode[] {
+  type Candidate = { start: number; end: number; priority: number; render: (key: string) => ReactNode }
+  const candidates: Candidate[] = []
+
+  for (const m of text.matchAll(INLINE_CODE_REGEX)) {
+    const start = m.index ?? 0
+    const content = m[1]
+    candidates.push({
+      start,
+      end: start + m[0].length,
+      priority: 0,
+      render: (key) => (
+        <code key={key} className="rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-ink">
+          {content}
+        </code>
+      ),
+    })
+  }
+  for (const m of text.matchAll(BOLD_REGEX)) {
+    const start = m.index ?? 0
+    const content = m[1]
+    candidates.push({
+      start,
+      end: start + m[0].length,
+      priority: 1,
+      render: (key) => <strong key={key} className="font-bold">{content}</strong>,
+    })
+  }
+  for (const m of text.matchAll(STRIKE_REGEX)) {
+    const start = m.index ?? 0
+    const content = m[1]
+    candidates.push({
+      start,
+      end: start + m[0].length,
+      priority: 1,
+      render: (key) => <s key={key} className="line-through">{content}</s>,
+    })
+  }
+  for (const def of mentionDefs) {
+    if (usedMentionNeedles.has(def.needle)) continue
+    const idx = text.indexOf(def.needle)
+    if (idx !== -1) {
+      usedMentionNeedles.add(def.needle)
+      candidates.push({
+        start: idx,
+        end: idx + def.needle.length,
+        priority: 2,
+        render: (key) => (
+          <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
+            {def.label}
+          </span>
+        ),
+      })
+    }
+  }
+  if (aiPersonaName) {
+    const needle = `@${aiPersonaName}`
+    let idx = text.indexOf(needle)
+    while (idx !== -1) {
+      candidates.push({
+        start: idx,
+        end: idx + needle.length,
+        priority: 2,
+        render: (key) => (
+          <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
+            {needle}
+          </span>
+        ),
+      })
+      idx = text.indexOf(needle, idx + needle.length)
+    }
+  }
+  for (const u of findUrlMatches(text)) {
+    candidates.push({
+      start: u.start,
+      end: u.end,
+      priority: 3,
+      render: (key) => (
+        <a
+          key={key}
+          href={u.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-all text-accent-700 underline hover:text-accent-800"
+        >
+          {u.url}
+        </a>
+      ),
+    })
+  }
+
+  candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
+  const accepted: Candidate[] = []
+  for (const c of candidates) {
+    if (accepted.some((a) => c.start < a.end && a.start < c.end)) continue
+    accepted.push(c)
+  }
+  accepted.sort((a, b) => a.start - b.start)
+
+  if (accepted.length === 0) return [text]
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  accepted.forEach((c, i) => {
+    if (c.start > cursor) nodes.push(text.slice(cursor, c.start))
+    nodes.push(c.render(`${keyPrefix}-${i}`))
+    cursor = c.end
+  })
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
 // F-41 @メンションの描画。本文中の「@display_name_snapshot」を検出し、target_user_idを
 // 現在のチャンネル参加者一覧で解決した最新の表示名でハイライト表示する（05-1_詳細設計書_DB設計.html
 // 3.7節「表示時はtarget_user_idを解決して現在の表示名・アイコンを描画」）。A-62プロフィール編集の
@@ -90,64 +276,45 @@ export function renderMessageBody(
     (b): b is { block_type: 'mention'; payload: { target_user_id: string; display_name_snapshot: string }; sort_order: number } =>
       b.block_type === 'mention',
   )
-
-  type Match =
-    | { start: number; end: number; kind: 'mention'; label: string }
-    | { start: number; end: number; kind: 'url'; url: string }
-  const matches: Match[] = []
-  for (const block of mentions) {
+  const mentionDefs = mentions.map((block) => {
     const current = members?.find((m) => m.id === block.payload.target_user_id)?.name
-    const label = `@${current ?? block.payload.display_name_snapshot}`
-    const idx = body.indexOf(`@${block.payload.display_name_snapshot}`)
-    if (idx !== -1) {
-      matches.push({ start: idx, end: idx + block.payload.display_name_snapshot.length + 1, kind: 'mention', label })
+    return {
+      needle: `@${block.payload.display_name_snapshot}`,
+      label: `@${current ?? block.payload.display_name_snapshot}`,
     }
-  }
-  // AIメンションはF-41と異なりID参照化されずmessage_blocksに残らない（基本設計書5.22節の設計判断、
-  // services/ai_agent.detect_mentionと同じ本文中「@ペルソナ名」の文字列一致）ため、blocksとは別に
-  // ここで直接検出する。画面モックアップでは人間へのメンションと同じ見た目でハイライトされる
-  if (aiPersonaName) {
-    const needle = `@${aiPersonaName}`
-    let idx = body.indexOf(needle)
-    while (idx !== -1) {
-      matches.push({ start: idx, end: idx + needle.length, kind: 'mention', label: needle })
-      idx = body.indexOf(needle, idx + needle.length)
-    }
-  }
-  for (const u of findUrlMatches(body)) {
-    matches.push({ start: u.start, end: u.end, kind: 'url', url: u.url })
-  }
-  if (matches.length === 0) return body
-  matches.sort((a, b) => a.start - b.start)
+  })
+  const usedMentionNeedles = new Set<string>()
 
   const nodes: ReactNode[] = []
-  let cursor = 0
-  matches.forEach((m, i) => {
-    if (m.start < cursor) return
-    if (m.start > cursor) nodes.push(body.slice(cursor, m.start))
-    if (m.kind === 'url') {
+  splitCodeBlocks(body).forEach((seg, segIdx) => {
+    if (seg.type === 'code') {
       nodes.push(
-        <a
-          key={i}
-          href={m.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="break-all text-accent-700 underline hover:text-accent-800"
+        <pre
+          key={`code-${segIdx}`}
+          className="my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-ink"
         >
-          {m.url}
-        </a>,
+          {seg.content}
+        </pre>,
       )
-    } else {
-      nodes.push(
-        <span key={i} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
-          {m.label}
-        </span>,
-      )
+      return
     }
-    cursor = m.end
+    splitBulletLists(seg.content).forEach((ls, lsIdx) => {
+      if (ls.type === 'list') {
+        nodes.push(
+          <ul key={`list-${segIdx}-${lsIdx}`} className="my-1 list-disc space-y-0.5 pl-5">
+            {ls.items.map((item, ii) => (
+              <li key={ii}>
+                {renderInlineSegment(item, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}-li${ii}`)}
+              </li>
+            ))}
+          </ul>,
+        )
+      } else {
+        nodes.push(...renderInlineSegment(ls.content, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}`))
+      }
+    })
   })
-  if (cursor < body.length) nodes.push(body.slice(cursor))
-  return nodes
+  return nodes.length > 0 ? nodes : body
 }
 
 // Avatarが実際に必要とするフィールドだけを抜き出した形（Message全体を要求すると、S-05検索結果の
