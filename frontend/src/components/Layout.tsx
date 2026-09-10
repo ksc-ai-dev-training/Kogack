@@ -7,6 +7,7 @@ import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
 import { useScheduledMessages } from '../hooks/useScheduledMessages'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
+import NotificationSettingsButton from './NotificationSettingsButton'
 import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
 import ProfileEditModal from './ProfileEditModal'
@@ -36,9 +37,15 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const { joined } = useChannels()
   const { dms } = useDms()
   const { items: scheduledItems } = useScheduledMessages()
-  // ブラウザのデスクトップ通知（既存ポーリングのunread_count増分に相乗り。タブ非表示時のみ通知）
-  const { permission: notifPermission, requestPermission: requestNotifPermission, supported: notifSupported } =
-    useDesktopNotifications(joined, dms, me.id)
+  // ブラウザのデスクトップ通知（既存ポーリングのunread_count/unread_mention_count増分に相乗り。
+  // タブ非表示時のみ通知）
+  const {
+    permission: notifPermission,
+    requestPermission: requestNotifPermission,
+    mode: notifMode,
+    setMode: setNotifMode,
+    supported: notifSupported,
+  } = useDesktopNotifications(joined, dms, me.id)
   const [modalOpen, setModalOpen] = useState(false)
   const [dmModalOpen, setDmModalOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
@@ -87,25 +94,13 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               </span>
             )}
           </button>
-          {notifSupported && notifPermission !== 'granted' && (
-            <button
-              type="button"
-              onClick={() => {
-                if (notifPermission === 'default') requestNotifPermission()
-              }}
-              title={
-                notifPermission === 'denied'
-                  ? 'デスクトップ通知はブラウザの設定でブロックされています'
-                  : 'クリックしてデスクトップ通知を有効にする'
-              }
-              className={`rounded p-1.5 ${
-                notifPermission === 'denied'
-                  ? 'text-ink-subtle opacity-50'
-                  : 'text-ink-subtle hover:bg-surface-muted hover:text-ink-muted'
-              }`}
-            >
-              {notifPermission === 'denied' ? '🔕' : '🔔'}
-            </button>
+          {notifSupported && (
+            <NotificationSettingsButton
+              permission={notifPermission}
+              requestPermission={requestNotifPermission}
+              mode={notifMode}
+              setMode={setNotifMode}
+            />
           )}
           <NavLink
             to="/search"
@@ -254,6 +249,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             <ul>
               {joined.map((c) => {
                 const unread = c.unread_count ?? 0
+                const mentions = c.unread_mention_count ?? 0
                 return (
                   <li key={c.id} className="my-px">
                     <NavLink to={`/channels/${c.id}`} className={({ isActive }) => navItemClass(isActive)}>
@@ -261,11 +257,20 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                       <span className={`min-w-0 flex-1 truncate ${unread > 0 ? 'font-bold text-ink' : ''}`}>
                         {c.name}
                       </span>
-                      {unread > 0 && (
+                      {mentions > 0 ? (
+                        // 名指しされた発言がある＝赤い@バッジ（「チャンネルが賑やか」なだけの
+                        // グレーの件数バッジと区別する）
+                        <span
+                          title={`あなたへのメンション ${mentions} 件`}
+                          className="flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-danger-text px-1 text-[10px] font-bold text-white"
+                        >
+                          @{mentions > 99 ? '99+' : mentions}
+                        </span>
+                      ) : unread > 0 ? (
                         <span className="flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-accent-600 px-1 text-[10px] font-bold text-white">
                           {unread > 99 ? '99+' : unread}
                         </span>
-                      )}
+                      ) : null}
                     </NavLink>
                   </li>
                 )

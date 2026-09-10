@@ -26,6 +26,9 @@ export interface Channel {
   created_at: string
   /** joined一覧にのみ含まれる（joinableには無い。未読バッジ用） */
   unread_count?: number
+  /** joined一覧にのみ含まれる。未読のうち自分がF-41メンションされた件数（サイドバーの赤い@バッジ・
+   * デスクトップ通知の「メンション・DMのみ」モード用） */
+  unread_mention_count?: number
 }
 
 export interface ChannelDetail extends Channel {

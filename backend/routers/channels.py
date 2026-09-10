@@ -37,7 +37,11 @@ def _channel_out(row) -> dict:
 @router.get("")
 async def list_channels(user: CurrentUser = Depends(require_auth)):
     """A-05: 参加中チャンネル一覧＋参加可能な公開チャンネル一覧（総論5.3節）。
-    joinedのunread_countはT-22 read_states（未読バッジ、基本設計書4.2節）を使って算出する。"""
+    joinedのunread_countはT-22 read_states（未読バッジ、基本設計書4.2節）を使って算出する。
+    unread_mention_countは同じ期間条件のうち自分がF-41メンションされた発言の件数（サイドバーで
+    「名指しされた」と「チャンネルが賑やか」を区別するための赤バッジ用。message_blocksの
+    block_type='mention'・payload.target_user_id=自分でJOIN。AIメンションはmessage_blocksに
+    入らないため対象外＝正しい）。"""
     pool = get_pool()
     joined = await pool.fetch(
         """SELECT c.*,
@@ -45,7 +49,15 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
                 WHERE msg.channel_id = c.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
                   AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)
-               ) AS unread_count
+               ) AS unread_count,
+               (SELECT count(*) FROM messages msg
+                JOIN message_blocks mb ON mb.message_id = msg.id
+                  AND mb.block_type = 'mention'
+                  AND mb.payload->>'target_user_id' = $1::text
+                WHERE msg.channel_id = c.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
+                  AND msg.sender_user_id IS DISTINCT FROM $1
+                  AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)
+               ) AS unread_mention_count
            FROM channels c
            JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = $1
            LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = $1
@@ -60,7 +72,14 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
         user.id,
     )
     return {
-        "joined": [{**_channel_out(r), "unread_count": r["unread_count"]} for r in joined],
+        "joined": [
+            {
+                **_channel_out(r),
+                "unread_count": r["unread_count"],
+                "unread_mention_count": r["unread_mention_count"],
+            }
+            for r in joined
+        ],
         "joinable": [_channel_out(r) for r in joinable],
     }
 

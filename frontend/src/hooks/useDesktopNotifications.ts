@@ -5,10 +5,22 @@ import type { Channel, Dm } from '../types'
 const NOTIF_SUPPORTED = typeof window !== 'undefined' && 'Notification' in window
 
 export type NotifPermission = 'unsupported' | 'default' | 'granted' | 'denied'
+// 'all' = 所属チャンネルの全新着＋DM、'mentions' = 自分へのメンションとDMのみ（Slackの既定に近い）
+export type NotifMode = 'all' | 'mentions'
+
+const MODE_KEY = 'kogack_notif_mode'
 
 function currentPermission(): NotifPermission {
   if (!NOTIF_SUPPORTED) return 'unsupported'
   return Notification.permission as NotifPermission
+}
+
+function readMode(): NotifMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'mentions' ? 'mentions' : 'all'
+  } catch {
+    return 'all'
+  }
 }
 
 // デスクトップ通知が実際に使える状態か（許可済み）。useChannels/useDmsが、通知を出すために
@@ -19,15 +31,20 @@ export function desktopNotificationsEnabled(): boolean {
 }
 
 // ブラウザのデスクトップ通知（Web Notifications API）。プッシュ基盤（Service Worker + Web Push）は
-// 持たず、既存のuseChannels/useDmsのポーリングが返すunread_countの増分を検知して、Kogackのタブが
-// 非表示（他タブ・他アプリを見ている／最小化）のときだけOSの通知を出す簡易方式。
+// 持たず、既存のuseChannels/useDmsのポーリングが返すunread_count／unread_mention_countの増分を
+// 検知して、Kogackのタブが非表示（他タブ・他アプリを見ている／最小化）のときだけOSの通知を出す。
 // ブラウザ・タブを完全に閉じている間は通知されない（Web Push未導入。CLAUDE.md 2026-09-10の方針）。
 // リアルタイム配信自体は引き続きポーリングで、この通知もそのポーリング結果に相乗りするだけ。
+//
+// mode='mentions'（既定は'all'）のときは、チャンネルの一般的な新着では通知せず、自分がF-41で
+// メンションされた発言とDMの新着のみ通知する（DMは元々「自分宛て」なのでmodeに関わらず通知対象）。
 export function useDesktopNotifications(joined: Channel[], dms: Dm[], meId: string | undefined) {
   const navigate = useNavigate()
   const [permission, setPermission] = useState<NotifPermission>(currentPermission)
-  // 会話キー -> 直近に観測したunread_count。初回観測時はベースラインとして記録するだけ（通知しない）
-  const seenRef = useRef<Map<string, number>>(new Map())
+  const [mode, setModeState] = useState<NotifMode>(readMode)
+  // 会話キー -> 直近に観測した {未読件数, 自分へのメンション未読件数}。
+  // 初回観測時はベースラインとして記録するだけ（通知しない）
+  const seenRef = useRef<Map<string, { count: number; mentions: number }>>(new Map())
   const meIdRef = useRef(meId)
 
   const requestPermission = useCallback(async () => {
@@ -37,6 +54,15 @@ export function useDesktopNotifications(joined: Channel[], dms: Dm[], meId: stri
       setPermission(result as NotifPermission)
     } catch {
       // 一部の古いブラウザはPromiseを返さずコールバックのみ。そこまでは面倒を見ない
+    }
+  }, [])
+
+  const setMode = useCallback((m: NotifMode) => {
+    setModeState(m)
+    try {
+      localStorage.setItem(MODE_KEY, m)
+    } catch {
+      // プライベートブラウジング等でlocalStorageが使えなくても致命的ではない（このセッション内では効く）
     }
   }, [])
 
@@ -50,36 +76,50 @@ export function useDesktopNotifications(joined: Channel[], dms: Dm[], meId: stri
 
     if (permission !== 'granted' || !NOTIF_SUPPORTED) return
 
-    type Conv = { key: string; count: number; label: string; to: string }
+    type Conv = {
+      key: string
+      count: number
+      mentions: number
+      label: string
+      to: string
+      isDm: boolean
+    }
     const convs: Conv[] = [
       ...joined.map((c) => ({
         key: `c:${c.id}`,
         count: c.unread_count ?? 0,
+        mentions: c.unread_mention_count ?? 0,
         label: `#${c.name}`,
         to: `/channels/${c.id}`,
+        isDm: false,
       })),
       ...dms.map((d) => ({
         key: `d:${d.id}`,
         count: d.unread_count,
+        mentions: 0, // DMに「メンション未読」の区別は設けない（DM自体が自分宛て）
         label: d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、'),
         to: `/dms/${d.id}`,
+        isDm: true,
       })),
     ]
 
     const seen = seenRef.current
-    const increased: Conv[] = []
+    const mentionHits: Conv[] = []
+    const messageHits: Conv[] = []
     for (const conv of convs) {
       const prev = seen.get(conv.key)
-      // prevがundefined＝この会話を初めて観測したタイミング。ベースラインとして記録するだけで通知しない
+      seen.set(conv.key, { count: conv.count, mentions: conv.mentions })
+      // prevがundefined＝この会話を初めて観測したタイミング。ベースライン記録のみで通知しない
       // （ページ読み込み直後に既存の未読ぶんがまとめて通知されるのを防ぐ）
-      if (prev !== undefined && conv.count > prev) increased.push(conv)
-      seen.set(conv.key, conv.count)
+      if (prev === undefined) continue
+      if (conv.mentions > prev.mentions) mentionHits.push(conv)
+      else if (conv.count > prev.count && (conv.isDm || mode === 'all')) messageHits.push(conv)
     }
     // 一覧から消えた会話（退出・削除）のキーは掃除する
     const liveKeys = new Set(convs.map((c) => c.key))
     for (const k of [...seen.keys()]) if (!liveKeys.has(k)) seen.delete(k)
 
-    if (increased.length === 0) return
+    if (mentionHits.length === 0 && messageHits.length === 0) return
     // Kogackのタブを見ている＝操作中なので、未読バッジで十分。通知は出さない（Slackの既定と同じ）
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') return
 
@@ -96,16 +136,19 @@ export function useDesktopNotifications(joined: Channel[], dms: Dm[], meId: stri
       }
     }
 
-    // バックグラウンドで長時間放置していた後などに多数の会話が一度に増えると通知が氾濫するため、
-    // 4件以上はまとめて1通にする
-    if (increased.length > 3) {
-      fire('Kogack', `${increased.length}件のチャンネル・DMに新着メッセージがあります`, 'kogack-digest', '/')
-      return
+    // メンションは埋もれさせたくないので、件数に関わらず常に会話ごとに個別通知する
+    for (const conv of mentionHits) {
+      fire('あなたへのメンション', conv.label, `kogack-m-${conv.key}`, conv.to)
     }
-    for (const conv of increased) {
-      fire('新しいメッセージ', `${conv.label}（未読 ${conv.count} 件）`, `kogack-${conv.key}`, conv.to)
+    // 一般の新着は、多数の会話が一度に増えたとき（長時間放置後など）は通知が氾濫するため4件以上で集約
+    if (messageHits.length > 3) {
+      fire('Kogack', `${messageHits.length}件のチャンネル・DMに新着メッセージがあります`, 'kogack-digest', '/')
+    } else {
+      for (const conv of messageHits) {
+        fire('新しいメッセージ', `${conv.label}（未読 ${conv.count} 件）`, `kogack-${conv.key}`, conv.to)
+      }
     }
-  }, [joined, dms, meId, permission, navigate])
+  }, [joined, dms, meId, permission, mode, navigate])
 
-  return { permission, requestPermission, supported: NOTIF_SUPPORTED }
+  return { permission, requestPermission, mode, setMode, supported: NOTIF_SUPPORTED }
 }
