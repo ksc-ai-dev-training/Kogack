@@ -883,8 +883,11 @@ export default function MessageList({
               {(canReact || showReplyButton || canDelete) && (
                 // 常時flowに置くと表示/非表示の切替で下の発言がガタつくため、絶対配置でホバー時だけ重ねて出す。
                 // リアクションのクイックボタン・絵文字ピッカーボタンは返信・削除ボタンの左隣に置く
-                // （ユーザーからの明示的な要望どおりの配置）
-                <div className="absolute right-4 top-1 hidden items-center gap-1 group-hover:flex">
+                // （ユーザーからの明示的な要望どおりの配置）。バー全体を1枚の枠（枠線＋背景＋影）で
+                // 囲み、時刻・発言者名の上に重なっても違和感のない浮遊ツールバーにする（ユーザー
+                // からの報告「スレッド返信で時刻表示と絵文字候補がかぶる」への対応。個々のボタンは
+                // 枠を持たず、バーの枠内に収める）
+                <div className="absolute right-4 top-0 hidden items-center gap-0.5 rounded-md border border-line bg-surface px-1 py-0.5 shadow-sm group-hover:flex">
                   {canReact && (
                     <ReactionQuickButtons
                       onToggle={(emoji) => toggleReaction(m.id, emoji)}
@@ -894,11 +897,14 @@ export default function MessageList({
                       }
                     />
                   )}
+                  {canReact && (showReplyButton || canDelete) && (
+                    <span className="mx-0.5 h-4 w-px flex-none bg-line" aria-hidden="true" />
+                  )}
                   {showReplyButton && (
                     <button
                       type="button"
                       onClick={() => onOpenThread(m.id)}
-                      className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-muted shadow-sm hover:text-accent-700"
+                      className="rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-accent-700"
                     >
                       返信
                     </button>
@@ -907,7 +913,7 @@ export default function MessageList({
                     <button
                       type="button"
                       onClick={() => deleteMessage(m.id)}
-                      className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-muted shadow-sm hover:text-danger-text"
+                      className="rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-danger-text"
                     >
                       削除
                     </button>

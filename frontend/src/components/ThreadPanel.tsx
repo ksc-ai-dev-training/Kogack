@@ -286,9 +286,9 @@ export default function ThreadPanel({
               <ReactionPills reactions={parentMessage.reactions} onToggle={toggleParentReaction} />
             </div>
             {/* 元発言への絵文字リアクション（ユーザーからの明示的な要望）。MessageList.tsxと同じ
-                「ホバー時に右上へ重ねて表示」の配置。返信・削除ボタンはここには元々無いため
-                クイックボタン＋ピッカーだけを置く */}
-            <div className="absolute right-3 top-2 hidden items-center gap-1 group-hover:flex">
+                「ホバー時に右上へ重ねて表示」の配置＋1枚の枠（枠線＋背景＋影）で囲む浮遊ツールバー。
+                返信・削除ボタンはここには元々無いためクイックボタン＋ピッカーだけを置く */}
+            <div className="absolute right-3 top-1 hidden items-center gap-0.5 rounded-md border border-line bg-surface px-1 py-0.5 shadow-sm group-hover:flex">
               <ReactionQuickButtons
                 onToggle={toggleParentReaction}
                 pickerOpen={!!parentEmojiPickerAnchor}
