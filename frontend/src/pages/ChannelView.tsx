@@ -185,7 +185,11 @@ export default function ChannelView() {
           >
             {channel?.name ?? '読み込み中...'}
           </span>
-          {channel?.topic && <span className="ml-1 min-w-0 flex-shrink truncate text-xs text-ink-subtle">{channel.topic}</span>}
+          {channel?.topic && (
+            <span className="ml-1 min-w-0 max-w-[220px] flex-shrink truncate text-xs text-ink-subtle">
+              {channel.topic}
+            </span>
+          )}
           {channel && (
             <button
               type="button"
