@@ -6,6 +6,7 @@ import { useMe } from '../hooks/useMe'
 import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
 import { useScheduledMessages } from '../hooks/useScheduledMessages'
+import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
 import ProfileEditModal from './ProfileEditModal'
@@ -35,6 +36,9 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const { joined } = useChannels()
   const { dms } = useDms()
   const { items: scheduledItems } = useScheduledMessages()
+  // ブラウザのデスクトップ通知（既存ポーリングのunread_count増分に相乗り。タブ非表示時のみ通知）
+  const { permission: notifPermission, requestPermission: requestNotifPermission, supported: notifSupported } =
+    useDesktopNotifications(joined, dms, me.id)
   const [modalOpen, setModalOpen] = useState(false)
   const [dmModalOpen, setDmModalOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
@@ -83,6 +87,26 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               </span>
             )}
           </button>
+          {notifSupported && notifPermission !== 'granted' && (
+            <button
+              type="button"
+              onClick={() => {
+                if (notifPermission === 'default') requestNotifPermission()
+              }}
+              title={
+                notifPermission === 'denied'
+                  ? 'デスクトップ通知はブラウザの設定でブロックされています'
+                  : 'クリックしてデスクトップ通知を有効にする'
+              }
+              className={`rounded p-1.5 ${
+                notifPermission === 'denied'
+                  ? 'text-ink-subtle opacity-50'
+                  : 'text-ink-subtle hover:bg-surface-muted hover:text-ink-muted'
+              }`}
+            >
+              {notifPermission === 'denied' ? '🔕' : '🔔'}
+            </button>
+          )}
           <NavLink
             to="/search"
             title="横断検索"
