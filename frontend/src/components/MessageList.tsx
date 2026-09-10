@@ -756,7 +756,10 @@ export default function MessageList({
         // （F-36定期投稿・F-38自動応答トリガーは内容のあるBOT発言のため対象外にしない。基本設計書6.2節「設計判断」）
         const isSystemNotice = m.sender_type === 'bot' && m.sender_name === 'システム通知'
         const canDelete = !isSystemNotice && !!me && (m.sender_user_id === me.id || me.role === 'admin')
-        const showReplyButton = !isSystemNotice && onOpenThread && !(m.thread_reply_count ?? 0)
+        // 既にスレッドがある発言でも「返信」ボタンを出す（押すとそのスレッドが開く。ユーザーからの
+        // 明示的な要望。従来はthread_reply_count>0のとき下の「💬 N件の返信」導線のみだった）。
+        // システム通知は引き続き対象外
+        const showReplyButton = !isSystemNotice && !!onOpenThread
         // リアクションは投稿者本人限定にせず、この会話にいる誰でも付けられる（Slack等と同じ一般的な
         // 挙動）。システム通知（参加・退出の記録）へのリアクションも、返信・削除と異なり記録の
         // 信頼性を損なわないため対象外にしない（バックエンドA-75も同じ判断）
