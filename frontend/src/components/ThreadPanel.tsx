@@ -10,6 +10,27 @@ import type { AttachmentPayload, CitationPayload, MentionPayload, MentionSourceM
 // S-04 スレッド表示（画面モックアップ S-04）。S-03/DmViewの右側に重ねて表示するパネル。
 // 元発言はChannelView/DmView側で既に読み込み済みのmessages一覧から渡してもらう
 // （A-13は返信一覧のみを返す設計のため、元発言の内容自体を取りに行く専用APIは無い）。
+
+// パネル幅をマウスドラッグで変更できるようにする（ユーザーからの明示的な要望）。幅は
+// localStorageに保存し次回スレッドを開いたときも保持する（サーバー同期は不要な、個人の
+// 画面設定に過ぎないため。プライベートブラウジング等でlocalStorageが使えない場合は
+// 既定値にフォールバックする）
+const THREAD_WIDTH_STORAGE_KEY = 'kogack_thread_panel_width'
+const THREAD_WIDTH_DEFAULT = 380
+const THREAD_WIDTH_MIN = 320
+const THREAD_WIDTH_MAX = 720
+
+function readStoredThreadWidth(): number {
+  try {
+    const raw = localStorage.getItem(THREAD_WIDTH_STORAGE_KEY)
+    const n = raw ? Number(raw) : NaN
+    if (Number.isFinite(n)) return Math.min(THREAD_WIDTH_MAX, Math.max(THREAD_WIDTH_MIN, n))
+  } catch {
+    // noop（プライベートブラウジング等でlocalStorageが使えない場合は既定値のまま）
+  }
+  return THREAD_WIDTH_DEFAULT
+}
+
 export default function ThreadPanel({
   messageId,
   parentMessage,
@@ -44,6 +65,51 @@ export default function ThreadPanel({
 }) {
   const { replies, mutate: mutateReplies } = useThread(messageId)
   const bodyRef = useRef<HTMLDivElement>(null)
+
+  // パネル幅のドラッグリサイズ。ドラッグ開始時のマウスX座標・幅をdragStartRefに記録し、
+  // resizing中はwindow全体でmousemove/mouseupを監視する（マウスがパネル外へ出ても追従させるため）。
+  // latestWidthRefは直近のmousemoveで計算した幅を保持し、mouseup時点でそれをlocalStorageへ
+  // 保存する（onMouseUpのクロージャがuseEffectの依存配列的に古いwidthを参照してしまうのを避けるため）
+  const [threadWidth, setThreadWidth] = useState(readStoredThreadWidth)
+  const [resizingThread, setResizingThread] = useState(false)
+  const dragStartRef = useRef<{ x: number; width: number } | null>(null)
+  const latestWidthRef = useRef(threadWidth)
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    dragStartRef.current = { x: e.clientX, width: threadWidth }
+    setResizingThread(true)
+  }
+  useEffect(() => {
+    if (!resizingThread) return
+    // ウィンドウが狭い場合でも本体側の会話画面が潰れきらないよう、最大幅はウィンドウ幅からも制限する
+    const dynamicMax = Math.min(THREAD_WIDTH_MAX, window.innerWidth - 300)
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragStartRef.current) return
+      // 左端のハンドルをドラッグする想定のため、マウスが左に動く（dx正）ほど幅が広がる
+      const dx = dragStartRef.current.x - ev.clientX
+      const next = Math.min(dynamicMax, Math.max(THREAD_WIDTH_MIN, dragStartRef.current.width + dx))
+      latestWidthRef.current = next
+      setThreadWidth(next)
+    }
+    const onMouseUp = () => {
+      setResizingThread(false)
+      try {
+        localStorage.setItem(THREAD_WIDTH_STORAGE_KEY, String(latestWidthRef.current))
+      } catch {
+        // noop
+      }
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [resizingThread])
   // F-41 メンション候補。ChannelView.tsxのmentionCandidatesWithAiと同じ考え方（ユーザーからの
   // 明示的な要望「スレッド内のメンション先候補にもAIを入れてほしい」で追加）。選択してもAIメンションは
   // ID参照化しない（Composer.MentionCandidate.isAi参照）
@@ -97,7 +163,20 @@ export default function ThreadPanel({
   }
 
   return (
-    <aside className="flex w-[380px] flex-none flex-col border-l border-line-strong bg-surface shadow-[-4px_0_16px_rgba(16,24,40,0.05)]">
+    <aside
+      className="relative flex flex-none flex-col border-l border-line-strong bg-surface shadow-[-4px_0_16px_rgba(16,24,40,0.05)]"
+      style={{ width: threadWidth }}
+    >
+      {/* 左端のリサイズハンドル（ユーザーからの明示的な要望「スレッドの枠の横幅をマウスで変更
+          できるようにしたい」）。境界線（border-l）をまたぐ形で少し広めの当たり判定を確保し、
+          ホバー時にアクセントカラーで存在を示す */}
+      <div
+        onMouseDown={startResize}
+        title="ドラッグして幅を変更"
+        className={`absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize select-none ${
+          resizingThread ? 'bg-accent-600/40' : 'hover:bg-accent-600/25'
+        }`}
+      />
       <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-4">
         <div className="flex min-w-0 flex-col">
           <span className="text-sm font-bold text-ink">スレッド</span>
