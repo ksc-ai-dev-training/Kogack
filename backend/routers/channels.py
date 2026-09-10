@@ -17,6 +17,7 @@ from auth_helpers import (
 )
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
+from reactions import fetch_reactions_grouped
 from services import ai_agent, doc_permissions, trigger_matcher
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
@@ -463,7 +464,10 @@ async def mark_channel_read(channel_id: int, user: CurrentUser = Depends(require
     return {"channel_id": str(channel_id), "read": True}
 
 
-def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] | None = None) -> dict:
+def _message_out(
+    row, blocks: list[dict] | None = None, attachments: list[dict] | None = None,
+    reactions: list[dict] | None = None,
+) -> dict:
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]),
@@ -486,6 +490,9 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "is_summary": row["is_summary"],
         "blocks": blocks or [],
         "attachments": attachments or [],
+        # 絵文字リアクション（ユーザーからの明示的な要望「Slackのように発言一つ一つに対して
+        # 絵文字でリアクションできるようにしたい」、T-26 message_reactions・reactions.py）
+        "reactions": reactions or [],
         "created_at": row["created_at"].isoformat(),
         # sinceポーリングの差分取得はupdated_atで判定する（下記list_messages参照）。フロントの
         # useMessagesがカーソル追跡に使う
@@ -574,8 +581,13 @@ async def list_messages(
         )))
     blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
     attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+    reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
     items = [
-        _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+        _message_out(
+            r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
+            reactions_by_message.get(r["id"]),
+        )
+        for r in rows
     ]
     if since or around:
         return {"items": items, "has_more": False}

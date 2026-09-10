@@ -577,6 +577,25 @@ CREATE TABLE IF NOT EXISTS google_drive_tokens (
 );
 ALTER TABLE google_drive_tokens ENABLE ROW LEVEL SECURITY;
 
+-- T-26 message_reactions: 発言への絵文字リアクション（ユーザーからの明示的な要望「Slackのように
+-- 発言一つ一つに対して絵文字でリアクションできるようにしたい」）。1人が同じ発言に同じ絵文字を
+-- 複数回付けられないようUNIQUE制約で防ぎ、backend/routers/messages.pyのA-75がトグル
+-- （既に付けていれば削除、無ければ追加）として扱う。emojiはUnicodeの絵文字そのもの（結合絵文字・
+-- 異体字セレクタを含む場合もある短い文字列）をそのままTEXTで保持し、種類を固定のCHECK制約等で
+-- 縛らない（フロントの投稿欄と同じ絵文字ピッカーの選択肢に依存させず、将来ピッカー側の選択肢を
+-- 増やしてもスキーマ変更が要らないようにするため）。message_id削除時はON DELETE CASCADEで
+-- 連動削除する。
+CREATE TABLE IF NOT EXISTS message_reactions (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    message_id  BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji       TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (message_id, user_id, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions (message_id);
+ALTER TABLE message_reactions ENABLE ROW LEVEL SECURITY;
+
 -- 文字数制限の見直し（2026-09-09、ユーザーからの明示的な要望）にともなう既存データの一括整形。
 -- ユーザー名（21字）・チャンネル名（80字）・チャンネル説明文（500字）の新しい上限を超えている
 -- 既存の行を先頭から切り詰める（LEFTは文字数ベースでマルチバイト文字も正しく扱う）。

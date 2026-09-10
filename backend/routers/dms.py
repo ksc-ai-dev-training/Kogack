@@ -10,6 +10,7 @@ from attachments import AttachmentInput, fetch_attachments_grouped, insert_attac
 from auth_helpers import CurrentUser, require_auth, require_dm_member
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
+from reactions import fetch_reactions_grouped
 
 router = APIRouter(prefix="/api/dms", tags=["dms"])
 
@@ -124,7 +125,10 @@ async def mark_dm_read(dm_id: int, user: CurrentUser = Depends(require_dm_member
     return {"dm_id": str(dm_id), "read": True}
 
 
-def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] | None = None) -> dict:
+def _message_out(
+    row, blocks: list[dict] | None = None, attachments: list[dict] | None = None,
+    reactions: list[dict] | None = None,
+) -> dict:
     return {
         "id": str(row["id"]),
         "dm_id": str(row["dm_id"]),
@@ -148,6 +152,8 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         # 添付ファイル（F-07）はメンションより前から候補元に依存せずDMでも対応済み。
         "blocks": blocks or [],
         "attachments": attachments or [],
+        # 絵文字リアクション（ユーザーからの明示的な要望、T-26・reactions.py）。channels.pyと同じ形
+        "reactions": reactions or [],
         "created_at": row["created_at"].isoformat(),
         # channels.pyと同じ理由でsinceポーリングの差分取得判定に使う（下記list_messages参照）
         "updated_at": row["updated_at"].isoformat(),
@@ -213,9 +219,14 @@ async def list_messages(
         )
         blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+        reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
         return {
             "items": [
-                _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+                _message_out(
+                    r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
+                    reactions_by_message.get(r["id"]),
+                )
+                for r in rows
             ],
             "has_more": False,
         }
@@ -225,9 +236,14 @@ async def list_messages(
             raise HTTPException(404, detail="発言が見つかりません")
         blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+        reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
         return {
             "items": [
-                _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+                _message_out(
+                    r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
+                    reactions_by_message.get(r["id"]),
+                )
+                for r in rows
             ],
             "has_more": False,
         }
@@ -239,9 +255,13 @@ async def list_messages(
     )
     blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
     attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+    reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
     return {
         "items": [
-            _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]))
+            _message_out(
+                r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
+                reactions_by_message.get(r["id"]),
+            )
             for r in reversed(rows)
         ],
         "has_more": len(rows) == limit,

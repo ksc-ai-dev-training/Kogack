@@ -9,12 +9,16 @@ from attachments import AttachmentInput, fetch_attachments_grouped, insert_attac
 from auth_helpers import CurrentUser, require_auth, require_thread_access
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
+from reactions import fetch_reactions_grouped, toggle_reaction
 from services import ai_agent
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 
-def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] | None = None) -> dict:
+def _message_out(
+    row, blocks: list[dict] | None = None, attachments: list[dict] | None = None,
+    reactions: list[dict] | None = None,
+) -> dict:
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]) if row["channel_id"] is not None else None,
@@ -39,6 +43,9 @@ def _message_out(row, blocks: list[dict] | None = None, attachments: list[dict] 
         "is_summary": row["is_summary"],
         "blocks": blocks or [],
         "attachments": attachments or [],
+        # 絵文字リアクション（ユーザーからの明示的な要望）。channels.py/dms.pyの_message_outと
+        # 同じ形（emoji・count・reacted_by_me・user_names）
+        "reactions": reactions or [],
         "created_at": row["created_at"].isoformat(),
         # channels.py/dms.pyの_message_outと型を揃えるため（useThreadは全件再取得のみで
         # sinceカーソルには使わないが、Message型のフィールドとしては必須にしている）
@@ -131,7 +138,11 @@ async def cancel_generation(message_id: int, user: CurrentUser = Depends(require
     updated = await pool.fetchrow("SELECT * FROM messages WHERE id = $1", message_id)
     blocks_by_message = await fetch_blocks_grouped(pool, [message_id])
     attachments_by_message = await fetch_attachments_grouped(pool, [message_id])
-    return _message_out(updated, blocks_by_message.get(message_id), attachments_by_message.get(message_id))
+    reactions_by_message = await fetch_reactions_grouped(pool, [message_id], user.id)
+    return _message_out(
+        updated, blocks_by_message.get(message_id), attachments_by_message.get(message_id),
+        reactions_by_message.get(message_id),
+    )
 
 
 @router.get("/{message_id}/thread")
@@ -147,9 +158,14 @@ async def list_thread(message_id: int, user: CurrentUser = Depends(require_threa
     )
     blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
     attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+    reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
     return {
         "items": [
-            _message_out(r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"])) for r in rows
+            _message_out(
+                r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
+                reactions_by_message.get(r["id"]),
+            )
+            for r in rows
         ]
     }
 
@@ -195,3 +211,45 @@ async def post_reply(
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url}, blocks, attachments,
     )
+
+
+class ToggleReactionRequest(BaseModel):
+    emoji: str = Field(min_length=1, max_length=32)
+
+
+@router.post("/{message_id}/reactions/toggle")
+async def toggle_message_reaction(
+    message_id: int, body: ToggleReactionRequest, user: CurrentUser = Depends(require_auth),
+):
+    """A-75: 発言への絵文字リアクションをトグルする（ユーザーからの明示的な要望「Slackのように
+    発言一つ一つに対して絵文字でリアクションできるようにしたい」）。既に自分が同じ絵文字で
+    リアクション済みなら取り消し、していなければ追加する（T-26、reactions.toggle_reaction）。
+    権限はA-12削除・A-74中断と同じ「その会話の参加者であること」だが、投稿者本人限定にはしない
+    （誰の発言にも誰でもリアクションできるのがSlack等の一般的な挙動のため）。システム通知（F-43）
+    へのリアクションも特別扱いしない——返信・削除は「参加・退出の記録の信頼性」を保つため対象外に
+    しているが、リアクションはその記録自体を書き換えるものではなく対象外にする理由が無いと判断した。"""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT channel_id, dm_id FROM messages WHERE id = $1 AND deleted_at IS NULL", message_id,
+    )
+    if row is None:
+        raise HTTPException(404, detail="見つかりません")
+
+    if user.role != "admin":
+        if row["channel_id"] is not None:
+            is_member = await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+                row["channel_id"], user.id,
+            )
+        else:
+            is_member = await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM direct_message_members WHERE dm_id = $1 AND user_id = $2)",
+                row["dm_id"], user.id,
+            )
+        if not is_member:
+            # 参加していない会話の発言は存在自体を伏せる（A-12・A-74・総論5.3節と同じ考え方）
+            raise HTTPException(404, detail="見つかりません")
+
+    added = await toggle_reaction(pool, message_id, user.id, body.emoji)
+    reactions_by_message = await fetch_reactions_grouped(pool, [message_id], user.id)
+    return {"id": str(message_id), "added": added, "reactions": reactions_by_message.get(message_id, [])}

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useThread } from '../hooks/useThread'
 import { apiFetch } from '../lib/api'
-import MessageList, { Avatar, formatTime, isEmojiOnlyBody, renderMessageBody } from './MessageList'
+import MessageList, {
+  Avatar, EmojiGridPopover, ReactionPills, ReactionQuickButtons, formatTime, isEmojiOnlyBody, renderMessageBody,
+} from './MessageList'
 import Composer, { type MentionCandidate } from './Composer'
 import ProfileCard from './ProfileCard'
 import { useToast } from './Toast'
@@ -63,7 +65,7 @@ export default function ThreadPanel({
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
 }) {
-  const { replies, mutate: mutateReplies } = useThread(messageId)
+  const { replies, mutate: mutateReplies, updateReplyReactions } = useThread(messageId)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   // パネル幅のドラッグリサイズ。ドラッグ開始時のマウスX座標・幅をdragStartRefに記録し、
@@ -124,6 +126,25 @@ export default function ThreadPanel({
   const [parentProfileOpen, setParentProfileOpen] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
   const toast = useToast()
+
+  // 元発言への絵文字リアクション（MessageListを経由せずここで個別に描画しているため、
+  // 返信一覧とは別に扱う）。返信側と異なりChannelView/DmView側のmessages一覧を直接
+  // 更新する手段が無いため、ここでは楽観的更新をせず、次のポーリング（channel/DM一覧は
+  // 1秒間隔）で自然に反映されるのを待つ（数秒以内には反映される）
+  const [parentEmojiPickerOpen, setParentEmojiPickerOpen] = useState(false)
+  const toggleParentReaction = async (emoji: string) => {
+    if (!parentMessage) return
+    setParentEmojiPickerOpen(false)
+    try {
+      await apiFetch(`/api/messages/${parentMessage.id}/reactions/toggle`, {
+        method: 'POST',
+        body: JSON.stringify({ emoji }),
+      })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'リアクションに失敗しました', 'error')
+    }
+  }
+
   // ハイライト対象がこのスレッドの返信一覧に実在する間は、末尾自動スクロールを止める
   // （MessageList側のscrollIntoViewと競合させないため。ChannelView本体と同じ考え方）
   const highlightInReplies = !!highlightMessageId && replies.some((r) => r.id === highlightMessageId)
@@ -207,7 +228,7 @@ export default function ThreadPanel({
 
       <div ref={bodyRef} className="flex-1 overflow-y-auto py-1.5">
         {parentMessage && (
-          <div className="relative flex gap-2.5 border-b border-line px-4 py-3">
+          <div className="group relative flex gap-2.5 border-b border-line px-4 py-3">
             <Avatar
               message={parentMessage}
               onClick={
@@ -261,7 +282,23 @@ export default function ThreadPanel({
                     ))}
                 </div>
               )}
+              <ReactionPills reactions={parentMessage.reactions} onToggle={toggleParentReaction} />
             </div>
+            {/* 元発言への絵文字リアクション（ユーザーからの明示的な要望）。MessageList.tsxと同じ
+                「ホバー時に右上へ重ねて表示」の配置。返信・削除ボタンはここには元々無いため
+                クイックボタン＋ピッカーだけを置く */}
+            <div className="absolute right-3 top-2 hidden items-center gap-1 group-hover:flex">
+              <ReactionQuickButtons
+                onToggle={toggleParentReaction}
+                pickerOpen={parentEmojiPickerOpen}
+                onTogglePicker={() => setParentEmojiPickerOpen((v) => !v)}
+              />
+            </div>
+            {parentEmojiPickerOpen && (
+              <div className="absolute right-3 top-9 z-40">
+                <EmojiGridPopover onSelect={toggleParentReaction} />
+              </div>
+            )}
             {parentProfileOpen && parentMessage.sender_user_id && (
               <ProfileCard userId={parentMessage.sender_user_id} onClose={() => setParentProfileOpen(false)} />
             )}
@@ -284,6 +321,7 @@ export default function ThreadPanel({
             mutateReplies()
             onReplyDeleted?.()
           }}
+          onReactionToggled={updateReplyReactions}
         />
 
         <p className="mx-4 mb-3 mt-1 rounded-md border border-line bg-surface-subtle px-2.5 py-2 text-[11px] leading-relaxed text-ink-subtle">

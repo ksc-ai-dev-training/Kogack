@@ -141,6 +141,16 @@ export interface AttachmentPayload {
   storage_path: string
 }
 
+/** T-26 message_reactions（A-75）。emoji単位に集計済み（誰がいつ付けたかの個別行は返さない）。
+ * user_namesは絵文字ごとに現在の表示名で解決済み（ツールチップ表示用）、reacted_by_meは
+ * 自分がこの絵文字で反応しているかどうか（トグルのハイライト・クリック時の追加/削除の判定に使う） */
+export interface MessageReaction {
+  emoji: string
+  count: number
+  reacted_by_me: boolean
+  user_names: string[]
+}
+
 export interface Message {
   id: string
   channel_id?: string | null
@@ -165,6 +175,9 @@ export interface Message {
   blocks?: MessageBlock[]
   /** F-07 ファイル共有。チャンネル・DMどちらの発言にも付く */
   attachments?: MessageAttachment[]
+  /** 絵文字リアクション（ユーザーからの明示的な要望「Slackのように発言一つ一つに対して絵文字で
+   * リアクションできるようにしたい」、A-75）。0件なら空配列 */
+  reactions?: MessageReaction[]
   created_at: string
   /** sinceポーリングの差分取得カーソルに使う（useMessages）。AI応答の本文確定はUPDATEのみで
    * created_atが変わらないため、このフィールドで「更新された」ことを検知する（2026-09-04バグ修正） */

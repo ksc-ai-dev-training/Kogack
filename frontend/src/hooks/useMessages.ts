@@ -47,9 +47,24 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
         // 返ってきうる（バックエンド側もsinceの絞り込みをupdated_at基準に変更済み）。従来は
         // 常に末尾へ追記するだけだったため、一度「生成中」の状態でこの行を取得すると、
         // 画面を切り替えない限り本文確定後の内容が永久に反映されないバグがあった。
-        // id一致で上書きすることで、既存行はその場で内容が更新され、新規行だけが追記される
+        // id一致で上書きすることで、既存行はその場で内容が更新され、新規行だけが追記される。
+        //
+        // バグ修正（2026-09-10、絵文字リアクション機能の実機検証で発見）: この関数は非同期
+        // （await apiFetch中に他の処理が進む）ため、リアクショントグル（updateMessageReactions）
+        // のような楽観的更新がこの関数の実行中（awaitで待っている間）に割り込むことがある。
+        // 従来は無条件にres.items（このリクエスト自身が発行された時点でのサーバーの状態、
+        // つまり楽観的更新より古いスナップショットのことがある）で上書きしていたため、
+        // 「リアクションを追加した直後にもう一つ追加すると、ほぼ同時に飛んでいた古いポーリング
+        // レスポンスが後から解決してその場での反映を巻き戻してしまう」という不具合が実機検証で
+        // 再現した。updated_atを比較し、既にローカルの方が新しい（＝この行はこのポーリング
+        // リクエストが発行された後に別の更新があった）場合はそちらを優先し、古いレスポンスでの
+        // 上書きをスキップする
         const byId = new Map(s.messages.map((m) => [m.id, m] as const))
-        for (const item of res.items) byId.set(item.id, item)
+        for (const item of res.items) {
+          const existing = byId.get(item.id)
+          if (existing && new Date(existing.updated_at).getTime() > new Date(item.updated_at).getTime()) continue
+          byId.set(item.id, item)
+        }
         s.messages = [...byId.values()]
       } else {
         s.messages = res.items
@@ -111,8 +126,19 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
     mutate(state.current.messages, { revalidate: false })
   }
 
+  // 絵文字リアクション（A-75）も同じ理由の楽観的更新。トグルAPIのレスポンスに含まれる
+  // 更新後のreactions一覧をそのまま反映する（推測で組み立てるのではなく、サーバーが実際に
+  // 確定した値を使う。3秒ポーリングを待たず自分の操作をその場で反映させるため）
+  const updateMessageReactions = (messageId: string, reactions: Message['reactions']) => {
+    if (!state.current) return
+    state.current.messages = state.current.messages.map((m) =>
+      m.id === messageId ? { ...m, reactions } : m,
+    )
+    mutate(state.current.messages, { revalidate: false })
+  }
+
   return {
     messages: data ?? [], error, isLoading, mutate,
-    bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
+    bumpThreadReplyCount, removeMessage, decrementThreadReplyCount, updateMessageReactions,
   }
 }

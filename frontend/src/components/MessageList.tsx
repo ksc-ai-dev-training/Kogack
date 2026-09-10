@@ -5,7 +5,8 @@ import { apiFetch } from '../lib/api'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
-import type { CitationPayload, MentionSourceMember, Message } from '../types'
+import { EMOJI_LIST } from './Composer'
+import type { CitationPayload, MentionSourceMember, Message, MessageReaction } from '../types'
 
 export function formatTime(iso: string) {
   const d = new Date(iso)
@@ -477,6 +478,107 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
   )
 }
 
+// 絵文字リアクション（ユーザーからの明示的な要望「Slackのように発言一つ一つに対して絵文字で
+// リアクションできるようにしたい」）。要望どおり「返信・削除ボタンの左隣によく使いそうな絵文字を
+// 数種類、その横に絵文字一覧を開くボタン」という構成にした。クイックリアクションは投稿欄の絵文字
+// ボタン（Composer.tsx）と同じEMOJI_LISTの中から特によく使われそうな5種を選んだ固定リスト。
+export const QUICK_REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '👀']
+
+// クイックリアクションボタン＋「もっと見る」（絵文字ピッカーを開く）ボタン。返信・削除ボタンと
+// 同じホバー時アクションバーに置く想定（呼び出し元がgroup-hover等の表示制御を行う）
+export function ReactionQuickButtons({
+  onToggle,
+  pickerOpen,
+  onTogglePicker,
+}: {
+  onToggle: (emoji: string) => void
+  pickerOpen: boolean
+  onTogglePicker: () => void
+}) {
+  return (
+    <>
+      {QUICK_REACTION_EMOJIS.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          onClick={() => onToggle(emoji)}
+          title={`${emoji}でリアクション`}
+          className="flex h-6 w-6 items-center justify-center rounded text-[13px] hover:bg-surface-muted"
+        >
+          {emoji}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onTogglePicker}
+        title="絵文字を選んでリアクション"
+        className={`flex h-6 w-6 items-center justify-center rounded ${
+          pickerOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle hover:bg-surface-muted'
+        }`}
+      >
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <circle cx="10" cy="10" r="7.2" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="7.3" cy="8.3" r="0.9" fill="currentColor" />
+          <circle cx="12.7" cy="8.3" r="0.9" fill="currentColor" />
+          <path d="M6.8 12a4 4 0 0 0 6.4 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+    </>
+  )
+}
+
+// クイックリアクション横の「もっと見る」ボタンから開く絵文字グリッド（Composer.tsxの絵文字
+// ピッカーと同じ見た目・EMOJI_LISTを共有）。位置は呼び出し元がラップするdivのclassNameで決める
+export function EmojiGridPopover({ onSelect }: { onSelect: (emoji: string) => void }) {
+  return (
+    <div className="grid max-h-[200px] w-[240px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+      {EMOJI_LIST.map((emoji, i) => (
+        <button
+          key={`${emoji}-${i}`}
+          type="button"
+          onClick={() => onSelect(emoji)}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] hover:bg-surface-muted"
+        >
+          {emoji}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// 発言本文の下に表示するリアクション一覧（絵文字＋件数のピル）。既に自分が付けている絵文字は
+// アクセントカラーで強調し、クリックで同じ絵文字をもう一度トグル（削除）できる。誰が付けたかは
+// タイトル属性（ホバー時のツールチップ）で見られるようにした
+export function ReactionPills({
+  reactions,
+  onToggle,
+}: {
+  reactions: MessageReaction[] | undefined
+  onToggle: (emoji: string) => void
+}) {
+  if (!reactions || reactions.length === 0) return null
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1">
+      {reactions.map((r) => (
+        <button
+          key={r.emoji}
+          type="button"
+          onClick={() => onToggle(r.emoji)}
+          title={r.user_names.join('、')}
+          className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] ${
+            r.reacted_by_me
+              ? 'border-accent-600 bg-accent-50 text-accent-700'
+              : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-subtle'
+          }`}
+        >
+          <span>{r.emoji}</span>
+          <span className="text-[11px] font-semibold">{r.count}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // S-03・S-04共通の発言一覧（詳細設計書 画面設計11.3節）。スクロールコンテナは呼び出し元が持つ
 // （S-04のthread-bodyは元発言・件数・返信一覧をひとつのスクロール領域として扱うため）。
 // onOpenThreadを渡すと「N件の返信」導線とホバー時の「返信」ボタンを表示する（S-04スレッド表示への導線）。
@@ -487,6 +589,7 @@ export default function MessageList({
   onOpenThread,
   openThreadId,
   onDeleted,
+  onReactionToggled,
   showDaySeparators = true,
   members,
   unreadDividerMessageId,
@@ -498,6 +601,11 @@ export default function MessageList({
   onOpenThread?: (messageId: string) => void
   openThreadId?: string | null
   onDeleted?: (messageId: string) => void
+  /** A-75リアクショントグルの直後、呼び出し元（useMessages.updateMessageReactions等）にその場
+   * での反映を任せるためのコールバック（onDeleted/onOpenThreadと同じ「楽観的更新は呼び出し元が
+   * 担う」パターン）。渡さない場合は次のポーリングで自然に反映される（ThreadPanelの元発言ヘッダー
+   * 等、独立した表示のみの箇所を想定） */
+  onReactionToggled?: (messageId: string, reactions: Message['reactions']) => void
   /** S-04スレッド返信欄では表示しない（画面モックアップに合わせる。既定はtrue） */
   showDaySeparators?: boolean
   /** F-41 @メンションの表示名解決に使う（チャンネル参加者一覧。DM会話では渡さない） */
@@ -552,6 +660,22 @@ export default function MessageList({
     }
   }
 
+  // 絵文字リアクション（A-75、ユーザーからの明示的な要望）。絵文字ピッカーはメッセージid単位で
+  // 開閉を管理する（同時に複数開く必要は無いため、単一のstateで足りる）
+  const [emojiPickerFor, setEmojiPickerFor] = useState<string | null>(null)
+  const toggleReaction = async (messageId: string, emoji: string) => {
+    setEmojiPickerFor(null)
+    try {
+      const res = await apiFetch<{ reactions: Message['reactions'] }>(
+        `/api/messages/${messageId}/reactions/toggle`,
+        { method: 'POST', body: JSON.stringify({ emoji }) },
+      )
+      onReactionToggled?.(messageId, res.reactions)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'リアクションに失敗しました', 'error')
+    }
+  }
+
   // A-74: 生成中のAI発言を強制的に中断する（ユーザーからの明示的な要望「AIの生成をアプリ上で
   // 強制的に中断させる機能がほしい」。バックエンドプロセスの再起動と重なると「生成中」のまま
   // 固まり続けることがあった実際の障害を受けて追加）。所有者という概念が無いAI発言のため、
@@ -583,6 +707,10 @@ export default function MessageList({
         const isSystemNotice = m.sender_type === 'bot' && m.sender_name === 'システム通知'
         const canDelete = !isSystemNotice && !!me && (m.sender_user_id === me.id || me.role === 'admin')
         const showReplyButton = !isSystemNotice && onOpenThread && !(m.thread_reply_count ?? 0)
+        // リアクションは投稿者本人限定にせず、この会話にいる誰でも付けられる（Slack等と同じ一般的な
+        // 挙動）。システム通知（参加・退出の記録）へのリアクションも、返信・削除と異なり記録の
+        // 信頼性を損なわないため対象外にしない（バックエンドA-75も同じ判断）
+        const canReact = !!me
         const isNewDay = showDaySeparators && (i === 0 || dayKey(messages[i - 1].created_at) !== dayKey(m.created_at))
 
         return (
@@ -691,6 +819,7 @@ export default function MessageList({
                   </div>
                 )}
                 <AttachmentList attachments={m.attachments} />
+                <ReactionPills reactions={m.reactions} onToggle={(emoji) => toggleReaction(m.id, emoji)} />
                 {onOpenThread && (m.thread_reply_count ?? 0) > 0 && (
                   <button
                     type="button"
@@ -701,9 +830,18 @@ export default function MessageList({
                   </button>
                 )}
               </div>
-              {(showReplyButton || canDelete) && (
-                // 常時flowに置くと表示/非表示の切替で下の発言がガタつくため、絶対配置でホバー時だけ重ねて出す
+              {(canReact || showReplyButton || canDelete) && (
+                // 常時flowに置くと表示/非表示の切替で下の発言がガタつくため、絶対配置でホバー時だけ重ねて出す。
+                // リアクションのクイックボタン・絵文字ピッカーボタンは返信・削除ボタンの左隣に置く
+                // （ユーザーからの明示的な要望どおりの配置）
                 <div className="absolute right-4 top-1 hidden items-center gap-1 group-hover:flex">
+                  {canReact && (
+                    <ReactionQuickButtons
+                      onToggle={(emoji) => toggleReaction(m.id, emoji)}
+                      pickerOpen={emojiPickerFor === m.id}
+                      onTogglePicker={() => setEmojiPickerFor((v) => (v === m.id ? null : m.id))}
+                    />
+                  )}
                   {showReplyButton && (
                     <button
                       type="button"
@@ -722,6 +860,11 @@ export default function MessageList({
                       削除
                     </button>
                   )}
+                </div>
+              )}
+              {emojiPickerFor === m.id && (
+                <div className="absolute right-4 top-8 z-40">
+                  <EmojiGridPopover onSelect={(emoji) => toggleReaction(m.id, emoji)} />
                 </div>
               )}
               {profileFor?.id === m.id && m.sender_user_id && (
