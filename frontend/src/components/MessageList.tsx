@@ -329,10 +329,14 @@ export function renderMessageBody(
   aiPersonaName?: string,
 ): ReactNode {
   const mentions = (blocks ?? []).filter(
-    (b): b is { block_type: 'mention'; payload: { target_user_id: string; display_name_snapshot: string }; sort_order: number } =>
+    (b): b is { block_type: 'mention'; payload: { target_user_id?: string; display_name_snapshot?: string; kind?: string }; sort_order: number } =>
       b.block_type === 'mention',
   )
   const mentionDefs = mentions.map((block) => {
+    // @channel（payload.kind='channel'）は個人宛てと違いtarget_user_id/display_name_snapshotを持たない
+    if (block.payload.kind === 'channel') {
+      return { needle: '@channel', label: '@channel' }
+    }
     const current = members?.find((m) => m.id === block.payload.target_user_id)?.name
     return {
       needle: `@${block.payload.display_name_snapshot}`,

@@ -26,15 +26,25 @@ export default function ChannelView() {
   const { channel, error: channelError } = useChannel(channelId)
   const { joined, mutate: mutateChannelsList } = useChannels()
   const { members } = useChannelMembers(channelId)
-  // F-41 メンション候補。チャンネルAIが有効なときだけ先頭に追加する（画面モックアップS-03の
-  // メンションポップオーバーどおり。無効なチャンネルでは「@ペルソナ名」と書いてもAIは応答しないため
-  // 候補に出さない）。選択してもAIメンションはID参照化しない（Composer.MentionCandidate.isAi参照）
-  const mentionCandidatesWithAi: MentionCandidate[] = channel?.ai_is_enabled
-    ? [
-        { id: 'ai', name: channel.ai_persona_name, isAi: true, picture_url: channel.ai_persona_icon_url },
-        ...members.filter((m) => m.is_active),
-      ]
-    : members.filter((m) => m.is_active)
+  // F-41 メンション候補。先頭は @channel（チャンネル全員への通知）、次にチャンネルAI（有効なとき
+  // だけ。画面モックアップS-03どおり。無効なチャンネルでは「@ペルソナ名」と書いてもAIは応答しない
+  // ため候補に出さない）、その後に参加者。@channelとAIメンションはいずれもID参照化しない
+  // （Composer.MentionCandidate の isChannel / isAi 参照）。@channelはチャンネル会話のみ（スレッド
+  // 返信・DMには出さない）。
+  const mentionCandidatesWithAi: MentionCandidate[] = [
+    { id: 'channel', name: 'channel', isChannel: true },
+    ...(channel?.ai_is_enabled
+      ? [
+          {
+            id: 'ai',
+            name: channel.ai_persona_name,
+            isAi: true,
+            picture_url: channel.ai_persona_icon_url,
+          } as MentionCandidate,
+        ]
+      : []),
+    ...members.filter((m) => m.is_active),
+  ]
   // highlightIdがスレッド返信宛て（threadIdも同時に付いている）の場合は、返信自体ではなく
   // スレッドの元発言（threadId）を中心に本体タイムラインをアンカーする。ThreadPanelへ渡す
   // parentMessageはこの本体messagesから探す実装のため、元発言が直近読み込み分の外（古い発言）

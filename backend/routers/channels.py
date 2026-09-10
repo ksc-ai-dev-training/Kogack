@@ -40,8 +40,10 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
     joinedのunread_countはT-22 read_states（未読バッジ、基本設計書4.2節）を使って算出する。
     unread_mention_countは同じ期間条件のうち自分がF-41メンションされた発言の件数（サイドバーで
     「名指しされた」と「チャンネルが賑やか」を区別するための赤バッジ用。message_blocksの
-    block_type='mention'・payload.target_user_id=自分でJOIN。AIメンションはmessage_blocksに
-    入らないため対象外＝正しい）。"""
+    block_type='mention'で、payload.target_user_id=自分（個人宛て）または payload.kind='channel'
+    （@channel＝チャンネル全員宛て、参加者なら全員カウント）のいずれかをJOIN。1発言に個人宛てと
+    @channelが両方あっても二重に数えないよう count(DISTINCT msg.id)。AIメンションはmessage_blocks
+    に入らないため対象外＝正しい）。"""
     pool = get_pool()
     joined = await pool.fetch(
         """SELECT c.*,
@@ -50,10 +52,10 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
                   AND msg.sender_user_id IS DISTINCT FROM $1
                   AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)
                ) AS unread_count,
-               (SELECT count(*) FROM messages msg
+               (SELECT count(DISTINCT msg.id) FROM messages msg
                 JOIN message_blocks mb ON mb.message_id = msg.id
                   AND mb.block_type = 'mention'
-                  AND mb.payload->>'target_user_id' = $1::text
+                  AND (mb.payload->>'target_user_id' = $1::text OR mb.payload->>'kind' = 'channel')
                 WHERE msg.channel_id = c.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
                   AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)

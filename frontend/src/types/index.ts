@@ -116,6 +116,8 @@ export interface MentionSourceMember {
 export interface MentionPayload {
   target_user_id: string
   display_name_snapshot: string
+  /** 'channel' は @channel（チャンネル全員への通知）。省略時は個人宛てメンション。 */
+  kind?: 'user' | 'channel'
 }
 
 export interface CitationPayload {

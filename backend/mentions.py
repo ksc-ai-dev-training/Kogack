@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field
 class MentionInput(BaseModel):
     target_user_id: str
     display_name_snapshot: str = Field(min_length=1, max_length=100)
+    # kind='channel' は @channel（チャンネル全員への通知）。target_user_id は使わず、
+    # payload に {"kind": "channel"} を1件だけ保存する。チャンネル発言でのみ有効（DMでは黙って無視）。
+    kind: str = "user"
 
 
 def _block_out(row) -> dict:
@@ -33,9 +36,25 @@ async def insert_mention_blocks(
     direct_message_membersを見る経路を追加した"""
     if not mentions:
         return []
-    candidate_ids = [int(m.target_user_id) for m in mentions if m.target_user_id.isdigit()]
+    blocks: list[dict] = []
+    sort_order = 0
+
+    # @channel（チャンネル全員への通知）。チャンネル発言のときだけ、payload {"kind":"channel"} を
+    # 1件だけ保存する（複数回指定されても1件）。A-05のunread_mention_count側で、その値を持つ
+    # ブロックがある発言をチャンネル参加者全員の「メンション未読」として数える。
+    if channel_id is not None and any(m.kind == "channel" for m in mentions):
+        row = await conn.fetchrow(
+            """INSERT INTO message_blocks (message_id, block_type, payload, sort_order)
+               VALUES ($1, 'mention', $2::jsonb, $3) RETURNING block_type, payload, sort_order""",
+            message_id, json.dumps({"kind": "channel"}), sort_order,
+        )
+        blocks.append(_block_out(row))
+        sort_order += 1
+
+    user_mentions = [m for m in mentions if m.kind != "channel"]
+    candidate_ids = [int(m.target_user_id) for m in user_mentions if m.target_user_id.isdigit()]
     if not candidate_ids:
-        return []
+        return blocks
     if channel_id is not None:
         member_rows = await conn.fetch(
             "SELECT user_id FROM channel_members WHERE channel_id = $1 AND user_id = ANY($2::bigint[])",
@@ -47,11 +66,9 @@ async def insert_mention_blocks(
             dm_id, candidate_ids,
         )
     else:
-        return []
+        return blocks
     valid_ids = {r["user_id"] for r in member_rows}
-    blocks: list[dict] = []
-    sort_order = 0
-    for m in mentions:
+    for m in user_mentions:
         if not m.target_user_id.isdigit() or int(m.target_user_id) not in valid_ids:
             continue
         payload = {"target_user_id": m.target_user_id, "display_name_snapshot": m.display_name_snapshot}
