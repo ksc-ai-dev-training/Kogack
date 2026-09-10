@@ -411,6 +411,41 @@ export default function Composer({
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       send()
+      return
+    }
+    // 箇条書きの行でEnterを押すと、次の行にも自動的に「- 」を付けて箇条書きを続ける
+    // （ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を置き換える
+    // 通常の入力）は対象外とし、素朴にカーソル位置のみのケースに絞る。何も入力していない
+    // 箇条書き行でEnterを押した場合は、そのままだと空の「- 」が際限なく増えてしまうため、
+    // 多くのエディタ（Notion・GitHub等）と同じくマーカーを外してリストから抜ける
+    if (e.key === 'Enter' && !e.shiftKey) {
+      const el = e.currentTarget
+      if (el.selectionStart === el.selectionEnd) {
+        const cursor = el.selectionStart
+        const lineStart = body.lastIndexOf('\n', cursor - 1) + 1
+        const nextNewlineIdx = body.indexOf('\n', cursor)
+        const lineEnd = nextNewlineIdx === -1 ? body.length : nextNewlineIdx
+        const bulletMatch = /^- (.*)$/.exec(body.slice(lineStart, lineEnd))
+        if (bulletMatch) {
+          e.preventDefault()
+          if (bulletMatch[1].trim() === '') {
+            const nextBody = body.slice(0, lineStart) + body.slice(lineEnd)
+            setBody(nextBody)
+            requestAnimationFrame(() => {
+              el.focus()
+              el.setSelectionRange(lineStart, lineStart)
+            })
+          } else {
+            const insertText = '\n- '
+            setBody(body.slice(0, cursor) + insertText + body.slice(cursor))
+            requestAnimationFrame(() => {
+              el.focus()
+              const pos = cursor + insertText.length
+              el.setSelectionRange(pos, pos)
+            })
+          }
+        }
+      }
     }
   }
 
