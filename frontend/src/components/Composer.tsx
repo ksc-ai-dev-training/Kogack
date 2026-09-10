@@ -546,6 +546,22 @@ export default function Composer({
         </button>
         <button
           type="button"
+          title="斜体（_で囲みます）"
+          onClick={() => wrapSelection('_', '_')}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic text-ink-subtle hover:bg-surface-muted"
+        >
+          I
+        </button>
+        <button
+          type="button"
+          title="下線（++で囲みます）"
+          onClick={() => wrapSelection('++', '++')}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle underline hover:bg-surface-muted"
+        >
+          U
+        </button>
+        <button
+          type="button"
           title="取り消し線（~~で囲みます）"
           onClick={() => wrapSelection('~~', '~~')}
           className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"

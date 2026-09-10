@@ -74,24 +74,35 @@ function findUrlMatches(text: string): { start: number; end: number; url: string
   return results
 }
 
-// 簡易書式（太字・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望「Slackのメッセージ
-// 入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような機能を付けたい」により追加。
-// 採用した記法はGFM（GitHub Flavored Markdown）風（`**太字**`・`` `コード` ``・
-// ``` ```コードブロック``` ```・行頭「- 」の箇条書き）。Slack自体のmrkdwn記法（単一`*`太字・単一`~`
-// 取り消し線）は、日本語の波ダッシュ「〜」や文中で単発の`*`を使う文章との誤検出が多いため意図的に
-// 避けた（着手前にユーザーへ確認し合意）。下線はSlack自体の書式メニューにも標準Markdownにも存在しない
-// ため、取り消し線で代替する方針で合意した。コードブロック・箇条書きは行を跨ぐ構造のため、
-// メンション・URL・太字・取り消し線・インラインコードと同じ「本文中の位置に対するmatches」方式では
-// 扱えず、まず本文をコードブロック単位（1階層目）→箇条書き行の連続単位（2階層目）に分割してから、
-// 残った通常の文章部分にだけ既存のインライン装飾（renderInlineSegment）を適用する2段階構成にした。
-// コードスパン・コードブロックの中身はMarkdownの一般的な挙動どおり、太字・取り消し線・メンション・
-// URLをさらに解釈しない（ネストした書式には対応しない、という簡易実装の範囲内の割り切り）。
+// 簡易書式（太字・斜体・下線・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望「Slackの
+// メッセージ入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような機能を付けたい」
+// （2026-09-10最初の実装）と、続けて「コードボックスの中の文字は黒とは別の色にしてほしい。斜体や
+// 下線もSlackにあったので実装したい」（同日追加）により拡張した。採用した記法はGFM（GitHub Flavored
+// Markdown）風の`**太字**`・`` `コード` ``・``` ```コードブロック``` ```・行頭「- 」の箇条書き・
+// `~~取り消し線~~`に加え、`_斜体_`（GFM標準の単一アンダースコア）・`++下線++`（標準Markdownに無い
+// ため独自に定めた記法）を追加した。Slack自体のmrkdwn記法（単一`*`太字・単一`~`取り消し線）は、
+// 日本語の波ダッシュ「〜」や文中で単発の`*`を使う文章との誤検出が多いため意図的に避けた（着手前に
+// ユーザーへ確認し合意）。**単一アンダースコアの斜体には、Pythonのダンダーメソッド名（`__init__`
+// 等）のような開発者間チャットにありがちな誤検出リスクがあるが、単一`*`（一般利用者の日常的な文章
+// での強調表現との衝突が非常に多い）よりは狭い層にしか起きない・GFMの標準的な記法でもあるという
+// 判断で受容した**（コードスパン内の文字は装飾を解釈しないため、`` `__init__` `` のようにバック
+// クォートで囲めば誤検出は防げる）。下線の`++`記法も、既存の増分演算子`i++`のような単発の出現では
+// マッチしない（`++`が対になって初めて反応する）ため実用上のリスクは小さいと判断した。コードブロック・
+// 箇条書きは行を跨ぐ構造のため、メンション・URL・太字・斜体・下線・取り消し線・インラインコードと
+// 同じ「本文中の位置に対するmatches」方式では扱えず、まず本文をコードブロック単位（1階層目）→
+// 箇条書き行の連続単位（2階層目）に分割してから、残った通常の文章部分にだけ既存のインライン装飾
+// （renderInlineSegment）を適用する2段階構成にした。コードスパン・コードブロックの中身は
+// Markdownの一般的な挙動どおり、太字・斜体・下線・取り消し線・メンション・URLをさらに解釈しない
+// （ネストした書式には対応しない、という簡易実装の範囲内の割り切り）。
 // コード表示の背景色はbg-surface-subtleではなくbg-surface-mutedを使う（発言行のホバー背景が
 // hover:bg-surface-subtleのため、同じ色にするとホバー時にコードの箱が消えて見えてしまうため）。
+// コード表示の文字色は黒（ink）と紛れないよう専用のtext-code-text（index.css参照）を使う。
 const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
 const INLINE_CODE_REGEX = /`([^`\n]+)`/g
 const BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
 const STRIKE_REGEX = /~~([\s\S]+?)~~/g
+const ITALIC_REGEX = /_([\s\S]+?)_/g
+const UNDERLINE_REGEX = /\+\+([\s\S]+?)\+\+/g
 
 function splitCodeBlocks(text: string): { type: 'code' | 'text'; content: string }[] {
   const segments: { type: 'code' | 'text'; content: string }[] = []
@@ -161,7 +172,7 @@ function renderInlineSegment(
       end: start + m[0].length,
       priority: 0,
       render: (key) => (
-        <code key={key} className="rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-ink">
+        <code key={key} className="rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-code-text">
           {content}
         </code>
       ),
@@ -175,6 +186,26 @@ function renderInlineSegment(
       end: start + m[0].length,
       priority: 1,
       render: (key) => <strong key={key} className="font-bold">{content}</strong>,
+    })
+  }
+  for (const m of text.matchAll(ITALIC_REGEX)) {
+    const start = m.index ?? 0
+    const content = m[1]
+    candidates.push({
+      start,
+      end: start + m[0].length,
+      priority: 1,
+      render: (key) => <em key={key} className="italic">{content}</em>,
+    })
+  }
+  for (const m of text.matchAll(UNDERLINE_REGEX)) {
+    const start = m.index ?? 0
+    const content = m[1]
+    candidates.push({
+      start,
+      end: start + m[0].length,
+      priority: 1,
+      render: (key) => <u key={key} className="underline">{content}</u>,
     })
   }
   for (const m of text.matchAll(STRIKE_REGEX)) {
@@ -291,7 +322,7 @@ export function renderMessageBody(
       nodes.push(
         <pre
           key={`code-${segIdx}`}
-          className="my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-ink"
+          className="my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text"
         >
           {seg.content}
         </pre>,

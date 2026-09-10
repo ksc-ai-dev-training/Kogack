@@ -35,6 +35,11 @@
   --color-danger-bg: #fef2f2;
   --color-danger-border: #fecaca;
   --color-danger-text: #b91c1c;
+
+  /* コード表示（太字・箇条書き等の簡易書式、2026-09-10）の文字色。黒（ink）と見た目で区別できる
+     ようにするためのユーザーからの要望で追加。画面モックアップには存在しない新規機能のため、
+     既存の役割トークン（admin-text等）を流用せず専用のトークンとして追加した */
+  --color-code-text: #6d28d9;
 }
 
 body {
