@@ -130,11 +130,12 @@ export default function ThreadPanel({
   // 元発言への絵文字リアクション（MessageListを経由せずここで個別に描画しているため、
   // 返信一覧とは別に扱う）。返信側と異なりChannelView/DmView側のmessages一覧を直接
   // 更新する手段が無いため、ここでは楽観的更新をせず、次のポーリング（channel/DM一覧は
-  // 1秒間隔）で自然に反映されるのを待つ（数秒以内には反映される）
-  const [parentEmojiPickerOpen, setParentEmojiPickerOpen] = useState(false)
+  // 2秒間隔）で自然に反映されるのを待つ（数秒以内には反映される）。anchorはEmojiGridPopoverを
+  // document.bodyへポータル配置する基準（ユーザーからの報告「投稿欄の裏に隠れて見えない」の修正）
+  const [parentEmojiPickerAnchor, setParentEmojiPickerAnchor] = useState<DOMRect | null>(null)
   const toggleParentReaction = async (emoji: string) => {
     if (!parentMessage) return
-    setParentEmojiPickerOpen(false)
+    setParentEmojiPickerAnchor(null)
     try {
       await apiFetch(`/api/messages/${parentMessage.id}/reactions/toggle`, {
         method: 'POST',
@@ -290,14 +291,16 @@ export default function ThreadPanel({
             <div className="absolute right-3 top-2 hidden items-center gap-1 group-hover:flex">
               <ReactionQuickButtons
                 onToggle={toggleParentReaction}
-                pickerOpen={parentEmojiPickerOpen}
-                onTogglePicker={() => setParentEmojiPickerOpen((v) => !v)}
+                pickerOpen={!!parentEmojiPickerAnchor}
+                onTogglePicker={(anchor) => setParentEmojiPickerAnchor((v) => (v ? null : anchor))}
               />
             </div>
-            {parentEmojiPickerOpen && (
-              <div className="absolute right-3 top-9 z-40">
-                <EmojiGridPopover onSelect={toggleParentReaction} />
-              </div>
+            {parentEmojiPickerAnchor && (
+              <EmojiGridPopover
+                anchor={parentEmojiPickerAnchor}
+                onSelect={toggleParentReaction}
+                onClose={() => setParentEmojiPickerAnchor(null)}
+              />
             )}
             {parentProfileOpen && parentMessage.sender_user_id && (
               <ProfileCard userId={parentMessage.sender_user_id} onClose={() => setParentProfileOpen(false)} />

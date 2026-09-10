@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { apiFetch } from '../lib/api'
@@ -493,7 +494,10 @@ export function ReactionQuickButtons({
 }: {
   onToggle: (emoji: string) => void
   pickerOpen: boolean
-  onTogglePicker: () => void
+  /** 絵文字ピッカーを開く。EmojiGridPopoverをdocument.bodyへポータル配置する基準にするため、
+   * ボタン自身の座標（getBoundingClientRect）を渡す（ユーザーからの報告「絵文字ピッカーが
+   * 投稿欄の裏に隠れて見えない」の修正、ProfileCardのanchor方式と同じ考え方） */
+  onTogglePicker: (anchor: DOMRect) => void
 }) {
   return (
     <>
@@ -510,7 +514,7 @@ export function ReactionQuickButtons({
       ))}
       <button
         type="button"
-        onClick={onTogglePicker}
+        onClick={(e) => onTogglePicker(e.currentTarget.getBoundingClientRect())}
         title="絵文字を選んでリアクション"
         className={`flex h-6 w-6 items-center justify-center rounded ${
           pickerOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle hover:bg-surface-muted'
@@ -527,11 +531,51 @@ export function ReactionQuickButtons({
   )
 }
 
+const EMOJI_GRID_WIDTH = 240
+const EMOJI_GRID_HEIGHT_ESTIMATE = 200 // 実測前の見積もり（下開き/上開きの判定用途のみ、ProfileCardと同じ考え方）
+
 // クイックリアクション横の「もっと見る」ボタンから開く絵文字グリッド（Composer.tsxの絵文字
-// ピッカーと同じ見た目・EMOJI_LISTを共有）。位置は呼び出し元がラップするdivのclassNameで決める
-export function EmojiGridPopover({ onSelect }: { onSelect: (emoji: string) => void }) {
-  return (
-    <div className="grid max-h-[200px] w-[240px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+// ピッカーと同じ見た目・EMOJI_LISTを共有）。ユーザーからの報告「絵文字ピッカーが投稿欄の裏に
+// 隠れて見えない」を受けて、ProfileCard.tsxと同じ「document.bodyへポータル配置し、anchor
+// （クリックした要素のgetBoundingClientRect）を基準にposition: fixedで配置、下に十分な余白が
+// 無ければ自動的に上開きに切り替える」方式にした（従来は発言行の中でabsolute配置していたため、
+// 会話ログのoverflow-y-autoスクロール領域の下端でクリップされ、画面下寄りの発言では投稿欄の
+// 裏に隠れて見えなくなっていた）。document内の他の場所をクリックすると閉じる
+export function EmojiGridPopover({
+  anchor,
+  onSelect,
+  onClose,
+}: {
+  anchor: DOMRect
+  onSelect: (emoji: string) => void
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onDocMouseDown = (e: globalThis.MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    return () => document.removeEventListener('mousedown', onDocMouseDown)
+  }, [onClose])
+
+  // +6は下開き時に実際に使うanchor.bottomとの間隔（下記style参照）。この分を含めずに判定すると
+  // 「ギリギリ収まる」と判定されたケースで実際には6px分だけ画面下端をはみ出すことがあったため
+  // （実機検証で発見）、判定にも同じ余白を含める
+  const openUpward = anchor.bottom + 6 + EMOJI_GRID_HEIGHT_ESTIMATE > window.innerHeight
+  const style: CSSProperties = {
+    position: 'fixed',
+    left: Math.min(Math.max(anchor.right - EMOJI_GRID_WIDTH, 8), window.innerWidth - EMOJI_GRID_WIDTH - 8),
+    ...(openUpward ? { bottom: window.innerHeight - anchor.top + 6 } : { top: anchor.bottom + 6 }),
+  }
+
+  return createPortal(
+    <div
+      ref={ref}
+      style={style}
+      className="z-50 grid max-h-[200px] w-[240px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
+    >
       {EMOJI_LIST.map((emoji, i) => (
         <button
           key={`${emoji}-${i}`}
@@ -542,7 +586,8 @@ export function EmojiGridPopover({ onSelect }: { onSelect: (emoji: string) => vo
           {emoji}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -661,8 +706,9 @@ export default function MessageList({
   }
 
   // 絵文字リアクション（A-75、ユーザーからの明示的な要望）。絵文字ピッカーはメッセージid単位で
-  // 開閉を管理する（同時に複数開く必要は無いため、単一のstateで足りる）
-  const [emojiPickerFor, setEmojiPickerFor] = useState<string | null>(null)
+  // 開閉を管理する（同時に複数開く必要は無いため、単一のstateで足りる）。anchorはEmojiGridPopoverを
+  // document.bodyへポータル配置する基準（ユーザーからの報告「投稿欄の裏に隠れて見えない」の修正）
+  const [emojiPickerFor, setEmojiPickerFor] = useState<{ id: string; anchor: DOMRect } | null>(null)
   const toggleReaction = async (messageId: string, emoji: string) => {
     setEmojiPickerFor(null)
     try {
@@ -838,8 +884,10 @@ export default function MessageList({
                   {canReact && (
                     <ReactionQuickButtons
                       onToggle={(emoji) => toggleReaction(m.id, emoji)}
-                      pickerOpen={emojiPickerFor === m.id}
-                      onTogglePicker={() => setEmojiPickerFor((v) => (v === m.id ? null : m.id))}
+                      pickerOpen={emojiPickerFor?.id === m.id}
+                      onTogglePicker={(anchor) =>
+                        setEmojiPickerFor((v) => (v?.id === m.id ? null : { id: m.id, anchor }))
+                      }
                     />
                   )}
                   {showReplyButton && (
@@ -862,10 +910,12 @@ export default function MessageList({
                   )}
                 </div>
               )}
-              {emojiPickerFor === m.id && (
-                <div className="absolute right-4 top-8 z-40">
-                  <EmojiGridPopover onSelect={(emoji) => toggleReaction(m.id, emoji)} />
-                </div>
+              {emojiPickerFor?.id === m.id && (
+                <EmojiGridPopover
+                  anchor={emojiPickerFor.anchor}
+                  onSelect={(emoji) => toggleReaction(m.id, emoji)}
+                  onClose={() => setEmojiPickerFor(null)}
+                />
               )}
               {profileFor?.id === m.id && m.sender_user_id && (
                 <ProfileCard
