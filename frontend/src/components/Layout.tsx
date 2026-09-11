@@ -7,6 +7,7 @@ import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
 import { useScheduledMessages } from '../hooks/useScheduledMessages'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
+import { usePushSubscription } from '../hooks/usePushSubscription'
 import { useUiZoom } from '../hooks/useUiZoom'
 import { UI_ZOOM_LABELS, UI_ZOOM_ORDER } from '../lib/uiZoom'
 import NotificationSettingsButton from './NotificationSettingsButton'
@@ -39,15 +40,18 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const { joined } = useChannels()
   const { dms } = useDms()
   const { items: scheduledItems } = useScheduledMessages()
-  // ブラウザのデスクトップ通知（既存ポーリングのunread_count/unread_mention_count増分に相乗り。
-  // タブ非表示時のみ通知）
+  // ブラウザのデスクトップ通知①（既存ポーリングのunread_count/unread_mention_count増分に相乗り。
+  // タブ非表示時のみ通知）。notif_modeはサーバー側（me.notif_mode）を正とする（2026-09-11、②追加時に変更）
   const {
     permission: notifPermission,
     requestPermission: requestNotifPermission,
     mode: notifMode,
     setMode: setNotifMode,
     supported: notifSupported,
-  } = useDesktopNotifications(joined, dms, me.id)
+  } = useDesktopNotifications(joined, dms, me.id, me.notif_mode)
+  // デスクトップ通知②（Web Push、タブ・ブラウザを閉じていても届く）。①の許可が下りたタイミングで
+  // Service Workerの登録・購読を試みる（VAPID未設定ならサーバー側で何もしないだけで①は影響を受けない）
+  usePushSubscription(notifPermission)
   // UI全体の表示倍率（案A、ユーザーからの要望「設定で文字の大きさを変えたい」）
   const { zoom: uiZoom, setZoom: setUiZoom } = useUiZoom()
   const [modalOpen, setModalOpen] = useState(false)

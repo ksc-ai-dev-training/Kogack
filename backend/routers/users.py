@@ -33,13 +33,18 @@ async def search_users(q: str = "", limit: int = 20, user: CurrentUser = Depends
 class UpdateMeRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=21)
     picture_url: str | None = None
+    # デスクトップ通知①・②共通の対象範囲設定（2026-09-11。従来localStorageのみで管理していたが、
+    # ②はサーバー側で誰に送るか判定する必要があるためDBへ移した。NotificationSettingsButton.tsx参照）
+    notif_mode: str | None = None
 
 
 @router.put("/me")
 async def update_me(body: UpdateMeRequest, user: CurrentUser = Depends(require_auth)):
-    """A-62: 自分のプロフィール更新（表示名・アイコン。F-37/F-39）。name/picture_urlはいずれも省略可
-    （指定したフィールドのみ更新する）。email/roleはここでは変更できない。表示名の重複は許容し、
-    UNIQUE制約を設けない（基本設計書5.20節「設計判断」）。"""
+    """A-62: 自分のプロフィール更新（表示名・アイコン・通知設定。F-37/F-39）。name/picture_url/
+    notif_modeはいずれも省略可（指定したフィールドのみ更新する）。email/roleはここでは変更できない。
+    表示名の重複は許容し、UNIQUE制約を設けない（基本設計書5.20節「設計判断」）。"""
+    if body.notif_mode is not None and body.notif_mode not in ("all", "mentions"):
+        raise HTTPException(422, detail="不正なnotif_modeです")
     pool = get_pool()
     if body.name is not None:
         await pool.execute("UPDATE users SET name = $2, updated_at = now() WHERE id = $1", user.id, body.name)
@@ -47,10 +52,16 @@ async def update_me(body: UpdateMeRequest, user: CurrentUser = Depends(require_a
         await pool.execute(
             "UPDATE users SET picture_url = $2, updated_at = now() WHERE id = $1", user.id, body.picture_url
         )
-    row = await pool.fetchrow("SELECT id, email, name, role, picture_url FROM users WHERE id = $1", user.id)
+    if body.notif_mode is not None:
+        await pool.execute(
+            "UPDATE users SET notif_mode = $2, updated_at = now() WHERE id = $1", user.id, body.notif_mode
+        )
+    row = await pool.fetchrow(
+        "SELECT id, email, name, role, picture_url, notif_mode FROM users WHERE id = $1", user.id
+    )
     return {
         "id": str(row["id"]), "email": row["email"], "name": row["name"],
-        "role": row["role"], "picture_url": row["picture_url"],
+        "role": row["role"], "picture_url": row["picture_url"], "notif_mode": row["notif_mode"],
     }
 
 

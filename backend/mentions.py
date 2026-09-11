@@ -114,6 +114,27 @@ async def insert_mention_blocks(
     return blocks
 
 
+def mention_summary(blocks: list[dict]) -> tuple[bool, set[str]]:
+    """発言のmention系ブロックから「@channelが含まれるか」「個人宛て・@hereで具体的に
+    特定された対象user_id集合」を取り出す。デスクトップ通知②（services/push_sender.py）が、
+    参加者ごとに「この発言は自分宛てか」を判定するために使う（@channelは参加者全員が対象なので
+    個別のuser_idを持たず、channel_wide=Trueとして別扱いにする）"""
+    channel_wide = False
+    ids: set[str] = set()
+    for b in blocks:
+        if b.get("block_type") != "mention":
+            continue
+        payload = b.get("payload") or {}
+        kind = payload.get("kind")
+        if kind == "channel":
+            channel_wide = True
+        elif kind == "here":
+            ids.update(payload.get("user_ids") or [])
+        elif payload.get("target_user_id"):
+            ids.add(str(payload["target_user_id"]))
+    return channel_wide, ids
+
+
 async def fetch_blocks_grouped(pool, message_ids: list[int]) -> dict[int, list[dict]]:
     """複数メッセージ分のブロックを1クエリでまとめて取得する（A-10/A-13のN+1回避）"""
     if not message_ids:

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
+import { apiFetch } from '../lib/api'
 import type { Channel, Dm } from '../types'
 
 const NOTIF_SUPPORTED = typeof window !== 'undefined' && 'Notification' in window
@@ -8,19 +9,9 @@ export type NotifPermission = 'unsupported' | 'default' | 'granted' | 'denied'
 // 'all' = 所属チャンネルの全新着＋DM、'mentions' = 自分へのメンションとDMのみ（Slackの既定に近い）
 export type NotifMode = 'all' | 'mentions'
 
-const MODE_KEY = 'kogack_notif_mode'
-
 function currentPermission(): NotifPermission {
   if (!NOTIF_SUPPORTED) return 'unsupported'
   return Notification.permission as NotifPermission
-}
-
-function readMode(): NotifMode {
-  try {
-    return localStorage.getItem(MODE_KEY) === 'mentions' ? 'mentions' : 'all'
-  } catch {
-    return 'all'
-  }
 }
 
 // デスクトップ通知が実際に使える状態か（許可済み）。useChannels/useDmsが、通知を出すために
@@ -38,10 +29,17 @@ export function desktopNotificationsEnabled(): boolean {
 //
 // mode='mentions'（既定は'all'）のときは、チャンネルの一般的な新着では通知せず、自分がF-41で
 // メンションされた発言とDMの新着のみ通知する（DMは元々「自分宛て」なのでmodeに関わらず通知対象）。
-export function useDesktopNotifications(joined: Channel[], dms: Dm[], meId: string | undefined) {
+//
+// initialModeは`me.notif_mode`（A-04レスポンス）を渡す。従来はlocalStorageのみで管理していたが、
+// ②（Web Push、services/push_sender.py）はサーバー自身が「誰に送るか」を判定する必要があるため
+// サーバー側（DB）を正とする設定に変更した（2026-09-11）。setModeはローカルstateを即座に更新
+// しつつ、A-62（PUT /api/users/me）で永続化する。
+export function useDesktopNotifications(
+  joined: Channel[], dms: Dm[], meId: string | undefined, initialMode: NotifMode,
+) {
   const navigate = useNavigate()
   const [permission, setPermission] = useState<NotifPermission>(currentPermission)
-  const [mode, setModeState] = useState<NotifMode>(readMode)
+  const [mode, setModeState] = useState<NotifMode>(initialMode)
   // 会話キー -> 直近に観測した {未読件数, 自分へのメンション未読件数}。
   // 初回観測時はベースラインとして記録するだけ（通知しない）
   const seenRef = useRef<Map<string, { count: number; mentions: number }>>(new Map())
@@ -59,11 +57,10 @@ export function useDesktopNotifications(joined: Channel[], dms: Dm[], meId: stri
 
   const setMode = useCallback((m: NotifMode) => {
     setModeState(m)
-    try {
-      localStorage.setItem(MODE_KEY, m)
-    } catch {
-      // プライベートブラウジング等でlocalStorageが使えなくても致命的ではない（このセッション内では効く）
-    }
+    apiFetch('/api/users/me', { method: 'PUT', body: JSON.stringify({ notif_mode: m }) }).catch(() => {
+      // 保存に失敗してもこのタブ内では選択どおり動く（サーバー側の設定は次回起動時まで古いまま
+      // 残りうるが、②プッシュの対象判定がわずかにずれるだけで致命的ではない）
+    })
   }, [])
 
   useEffect(() => {

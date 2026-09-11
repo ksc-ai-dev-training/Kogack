@@ -61,7 +61,8 @@ export default function NotificationSettingsButton({
           {permission === 'default' && (
             <>
               <p className="mb-2 leading-relaxed text-ink-subtle">
-                他のタブやアプリを見ている間に届いた新着を、OSの通知で知らせます。
+                他のタブやアプリを見ている間、またはブラウザを閉じている間に届いた新着を、
+                OSの通知で知らせます（対応ブラウザのみ、閉じている間の通知はベストエフォートです）。
               </p>
               <button
                 type="button"
@@ -114,6 +115,7 @@ export default function NotificationSettingsButton({
               </label>
               <p className="mt-2 leading-relaxed text-ink-subtle">
                 Kogackのタブを開いて操作している間は通知しません（サイドバーの未読バッジで分かるため）。
+                ブラウザを閉じている間の通知は対応ブラウザでのみ届きます。
               </p>
             </>
           )}

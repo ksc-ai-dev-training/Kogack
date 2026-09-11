@@ -1,6 +1,7 @@
 # A-16〜A-19（詳細設計書 API設計4.4節、総論5.1節）
 # グループDM対応。参加者は開始時に固定（開始後の追加・削除は対象外、05-1_詳細設計書_DB設計.html 3.17節）。
 # 自分専用DM（F-05、direct_message_membersが自分1行のみ）にも対応する
+import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,7 @@ from auth_helpers import CurrentUser, require_auth, require_dm_member
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped
+from services import push_sender
 
 router = APIRouter(prefix="/api/dms", tags=["dms"])
 
@@ -289,6 +291,8 @@ async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser =
         )
         blocks = await insert_mention_blocks(conn, row["id"], body.mentions, dm_id=dm_id, sender_user_id=user.id)
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
+    # デスクトップ通知②（Web Push、2026-09-11）。投稿完了を待たせないfire-and-forget起動
+    asyncio.create_task(push_sender.notify_dm_message(dm_id, user.id, user.name, body.body, f"/dms/{dm_id}"))
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
         blocks,

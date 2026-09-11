@@ -6,6 +6,7 @@
 # S-06チャンネル設定は「チャンネル管理者」「基本設定」「キャラクタ」「振る舞い定義」「定期投稿」
 # 「自動応答トリガー」の6タブを実装し、「参照ドキュメント範囲」「スキル」「反応モード」「自動対応範囲」の
 # 4タブは対応する基盤（ドキュメント索引・自動対応分類）が未実装のため対象外（CLAUDE.md 実装状況節）。
+import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,7 +19,7 @@ from auth_helpers import (
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped
-from services import ai_agent, doc_permissions, trigger_matcher
+from services import ai_agent, doc_permissions, push_sender, trigger_matcher
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -650,6 +651,11 @@ async def post_message(
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     await trigger_matcher.maybe_trigger(channel_id, body.body)
     await ai_agent.maybe_trigger(channel_id, body.body, user.id)
+    # デスクトップ通知②（Web Push、2026-09-11）。投稿完了を待たせないfire-and-forget起動
+    # （AIメンション応答・自動応答トリガーと同じ非同期パターン）
+    asyncio.create_task(
+        push_sender.notify_channel_message(channel_id, user.id, user.name, body.body, blocks, f"/channels/{channel_id}")
+    )
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
         blocks,

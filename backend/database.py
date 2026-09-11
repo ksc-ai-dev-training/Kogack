@@ -600,6 +600,30 @@ CREATE TABLE IF NOT EXISTS message_reactions (
 CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions (message_id);
 ALTER TABLE message_reactions ENABLE ROW LEVEL SECURITY;
 
+-- デスクトップ通知②（Web Push、2026-09-11、ユーザーからの明示的な要望「アプリを閉じていても
+-- 通知が来るようにしたい」）。①（Web Notifications API、タブが開いている間のみ）に続く追加。
+-- notif_modeは従来localStorageのみで管理していた「すべての新着」/「メンション・DMのみ」を
+-- サーバー側にも持たせたもの（②はサーバー自身が誰に送るか判定する必要があるため）。
+-- ①（hooks/useDesktopNotifications.ts）・②（services/push_sender.py）の両方がこの値を参照する。
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_mode TEXT NOT NULL DEFAULT 'all'
+    CHECK (notif_mode IN ('all', 'mentions'));
+
+-- T-27 push_subscriptions: Web Push購読情報。1利用者が複数端末（会社PC・自宅PC等）で購読できるよう
+-- endpoint単位で複数行持てる（UNIQUE(user_id, endpoint)で同じ端末の重複購読のみ防ぐ）。
+-- p256dh/authはブラウザが発行する暗号化用の公開鍵・認証シークレット（暗号化はブラウザ側の
+-- 秘密鍵で復号されるため、サーバー・プッシュ配送業者とも本文を読めない）。
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint    TEXT NOT NULL,
+    p256dh      TEXT NOT NULL,
+    auth        TEXT NOT NULL,
+    user_agent  TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, endpoint)
+);
+ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+
 -- 文字数制限の見直し（2026-09-09、ユーザーからの明示的な要望）にともなう既存データの一括整形。
 -- ユーザー名（21字）・チャンネル名（80字）・チャンネル説明文（500字）の新しい上限を超えている
 -- 既存の行を先頭から切り詰める（LEFTは文字数ベースでマルチバイト文字も正しく扱う）。

@@ -26,6 +26,9 @@ class CurrentUser:
     name: str
     role: str
     picture_url: str | None
+    # デスクトップ通知（①・②共通）の対象範囲設定。②（Web Push、services/push_sender.py）は
+    # サーバー自身がこの値を見て送るかどうかを判断するため、CurrentUserにも持たせておく
+    notif_mode: str = "all"
 
 
 def issue_jwt(user_id: int, role: str) -> str:
@@ -47,14 +50,14 @@ async def require_auth(request: Request) -> CurrentUser:
         raise HTTPException(401, detail="認証が必要です")
     payload = verify_jwt(token)
     row = await get_pool().fetchrow(
-        "SELECT id, email, name, role, is_active, picture_url FROM users WHERE id = $1",
+        "SELECT id, email, name, role, is_active, picture_url, notif_mode FROM users WHERE id = $1",
         int(payload["sub"]),
     )
     if row is None or not row["is_active"]:
         raise HTTPException(401, detail="認証が必要です")
     return CurrentUser(
         id=row["id"], email=row["email"], name=row["name"],
-        role=row["role"], picture_url=row["picture_url"],
+        role=row["role"], picture_url=row["picture_url"], notif_mode=row["notif_mode"],
     )
 
 

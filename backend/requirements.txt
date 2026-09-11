@@ -15,3 +15,5 @@ openai>=2.9,<3
 # 層2ドキュメントQ&Aの索引化（Slice 3）。アップロードされたPDF/Wordからテキストを抽出する
 pypdf>=5.1
 python-docx>=1.1
+# デスクトップ通知②（Web Push、2026-09-11）。VAPID署名・購読先への暗号化送信
+pywebpush>=2.5

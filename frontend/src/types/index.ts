@@ -8,6 +8,9 @@ export interface Me {
   name: string
   role: Role
   picture_url: string | null
+  /** デスクトップ通知①・②共通の対象範囲設定（2026-09-11。従来localStorageのみで管理していたが、
+   * ②（Web Push）はサーバー側で誰に送るか判定する必要があるためDBへ移した） */
+  notif_mode: 'all' | 'mentions'
 }
 
 /** 開発用ログイン（/api/auth/dev-users）で使う。設計書には無いローカル開発専用の型 */

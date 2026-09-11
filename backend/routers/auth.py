@@ -219,5 +219,5 @@ async def me(user: CurrentUser = Depends(require_auth)):
     )
     return {
         "id": str(user.id), "email": user.email, "name": user.name,
-        "role": user.role, "picture_url": user.picture_url,
+        "role": user.role, "picture_url": user.picture_url, "notif_mode": user.notif_mode,
     }
