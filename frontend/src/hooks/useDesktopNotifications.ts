@@ -6,8 +6,10 @@ import type { Channel, Dm } from '../types'
 const NOTIF_SUPPORTED = typeof window !== 'undefined' && 'Notification' in window
 
 export type NotifPermission = 'unsupported' | 'default' | 'granted' | 'denied'
-// 'all' = 所属チャンネルの全新着＋DM、'mentions' = 自分へのメンションとDMのみ（Slackの既定に近い）
-export type NotifMode = 'all' | 'mentions'
+// 'all' = 所属チャンネルの全新着＋DM、'mentions' = 自分へのメンションとDMのみ（Slackの既定に近い）、
+// 'off' = 通知を一切出さない（2026-09-11追加。ブラウザの通知許可自体は維持したまま、アプリ側の
+// 設定だけで止められるようにした。ユーザーからの要望「通知をオフにするオプションを追加」）
+export type NotifMode = 'all' | 'mentions' | 'off'
 
 function currentPermission(): NotifPermission {
   if (!NOTIF_SUPPORTED) return 'unsupported'
@@ -29,6 +31,7 @@ export function desktopNotificationsEnabled(): boolean {
 //
 // mode='mentions'（既定は'all'）のときは、チャンネルの一般的な新着では通知せず、自分がF-41で
 // メンションされた発言とDMの新着のみ通知する（DMは元々「自分宛て」なのでmodeに関わらず通知対象）。
+// mode='off'のときは（ブラウザの許可自体は'granted'のままでも）一切通知を出さない。
 //
 // initialModeは`me.notif_mode`（A-04レスポンス）を渡す。従来はlocalStorageのみで管理していたが、
 // ②（Web Push、services/push_sender.py）はサーバー自身が「誰に送るか」を判定する必要があるため
@@ -109,6 +112,9 @@ export function useDesktopNotifications(
       // prevがundefined＝この会話を初めて観測したタイミング。ベースライン記録のみで通知しない
       // （ページ読み込み直後に既存の未読ぶんがまとめて通知されるのを防ぐ）
       if (prev === undefined) continue
+      // mode==='off'でも観測（ベースライン更新）自体は続ける。ここで丸ごとスキップせず継続すると、
+      // 後で'all'/'mentions'に戻したときにオフだった間の未読が一気に「新着」扱いで通知されてしまう
+      if (mode === 'off') continue
       if (conv.mentions > prev.mentions) mentionHits.push(conv)
       else if (conv.count > prev.count && (conv.isDm || mode === 'all')) messageHits.push(conv)
     }

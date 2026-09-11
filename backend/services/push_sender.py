@@ -72,9 +72,9 @@ async def _send_to_subscription(sub_row, payload: dict) -> None:
 async def notify_channel_message(
     channel_id: int, sender_id: int, sender_name: str, body: str, blocks: list[dict], url: str,
 ) -> None:
-    """A-11投稿後に呼ぶ。notif_mode='mentions'の利用者には、この発言が実際に自分宛て
-    （個人宛てメンション／@channel／@here）のときだけ送る（①のクライアント側ロジックと同じ判断
-    基準。mentions.mention_summaryでブロックから判定する）。DMと異なりnotif_modeを尊重する。"""
+    """A-11投稿後に呼ぶ。notif_mode='off'の利用者には一切送らず、'mentions'の利用者には、この
+    発言が実際に自分宛て（個人宛てメンション／@channel／@here）のときだけ送る（①のクライアント側
+    ロジックと同じ判断基準。mentions.mention_summaryでブロックから判定する）。"""
     if not is_configured():
         return
     pool = get_pool()
@@ -92,6 +92,8 @@ async def notify_channel_message(
     )
     body_excerpt = _excerpt(body)
     for r in rows:
+        if r["notif_mode"] == "off":
+            continue
         is_mentioned = channel_wide or str(r["user_id"]) in mentioned_ids
         if r["notif_mode"] == "mentions" and not is_mentioned:
             continue
@@ -103,19 +105,24 @@ async def notify_channel_message(
 
 
 async def notify_dm_message(dm_id: int, sender_id: int, sender_name: str, body: str, url: str) -> None:
-    """A-19投稿後に呼ぶ。DMは①と同じくnotif_modeに関わらず常に通知対象とする
-    （DM自体が既に「自分宛て」であるため。useDesktopNotifications.tsのisDm扱いと同じ）。"""
+    """A-19投稿後に呼ぶ。DMは①と同じく'mentions'/'all'の区別なく常に通知対象とする（DM自体が
+    既に「自分宛て」であるため。useDesktopNotifications.tsのisDm扱いと同じ）。ただし'off'
+    （2026-09-11追加、ユーザーからの要望「通知をオフにするオプション」）のときはDMも含め
+    一切送らない——「オフ」は文字どおり全面的な無効化であるべきという判断（基本設計書6.2節）。"""
     if not is_configured():
         return
     pool = get_pool()
     rows = await pool.fetch(
-        """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
+        """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.notif_mode
            FROM direct_message_members dmm
-           JOIN push_subscriptions ps ON ps.user_id = dmm.user_id
+           JOIN users u ON u.id = dmm.user_id
+           JOIN push_subscriptions ps ON ps.user_id = u.id
            WHERE dmm.dm_id = $1 AND dmm.user_id != $2""",
         dm_id, sender_id,
     )
     body_excerpt = _excerpt(body)
     payload = {"title": sender_name, "body": body_excerpt, "url": url, "tag": f"kogack-d-{dm_id}"}
     for r in rows:
+        if r["notif_mode"] == "off":
+            continue
         await _send_to_subscription(r, payload)

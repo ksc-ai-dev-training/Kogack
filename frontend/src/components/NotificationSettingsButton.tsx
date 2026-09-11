@@ -27,10 +27,15 @@ export default function NotificationSettingsButton({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  const glyph = permission === 'denied' ? '🔕' : '🔔'
+  // mode==='off'のときはブラウザの許可自体はgrantedのままでも、見た目上は🔕（ブロック時と同じ
+  // ミュート表現）にして「今は届かない」ことがひと目で分かるようにする
+  const muted = permission === 'denied' || (permission === 'granted' && mode === 'off')
+  const glyph = muted ? '🔕' : '🔔'
   const btnTitle =
     permission === 'granted'
-      ? 'デスクトップ通知の設定'
+      ? mode === 'off'
+        ? 'デスクトップ通知はオフになっています'
+        : 'デスクトップ通知の設定'
       : permission === 'denied'
         ? 'デスクトップ通知はブラウザの設定でブロックされています'
         : 'デスクトップ通知'
@@ -42,9 +47,9 @@ export default function NotificationSettingsButton({
         onClick={() => setOpen((v) => !v)}
         title={btnTitle}
         className={`rounded p-1.5 ${
-          permission === 'granted'
+          permission === 'granted' && mode !== 'off'
             ? 'text-accent-600 hover:bg-surface-muted'
-            : permission === 'denied'
+            : muted
               ? 'text-ink-subtle opacity-50 hover:bg-surface-muted'
               : 'text-ink-subtle hover:bg-surface-muted hover:text-ink-muted'
         }`}
@@ -100,7 +105,7 @@ export default function NotificationSettingsButton({
                   <span className="block text-ink-subtle">所属チャンネルの全メッセージとDM</span>
                 </span>
               </label>
-              <label className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 hover:bg-surface-muted">
+              <label className="mb-1 flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 hover:bg-surface-muted">
                 <input
                   type="radio"
                   name="notif-mode"
@@ -113,9 +118,23 @@ export default function NotificationSettingsButton({
                   <span className="block text-ink-subtle">自分が名指しされた発言とDMだけ</span>
                 </span>
               </label>
+              <label className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 hover:bg-surface-muted">
+                <input
+                  type="radio"
+                  name="notif-mode"
+                  className="mt-0.5"
+                  checked={mode === 'off'}
+                  onChange={() => setMode('off')}
+                />
+                <span>
+                  <span className="font-semibold text-ink">オフ</span>
+                  <span className="block text-ink-subtle">通知を受け取らない</span>
+                </span>
+              </label>
               <p className="mt-2 leading-relaxed text-ink-subtle">
                 Kogackのタブを開いて操作している間は通知しません（サイドバーの未読バッジで分かるため）。
-                ブラウザを閉じている間の通知は対応ブラウザでのみ届きます。
+                ブラウザを閉じている間の通知は対応ブラウザでのみ届きます。ブラウザの通知許可自体を
+                取り消したい場合はブラウザのサイト設定から行う必要があります。
               </p>
             </>
           )}

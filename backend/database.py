@@ -607,6 +607,14 @@ ALTER TABLE message_reactions ENABLE ROW LEVEL SECURITY;
 -- ①（hooks/useDesktopNotifications.ts）・②（services/push_sender.py）の両方がこの値を参照する。
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_mode TEXT NOT NULL DEFAULT 'all'
     CHECK (notif_mode IN ('all', 'mentions'));
+-- 'off'（通知をすべてオフにする、2026-09-11）を追加するため制約を広げる。既存値はall/mentionsの
+-- ままなので広げても既存データに違反は起きない。2026-09-09に確立したパターンどおり、旧制約名を
+-- 明示的にDROPしてから同名でADDし直す（旧ADD文自体は残さない。旧ADD文を残したまま次回起動すると、
+-- 既にoff値を持つ行に対して旧い狭い制約が再実行されCheckViolationErrorで起動が失敗する事故が
+-- 過去にdoc_foldersで発生したため）。既定値は'all'のまま変更しない（通知を許可するまでは
+-- どのnotif_modeでも通知が一切飛ばないという既存の前提は変わらないため、既定を'off'にする必要はない）。
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_notif_mode_check;
+ALTER TABLE users ADD CONSTRAINT users_notif_mode_check CHECK (notif_mode IN ('all', 'mentions', 'off'));
 
 -- T-27 push_subscriptions: Web Push購読情報。1利用者が複数端末（会社PC・自宅PC等）で購読できるよう
 -- endpoint単位で複数行持てる（UNIQUE(user_id, endpoint)で同じ端末の重複購読のみ防ぐ）。

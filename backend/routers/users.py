@@ -34,7 +34,8 @@ class UpdateMeRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=21)
     picture_url: str | None = None
     # デスクトップ通知①・②共通の対象範囲設定（2026-09-11。従来localStorageのみで管理していたが、
-    # ②はサーバー側で誰に送るか判定する必要があるためDBへ移した。NotificationSettingsButton.tsx参照）
+    # ②はサーバー側で誰に送るか判定する必要があるためDBへ移した。'off'は2026-09-11に追加
+    # （ユーザーからの要望「通知をオフにするオプション」）。NotificationSettingsButton.tsx参照）
     notif_mode: str | None = None
 
 
@@ -43,7 +44,7 @@ async def update_me(body: UpdateMeRequest, user: CurrentUser = Depends(require_a
     """A-62: 自分のプロフィール更新（表示名・アイコン・通知設定。F-37/F-39）。name/picture_url/
     notif_modeはいずれも省略可（指定したフィールドのみ更新する）。email/roleはここでは変更できない。
     表示名の重複は許容し、UNIQUE制約を設けない（基本設計書5.20節「設計判断」）。"""
-    if body.notif_mode is not None and body.notif_mode not in ("all", "mentions"):
+    if body.notif_mode is not None and body.notif_mode not in ("all", "mentions", "off"):
         raise HTTPException(422, detail="不正なnotif_modeです")
     pool = get_pool()
     if body.name is not None:
