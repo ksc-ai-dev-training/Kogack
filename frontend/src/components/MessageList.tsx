@@ -772,7 +772,11 @@ export function EmojiGridPopover({
 
 // 発言本文の下に表示するリアクション一覧（絵文字＋件数のピル）。既に自分が付けている絵文字は
 // アクセントカラーで強調し、クリックで同じ絵文字をもう一度トグル（削除）できる。誰が付けたかは
-// タイトル属性（ホバー時のツールチップ）で見られるようにした
+// ホバー時のカスタムツールチップ（黒い吹き出し）で見られるようにした（ユーザーからの明示的な
+// 要望「黒い吹き出しで文字も大きくして見やすいようにしたい」、2026-09-11。従来はブラウザ標準の
+// title属性を使っており、文字が小さく表示までの遅延・見た目の一貫性がOS/ブラウザ依存だった）。
+// `group`（ボタン自身）＋`invisible/opacity-0`→`group-hover:visible/opacity-100`のCSSのみの
+// 実装（JS側の開閉状態管理は不要）。`absolute`配置のため通常のレイアウトフローには影響しない
 export function ReactionPills({
   reactions,
   onToggle,
@@ -788,12 +792,11 @@ export function ReactionPills({
           key={r.emoji}
           type="button"
           onClick={() => onToggle(r.emoji)}
-          title={r.user_names.join('、')}
           // ホバーで少し拡大・クリック中は少し縮小するマイクロインタラクション
           // （ユーザーからの明示的な要望「カーソルを合わせると少しだけ枠が大きくなる」
           // 「クリックしたら一瞬小さくなってクリックした感を出す」）。active:はマウスの
           // 押下中〜離すまでの間だけ適用されるため、追加のstate管理無しで「一瞬」の縮小を表現できる
-          className={`flex scale-100 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] transition-transform duration-150 hover:scale-110 active:scale-90 ${
+          className={`group relative flex scale-100 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] transition-transform duration-150 hover:scale-110 active:scale-90 ${
             r.reacted_by_me
               ? 'border-accent-600 bg-accent-50 text-accent-700'
               : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-subtle'
@@ -801,6 +804,12 @@ export function ReactionPills({
         >
           <span>{r.emoji}</span>
           <span className="text-[11px] font-semibold">{r.count}</span>
+          <span
+            role="tooltip"
+            className="pointer-events-none invisible absolute bottom-full left-1/2 z-20 mb-2 w-max max-w-[220px] -translate-x-1/2 whitespace-normal break-words rounded-lg bg-ink px-2.5 py-1.5 text-center text-[13px] font-medium leading-snug text-white opacity-0 shadow-[0_8px_20px_rgba(16,24,40,0.25)] transition-opacity duration-150 group-hover:visible group-hover:opacity-100 after:absolute after:left-1/2 after:top-full after:-ml-1 after:border-4 after:border-transparent after:border-t-ink"
+          >
+            {r.user_names.join('、')}
+          </span>
         </button>
       ))}
     </div>
