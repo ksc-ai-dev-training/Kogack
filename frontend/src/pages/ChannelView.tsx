@@ -10,8 +10,9 @@ import MessageList from '../components/MessageList'
 import Composer, { type MentionCandidate } from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
+import ChannelNotifButton from '../components/ChannelNotifButton'
 import { useToast } from '../components/Toast'
-import type { AttachmentPayload, MentionPayload } from '../types'
+import type { AttachmentPayload, ChannelNotifMode, MentionPayload } from '../types'
 
 // S-03 チャンネル会話＋S-04 スレッド表示（このスライスは添付・送信予約は未実装）
 export default function ChannelView() {
@@ -23,7 +24,7 @@ export default function ChannelView() {
   // アンカー取得しない（ThreadPanel側へ渡すことで、そちらのMessageListがハイライトする）
   const highlightId = searchParams.get('highlight')
   const { me } = useMe()
-  const { channel, error: channelError } = useChannel(channelId)
+  const { channel, error: channelError, mutate: mutateChannel } = useChannel(channelId)
   const { joined, mutate: mutateChannelsList } = useChannels()
   const { members } = useChannelMembers(channelId)
   // F-41 メンション候補。先頭は @channel（チャンネル全員への通知）、次にチャンネルAI（有効な
@@ -199,6 +200,21 @@ export default function ChannelView() {
     }
   }
 
+  // チャンネルごとの通知設定（ユーザーからの明示的な要望「チャンネルごとに通知設定できる機能を
+  // 付けられる？」）。ChannelNotifButton自身が保存前に楽観的に呼び、保存失敗時は元の値で再度
+  // 呼んで巻き戻す（コンポーネント側のコメント参照）。ここではAPI呼び出し自体は行わず、
+  // A-06（useChannel）・A-05（useChannels、サイドバーのバッジ抑制用）の両方のSWRキャッシュを
+  // revalidateなしで直接更新するだけに留める（保存の成否に関わらず即座に画面へ反映するため）
+  const handleChannelNotifModeChanged = (mode: ChannelNotifMode) => {
+    if (!channelId) return
+    mutateChannel((prev) => (prev ? { ...prev, notif_mode: mode } : prev), { revalidate: false })
+    mutateChannelsList(
+      (prev) =>
+        prev ? { ...prev, joined: prev.joined.map((c) => (c.id === channelId ? { ...c, notif_mode: mode } : c)) } : prev,
+      { revalidate: false },
+    )
+  }
+
   return (
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -234,6 +250,13 @@ export default function ChannelView() {
             >
               📝 {summarizing ? '要約中...' : '要約'}
             </button>
+          )}
+          {channel && (
+            <ChannelNotifButton
+              channelId={channelId!}
+              mode={channel.notif_mode ?? 'default'}
+              onChanged={handleChannelNotifModeChanged}
+            />
           )}
           {(channel?.is_channel_admin || me?.role === 'admin') && (
             <Link

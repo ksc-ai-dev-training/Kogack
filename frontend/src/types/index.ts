@@ -33,7 +33,12 @@ export interface Channel {
   /** joined一覧にのみ含まれる。未読のうち自分がF-41メンションされた件数（サイドバーの赤い@バッジ・
    * デスクトップ通知の「メンション・DMのみ」モード用） */
   unread_mention_count?: number
+  /** チャンネルごとの通知設定（channel_members.notif_mode、2026-09-11）。'default'は全体設定
+   * （me.notif_mode）に従う。joined一覧・ChannelDetailの両方に含まれる */
+  notif_mode?: ChannelNotifMode
 }
+
+export type ChannelNotifMode = 'default' | 'all' | 'mentions' | 'off'
 
 export interface ChannelDetail extends Channel {
   member_count: number

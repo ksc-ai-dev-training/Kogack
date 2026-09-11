@@ -83,6 +83,10 @@ export function useDesktopNotifications(
       label: string
       to: string
       isDm: boolean
+      // チャンネルごとの通知設定（2026-09-11）。'default'以外なら全体設定（mode）より優先する
+      // （services/push_sender.pyの実効設定計算と同じ考え方）。DMには今回の機能を対象外としたため
+      // 常にmode（全体設定）をそのまま使う
+      effectiveMode: NotifMode
     }
     const convs: Conv[] = [
       ...joined.map((c) => ({
@@ -92,6 +96,7 @@ export function useDesktopNotifications(
         label: `#${c.name}`,
         to: `/channels/${c.id}`,
         isDm: false,
+        effectiveMode: c.notif_mode && c.notif_mode !== 'default' ? c.notif_mode : mode,
       })),
       ...dms.map((d) => ({
         key: `d:${d.id}`,
@@ -100,6 +105,7 @@ export function useDesktopNotifications(
         label: d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、'),
         to: `/dms/${d.id}`,
         isDm: true,
+        effectiveMode: mode,
       })),
     ]
 
@@ -112,11 +118,12 @@ export function useDesktopNotifications(
       // prevがundefined＝この会話を初めて観測したタイミング。ベースライン記録のみで通知しない
       // （ページ読み込み直後に既存の未読ぶんがまとめて通知されるのを防ぐ）
       if (prev === undefined) continue
-      // mode==='off'でも観測（ベースライン更新）自体は続ける。ここで丸ごとスキップせず継続すると、
-      // 後で'all'/'mentions'に戻したときにオフだった間の未読が一気に「新着」扱いで通知されてしまう
-      if (mode === 'off') continue
+      // effectiveMode==='off'でも観測（ベースライン更新）自体は続ける。ここで丸ごとスキップせず
+      // 継続すると、後で'all'/'mentions'に戻したときにオフだった間の未読が一気に「新着」扱いで
+      // 通知されてしまう
+      if (conv.effectiveMode === 'off') continue
       if (conv.mentions > prev.mentions) mentionHits.push(conv)
-      else if (conv.count > prev.count && (conv.isDm || mode === 'all')) messageHits.push(conv)
+      else if (conv.count > prev.count && (conv.isDm || conv.effectiveMode === 'all')) messageHits.push(conv)
     }
     // 一覧から消えた会話（退出・削除）のキーは掃除する
     const liveKeys = new Set(convs.map((c) => c.key))

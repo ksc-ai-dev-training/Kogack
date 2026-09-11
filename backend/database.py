@@ -637,6 +637,14 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
 
+-- チャンネルごとの通知設定（ユーザーからの明示的な要望「チャンネルごとに通知設定できる機能」、
+-- 2026-09-11）。T-03 channel_membersに追加し、利用者×チャンネルの1行に自然に収まる（新規テーブルは
+-- 不要）。'default'は「全体設定（users.notif_mode）に従う」を意味し、それ以外（all/mentions/off）は
+-- このチャンネルに限った上書き。①（hooks/useDesktopNotifications.ts）・②（services/push_sender.py）
+-- の両方がこの値を参照する（users.notif_modeと同じ3値＋'default'）。
+ALTER TABLE channel_members ADD COLUMN IF NOT EXISTS notif_mode TEXT NOT NULL DEFAULT 'default'
+    CHECK (notif_mode IN ('default', 'all', 'mentions', 'off'));
+
 -- 文字数制限の見直し（2026-09-09、ユーザーからの明示的な要望）にともなう既存データの一括整形。
 -- ユーザー名（21字）・チャンネル名（80字）・チャンネル説明文（500字）の新しい上限を超えている
 -- 既存の行を先頭から切り詰める（LEFTは文字数ベースでマルチバイト文字も正しく扱う）。

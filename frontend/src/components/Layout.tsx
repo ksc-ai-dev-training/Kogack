@@ -265,8 +265,13 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </div>
             <ul>
               {joined.map((c) => {
-                const unread = c.unread_count ?? 0
-                const mentions = c.unread_mention_count ?? 0
+                // チャンネルごとの通知設定（2026-09-11）で「オフ（ミュート）」を選んだチャンネルは
+                // 未読バッジ・太字表示も抑える（全体設定のoffはバッジには影響しない既存仕様とは
+                // 意図的に区別。ユーザーが選んだ推奨案どおり。'default'/'all'/'mentions'は通知の
+                // 出し分けのみに関わり、バッジ表示自体は従来どおり）
+                const muted = c.notif_mode === 'off'
+                const unread = muted ? 0 : (c.unread_count ?? 0)
+                const mentions = muted ? 0 : (c.unread_mention_count ?? 0)
                 return (
                   <li key={c.id} className="my-px">
                     <GuardedNavLink to={`/channels/${c.id}`} className={({ isActive }) => navItemClass(isActive)}>

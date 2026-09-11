@@ -74,7 +74,9 @@ async def notify_channel_message(
 ) -> None:
     """A-11投稿後に呼ぶ。notif_mode='off'の利用者には一切送らず、'mentions'の利用者には、この
     発言が実際に自分宛て（個人宛てメンション／@channel／@here）のときだけ送る（①のクライアント側
-    ロジックと同じ判断基準。mentions.mention_summaryでブロックから判定する）。"""
+    ロジックと同じ判断基準。mentions.mention_summaryでブロックから判定する）。
+    チャンネルごとの通知設定（channel_members.notif_mode、2026-09-11）が'default'以外の場合は
+    全体設定（users.notif_mode）より優先する——このチャンネルに限った上書きという位置づけ。"""
     if not is_configured():
         return
     pool = get_pool()
@@ -83,7 +85,8 @@ async def notify_channel_message(
         return
     channel_wide, mentioned_ids = mention_summary(blocks)
     rows = await pool.fetch(
-        """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.id AS user_id, u.notif_mode
+        """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.id AS user_id, u.notif_mode,
+               cm.notif_mode AS channel_notif_mode
            FROM channel_members cm
            JOIN users u ON u.id = cm.user_id
            JOIN push_subscriptions ps ON ps.user_id = u.id
@@ -92,10 +95,11 @@ async def notify_channel_message(
     )
     body_excerpt = _excerpt(body)
     for r in rows:
-        if r["notif_mode"] == "off":
+        effective_mode = r["channel_notif_mode"] if r["channel_notif_mode"] != "default" else r["notif_mode"]
+        if effective_mode == "off":
             continue
         is_mentioned = channel_wide or str(r["user_id"]) in mentioned_ids
-        if r["notif_mode"] == "mentions" and not is_mentioned:
+        if effective_mode == "mentions" and not is_mentioned:
             continue
         title = "あなたへのメンション" if is_mentioned else f"#{channel_name}"
         payload = {

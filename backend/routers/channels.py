@@ -48,7 +48,7 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
     入らないため対象外＝正しい）。"""
     pool = get_pool()
     joined = await pool.fetch(
-        """SELECT c.*,
+        """SELECT c.*, cm.notif_mode,
                (SELECT count(*) FROM messages msg
                 WHERE msg.channel_id = c.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
@@ -85,6 +85,7 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
                 **_channel_out(r),
                 "unread_count": r["unread_count"],
                 "unread_mention_count": r["unread_mention_count"],
+                "notif_mode": r["notif_mode"],
             }
             for r in joined
         ],
@@ -144,6 +145,14 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
         "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
         channel_id, user.id,
     )
+    # チャンネルごとの通知設定（2026-09-11）。会話画面ヘッダーの🔔ボタンの初期状態用。
+    # 非参加者（システムadminがS-08経由でS-06を開いた場合等）にはchannel_members行自体が
+    # 無いためNoneになるが、その場合はヘッダー自体が表示されない画面遷移になっている
+    # （is_member=falseの分岐、ChannelView.tsx）ため実害は無い
+    notif_mode = await pool.fetchval(
+        "SELECT notif_mode FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+        channel_id, user.id,
+    )
     # AIメンションのハイライト表示・メンション候補一覧へのAI表示用（いずれもF-41同様の見た目にする、
     # フロント側の要望）。A-23と異なり参加者全員がA-06を呼べるため、ここで軽量に返す
     # （services/ai_agent.detect_mentionと同じ「@ペルソナ名」文字列一致をフロントでも再現するために必要。
@@ -159,6 +168,7 @@ async def get_channel(channel_id: int, user: CurrentUser = Depends(require_chann
         "ai_persona_name": (ai_row["persona_name"] if ai_row else None) or "Kogack AI",
         "ai_persona_icon_url": ai_row["persona_icon_url"] if ai_row else None,
         "ai_is_enabled": bool(ai_row["is_ai_enabled"]) if ai_row else False,
+        "notif_mode": notif_mode or "default",
     }
 
 
@@ -475,6 +485,28 @@ async def update_visibility(
     if row is None:
         raise HTTPException(404, detail="見つかりません")
     return {"id": str(row["id"]), "is_public": row["is_public"]}
+
+
+class UpdateChannelNotifModeRequest(BaseModel):
+    notif_mode: str = Field(pattern="^(default|all|mentions|off)$")
+
+
+@router.put("/{channel_id}/notif-mode")
+async def update_channel_notif_mode(
+    channel_id: int, body: UpdateChannelNotifModeRequest, user: CurrentUser = Depends(require_channel_member),
+):
+    """チャンネルごとの通知設定（ユーザーからの明示的な要望「チャンネルごとに通知設定できる機能」、
+    2026-09-11）。T-03 channel_members.notif_modeを自分の行についてのみ更新する。'default'は
+    「全体設定（A-62のusers.notif_mode）に従う」を意味し、それ以外（all/mentions/off）はこの
+    チャンネルに限った上書き。①（useDesktopNotifications.ts）・②（push_sender.py）の両方が
+    A-05/このAPIの値を実効設定の計算に使う。フロント（Layout.tsx）は'off'のときだけサイドバーの
+    未読バッジ・太字表示も抑える（全体設定のoffがバッジには影響しない既存仕様とは意図的に区別、
+    基本設計書6.2節）。"""
+    await get_pool().execute(
+        "UPDATE channel_members SET notif_mode = $3 WHERE channel_id = $1 AND user_id = $2",
+        channel_id, user.id, body.notif_mode,
+    )
+    return {"channel_id": str(channel_id), "notif_mode": body.notif_mode}
 
 
 @router.post("/{channel_id}/read")
