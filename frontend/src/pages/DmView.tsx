@@ -40,7 +40,10 @@ export default function DmView() {
     // ChannelViewと同じ理由でハイライトジャンプ中は末尾自動スクロールを止める
     if (highlightId && !threadId) return
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
-  }, [messages.length, highlightId, threadId])
+    // バグ修正（2026-09-11）: ChannelView.tsxと同じ不具合・同じ対処
+    // （AI応答本文が「生成中…」から実際の長い回答へ更新される際、messages.lengthが変化しないため
+    // 従来はスクロール位置が据え置かれ、長い回答の1行目しか見えなかった）
+  }, [messages.length, messages[messages.length - 1]?.updated_at, highlightId, threadId])
 
   useEffect(() => {
     // ChannelViewと同じ、ハイライト表示の一時的な?highlight=クリア

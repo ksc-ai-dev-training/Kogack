@@ -153,7 +153,10 @@ export default function ThreadPanel({
   useEffect(() => {
     if (highlightInReplies) return
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
-  }, [replies.length, highlightInReplies])
+    // バグ修正（2026-09-11）: ChannelView.tsx/DmView.tsxと同じ不具合・同じ対処。スレッド内での
+    // AIメンション応答・要約でも同じ「生成中…→長い本文」の更新でスクロール位置が据え置かれる
+    // 症状が起きるため、最後の返信のupdated_atも依存配列に加える
+  }, [replies.length, replies[replies.length - 1]?.updated_at, highlightInReplies])
 
   const send = async (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
     await apiFetch(`/api/messages/${messageId}/thread`, {

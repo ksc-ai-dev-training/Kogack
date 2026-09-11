@@ -74,7 +74,15 @@ export default function ChannelView() {
     // を上書きしてしまい、常に末尾に戻ってしまう）
     if (highlightId && !threadId) return
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
-  }, [messages.length, highlightId, threadId])
+    // バグ修正（2026-09-11）: 従来はmessages.lengthのみを依存配列にしていたため、AI応答が
+    // 「生成中…」の短いプレースホルダとして追加された直後（length変化）はここで末尾へスクロール
+    // するが、その後プレースホルダの本文が実際の長い回答へ更新される（同じ行の内容が変わるだけで
+    // lengthは変化しない）タイミングではこの効果が再発火せず、スクロール位置が「生成中…」だった
+    // 頃の高さのまま据え置かれてしまい、結果として長い回答の1行目だけが見えて続きは手動スクロール
+    // が必要という不具合が発生していた（ユーザーからの報告）。最後のメッセージのupdated_at
+    // （本文確定・生成完了時に必ず更新される、2026-09-04の同様の修正で確立済みの列）も依存配列に
+    // 加え、本文が更新されたときにも再度末尾へスクロールするようにした。
+  }, [messages.length, messages[messages.length - 1]?.updated_at, highlightId, threadId])
 
   useEffect(() => {
     // ハイライト表示は一時的なもの。数秒経ったら?highlight=をURLから外し、通常の
