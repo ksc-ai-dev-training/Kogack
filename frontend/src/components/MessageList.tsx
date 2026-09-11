@@ -618,7 +618,11 @@ export function ReactionPills({
           type="button"
           onClick={() => onToggle(r.emoji)}
           title={r.user_names.join('、')}
-          className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] ${
+          // ホバーで少し拡大・クリック中は少し縮小するマイクロインタラクション
+          // （ユーザーからの明示的な要望「カーソルを合わせると少しだけ枠が大きくなる」
+          // 「クリックしたら一瞬小さくなってクリックした感を出す」）。active:はマウスの
+          // 押下中〜離すまでの間だけ適用されるため、追加のstate管理無しで「一瞬」の縮小を表現できる
+          className={`flex scale-100 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] transition-transform duration-150 hover:scale-110 active:scale-90 ${
             r.reacted_by_me
               ? 'border-accent-600 bg-accent-50 text-accent-700'
               : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-subtle'
