@@ -31,7 +31,7 @@ export default function DmView() {
   const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-    updateMessageReactions,
+    updateMessageReactions, updateMessage,
   } = useMessages(dmId ? `/api/dms/${dmId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(dmId, dm?.unread_count, messages, me?.id)
   const listRef = useRef<HTMLDivElement>(null)
@@ -126,6 +126,7 @@ export default function DmView() {
             openThreadId={threadId}
             onDeleted={removeMessage}
             onReactionToggled={updateMessageReactions}
+            onEdited={updateMessage}
             unreadDividerMessageId={unreadDividerMessageId}
             highlightMessageId={highlightId}
           />

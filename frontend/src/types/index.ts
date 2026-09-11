@@ -179,6 +179,9 @@ export interface Message {
   generation_status: 'generating' | null
   /** F-14 やりとりの要約で生成された発言かどうか（要約ボタン経由。通常のAIメンション応答はfalse） */
   is_summary?: boolean
+  /** 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージを編集できるようにしたい」）。
+   * trueのとき本文の隣に「（編集済み）」を表示する */
+  is_edited?: boolean
   /** 元発言のみに含まれる（S-04スレッド表示への導線。A-10/A-18）。返信自体には付かない */
   thread_reply_count?: number
   /** F-41 @メンション。DM発言は常に空配列（候補元のA-46がチャンネル専用のため） */

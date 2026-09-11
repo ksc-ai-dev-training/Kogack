@@ -647,6 +647,7 @@ export default function MessageList({
   openThreadId,
   onDeleted,
   onReactionToggled,
+  onEdited,
   showDaySeparators = true,
   members,
   unreadDividerMessageId,
@@ -663,6 +664,10 @@ export default function MessageList({
    * 担う」パターン）。渡さない場合は次のポーリングで自然に反映される（ThreadPanelの元発言ヘッダー
    * 等、独立した表示のみの箇所を想定） */
   onReactionToggled?: (messageId: string, reactions: Message['reactions']) => void
+  /** 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージを編集できるようにしたい」）
+   * が成功した直後、呼び出し元にその場での反映を任せるためのコールバック（onDeleted等と同じ
+   * パターン）。渡さない場合は次のポーリングで自然に反映される */
+  onEdited?: (updated: Message) => void
   /** S-04スレッド返信欄では表示しない（画面モックアップに合わせる。既定はtrue） */
   showDaySeparators?: boolean
   /** F-41 @メンションの表示名解決に使う（チャンネル参加者一覧。DM会話では渡さない） */
@@ -717,6 +722,39 @@ export default function MessageList({
     }
   }
 
+  // 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージに限っては、メッセージを
+  // 送った後でも編集できる機能が欲しい」）。同時に編集できるのは1件のみ（メッセージid単位でstate
+  // を持つ、絵文字ピッカーのemojiPickerForと同じ考え方）。本文以外（@メンション・添付ファイル）は
+  // 編集対象外（バックエンドの設計判断どおり、本文のテキストのみを書き換える）
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editBody, setEditBody] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const startEdit = (m: Message) => {
+    setEditingId(m.id)
+    setEditBody(m.body)
+  }
+  const cancelEdit = () => setEditingId(null)
+  const saveEdit = async (messageId: string) => {
+    const trimmed = editBody.trim()
+    if (!trimmed) {
+      toast('本文を入力してください', 'error')
+      return
+    }
+    setSavingEdit(true)
+    try {
+      const updated = await apiFetch<Message>(`/api/messages/${messageId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ body: trimmed }),
+      })
+      onEdited?.(updated)
+      setEditingId(null)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '編集に失敗しました', 'error')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   // 絵文字リアクション（A-75、ユーザーからの明示的な要望）。絵文字ピッカーはメッセージid単位で
   // 開閉を管理する（同時に複数開く必要は無いため、単一のstateで足りる）。anchorはEmojiGridPopoverを
   // document.bodyへポータル配置する基準（ユーザーからの報告「投稿欄の裏に隠れて見えない」の修正）
@@ -764,6 +802,11 @@ export default function MessageList({
         // （F-36定期投稿・F-38自動応答トリガーは内容のあるBOT発言のため対象外にしない。基本設計書6.2節「設計判断」）
         const isSystemNotice = m.sender_type === 'bot' && m.sender_name === 'システム通知'
         const canDelete = !isSystemNotice && !!me && (m.sender_user_id === me.id || me.role === 'admin')
+        // 発言の編集は**投稿者本人限定**（削除と異なりadminバイパスは無い。本人が言っていない
+        // 内容を第三者が書き換えられる機能にはしない、という判断。バックエンドのedit_messageも
+        // 同じ制約）。システム通知・AI/BOT発言はsender_user_idが無いため自然に対象外になる
+        const canEdit = !!me && m.sender_user_id === me.id
+        const isEditing = editingId === m.id
         // 既にスレッドがある発言でも「返信」ボタンを出す（押すとそのスレッドが開く。ユーザーからの
         // 明示的な要望。従来はthread_reply_count>0のとき下の「💬 N件の返信」導線のみだった）。
         // システム通知は引き続き対象外
@@ -825,8 +868,53 @@ export default function MessageList({
                     </span>
                   )}
                   <span className="text-[11px] text-ink-subtle">{formatTime(m.created_at)}</span>
+                  {m.is_edited && (
+                    // 発言の編集（ユーザーからの明示的な要望「編集したメッセージに関しては
+                    // （編集済み）と明記されていることが望ましい」）
+                    <span className="text-[11px] text-ink-subtle">（編集済み）</span>
+                  )}
                 </div>
-                {m.generation_status === 'generating' ? (
+                {isEditing ? (
+                  <div className="mt-1">
+                    <textarea
+                      autoFocus
+                      value={editBody}
+                      onChange={(e) => setEditBody(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Composer.tsxと同じ規約: Enter=改行、Ctrl+Enter（Macは⌘+Enter）=保存、Escape=取消
+                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                          e.preventDefault()
+                          saveEdit(m.id)
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault()
+                          cancelEdit()
+                        }
+                      }}
+                      rows={Math.min(10, Math.max(2, editBody.split('\n').length))}
+                      maxLength={4000}
+                      className="w-full resize-none rounded-lg border border-accent-600 px-2.5 py-1.5 text-[13.5px] leading-[1.75] text-ink outline-none focus:ring-4 focus:ring-accent-50"
+                    />
+                    <div className="mt-1 flex items-center gap-2 text-[11.5px]">
+                      <button
+                        type="button"
+                        disabled={savingEdit}
+                        onClick={() => saveEdit(m.id)}
+                        className="rounded-md bg-accent-600 px-2.5 py-1 font-semibold text-white disabled:opacity-40"
+                      >
+                        {savingEdit ? '保存中…' : '保存'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingEdit}
+                        onClick={cancelEdit}
+                        className="rounded-md px-2.5 py-1 text-ink-muted hover:bg-surface-muted"
+                      >
+                        キャンセル
+                      </button>
+                      <span className="text-ink-subtle">Ctrl+Enterで保存・Escapeで取消</span>
+                    </div>
+                  </div>
+                ) : m.generation_status === 'generating' ? (
                   <div className="mt-0.5 flex items-center gap-2 text-[12.5px] text-ink-subtle">
                     <span className="inline-flex items-center gap-1">
                       <span className="inline-flex gap-[3px]">
@@ -891,7 +979,7 @@ export default function MessageList({
                   </button>
                 )}
               </div>
-              {(canReact || showReplyButton || canDelete) && (
+              {!isEditing && (canReact || showReplyButton || canDelete || canEdit) && (
                 // 常時flowに置くと表示/非表示の切替で下の発言がガタつくため、絶対配置でホバー時だけ重ねて出す。
                 // リアクションのクイックボタン・絵文字ピッカーボタンは返信・削除ボタンの左隣に置く
                 // （ユーザーからの明示的な要望どおりの配置）。バー全体を1枚の枠（枠線＋背景＋影）で
@@ -908,7 +996,7 @@ export default function MessageList({
                       }
                     />
                   )}
-                  {canReact && (showReplyButton || canDelete) && (
+                  {canReact && (showReplyButton || canDelete || canEdit) && (
                     <span className="mx-0.5 h-4 w-px flex-none bg-line" aria-hidden="true" />
                   )}
                   {showReplyButton && (
@@ -918,6 +1006,15 @@ export default function MessageList({
                       className="rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-accent-700"
                     >
                       返信
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(m)}
+                      className="rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-accent-700"
+                    >
+                      編集
                     </button>
                   )}
                   {canDelete && (

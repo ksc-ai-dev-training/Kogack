@@ -150,6 +150,8 @@ def _message_out(
         # F-14 やりとりの要約はチャンネルのみ対応（A-15がチャンネル専用API）のためDMでは常にfalseだが、
         # 他2ルーターと同じ分岐に揃えておく
         "is_summary": row["is_summary"],
+        # 発言の編集（ユーザーからの明示的な要望）。他2ルーターと同じ分岐に揃えておく
+        "is_edited": row["edited_at"] is not None,
         # F-41 @メンション（バグ修正2026-09-04でDMも対応。候補元はdirect_message_members）。
         # 添付ファイル（F-07）はメンションより前から候補元に依存せずDMでも対応済み。
         "blocks": blocks or [],

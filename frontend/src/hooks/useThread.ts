@@ -50,5 +50,12 @@ export function useThread(messageId: string | null) {
     mutate({ items: state.current.items, has_more: false }, { revalidate: false })
   }
 
-  return { replies: data?.items ?? ([] as Message[]), error, isLoading, mutate, updateReplyReactions }
+  // 発言の編集（ユーザーからの明示的な要望）のその場反映（updateReplyReactionsと同じ考え方）
+  const updateReplyMessage = (updated: Message) => {
+    if (!state.current) return
+    state.current.items = state.current.items.map((m) => (m.id === updated.id ? updated : m))
+    mutate({ items: state.current.items, has_more: false }, { revalidate: false })
+  }
+
+  return { replies: data?.items ?? ([] as Message[]), error, isLoading, mutate, updateReplyReactions, updateReplyMessage }
 }

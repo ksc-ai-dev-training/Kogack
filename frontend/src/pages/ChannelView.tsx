@@ -56,7 +56,7 @@ export default function ChannelView() {
   const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-    updateMessageReactions,
+    updateMessageReactions, updateMessage,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(
     channelId,
@@ -253,6 +253,7 @@ export default function ChannelView() {
             openThreadId={threadId}
             onDeleted={removeMessage}
             onReactionToggled={updateMessageReactions}
+            onEdited={updateMessage}
             members={members}
             unreadDividerMessageId={unreadDividerMessageId}
             aiPersonaName={channel?.ai_persona_name}

@@ -41,6 +41,8 @@ def _message_out(
         # F-14 やりとりの要約で生成された発言かどうか（ユーザーからの要望、フロントが専用バッジを出す）。
         # スレッド全体の要約はここ（A-13/A-14）を通る唯一の経路
         "is_summary": row["is_summary"],
+        # 発言の編集（ユーザーからの明示的な要望）。他2ルーターと同じ分岐に揃えておく
+        "is_edited": row["edited_at"] is not None,
         "blocks": blocks or [],
         "attachments": attachments or [],
         # 絵文字リアクション（ユーザーからの明示的な要望）。channels.py/dms.pyの_message_outと
@@ -90,6 +92,61 @@ async def delete_message(message_id: int, user: CurrentUser = Depends(require_au
         "UPDATE messages SET deleted_at = now(), deleted_by = $2 WHERE id = $1", message_id, user.id
     )
     return {"id": str(message_id), "deleted": True}
+
+
+class EditMessageRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+@router.put("/{message_id}")
+async def edit_message(message_id: int, body: EditMessageRequest, user: CurrentUser = Depends(require_auth)):
+    """発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージに限っては、メッセージを
+    送った後でも編集できる機能が欲しい。編集したメッセージには（編集済み）と明記してほしい」）。
+    要件定義書上のF-xxに対応付けられた機能ではない新規追加。**A-12削除と異なり投稿者本人限定
+    （adminバイパスは無い）**——削除は「消す」だけだが編集は「本文を書き換える」ため、本人以外に
+    許可すると本人が言っていない内容を第三者が作文できてしまう。システム通知（F-43）・AI/BOT発言は
+    sender_user_idを持たないため自然に対象外になる（本人チェックで弾かれる）。本文以外
+    （@メンションの構造化message_blocks・添付ファイル）は編集の対象外とした——本文の再解析は
+    通知の再送信・AIの再起動等の副作用に発展しうるため、今回は単純な誤字修正用途を想定し
+    本文の書き換えのみに絞った（編集後の本文に新しく「@氏名」等を書いてもクリック可能な
+    メンションとしては扱われず、リンク化・太字等の装飾記法のみそのまま解釈される）。"""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT channel_id, dm_id, sender_user_id FROM messages WHERE id = $1 AND deleted_at IS NULL",
+        message_id,
+    )
+    if row is None:
+        raise HTTPException(404, detail="見つかりません")
+
+    if row["channel_id"] is not None:
+        is_member = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+            row["channel_id"], user.id,
+        )
+    else:
+        is_member = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM direct_message_members WHERE dm_id = $1 AND user_id = $2)",
+            row["dm_id"], user.id,
+        )
+    if not is_member and row["sender_user_id"] != user.id:
+        # 参加していない会話にある他人の発言は存在自体を伏せる（A-12等と同じ考え方）。投稿後に
+        # 退出した本人（is_member=false・本人）は編集自体は許可する（次の分岐を素通りする）
+        raise HTTPException(404, detail="見つかりません")
+    if row["sender_user_id"] != user.id:
+        raise HTTPException(403, detail="権限がありません")
+
+    updated = await pool.fetchrow(
+        "UPDATE messages SET body = $2, edited_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
+        message_id, body.body,
+    )
+    blocks_by_message = await fetch_blocks_grouped(pool, [message_id])
+    attachments_by_message = await fetch_attachments_grouped(pool, [message_id])
+    reactions_by_message = await fetch_reactions_grouped(pool, [message_id], user.id)
+    return _message_out(
+        {**dict(updated), "sender_name": user.name, "sender_picture_url": user.picture_url},
+        blocks_by_message.get(message_id), attachments_by_message.get(message_id),
+        reactions_by_message.get(message_id),
+    )
 
 
 @router.post("/{message_id}/cancel-generation")

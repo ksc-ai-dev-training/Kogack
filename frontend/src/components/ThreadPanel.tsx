@@ -65,7 +65,7 @@ export default function ThreadPanel({
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
 }) {
-  const { replies, mutate: mutateReplies, updateReplyReactions } = useThread(messageId)
+  const { replies, mutate: mutateReplies, updateReplyReactions, updateReplyMessage } = useThread(messageId)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   // パネル幅のドラッグリサイズ。ドラッグ開始時のマウスX座標・幅をdragStartRefに記録し、
@@ -328,6 +328,7 @@ export default function ThreadPanel({
             onReplyDeleted?.()
           }}
           onReactionToggled={updateReplyReactions}
+          onEdited={updateReplyMessage}
         />
 
         <p className="mx-4 mb-3 mt-1 rounded-md border border-line bg-surface-subtle px-2.5 py-2 text-[11px] leading-relaxed text-ink-subtle">

@@ -117,6 +117,11 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 -- thread_parent_idが通常のAIメンション応答と同じくNULLになり構造上区別できないため、専用の
 -- フラグ列で明示する（services/ai_agent.start_summaryのみが true を立てる）
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_summary BOOLEAN NOT NULL DEFAULT false;
+-- F-xx 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージを送った後でも編集できる
+-- ようにしたい。編集したメッセージには（編集済み）と明記してほしい」）。編集したかどうかの
+-- フラグだけでなく実際の編集時刻も残しておく（監査ログ同様「本文差分は保持しない」設計だが、
+-- 「いつ編集されたか」自体は後から役立つ可能性があるため列として持たせる）
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 
 -- S-05横断検索（A-20）用（詳細設計書 API設計6.2節）。日本語形態素解析は導入せずpg_trgmの部分一致でよいと判断
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

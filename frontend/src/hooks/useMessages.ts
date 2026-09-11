@@ -139,8 +139,17 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
     mutate(state.current.messages, { revalidate: false })
   }
 
+  // 発言の編集（ユーザーからの明示的な要望）も同じ理由の楽観的更新。編集APIのレスポンスに
+  // 含まれる更新後の発言（body・is_edited・updated_at）をそのまま反映する
+  // （updateMessageReactionsと同じ「サーバーが実際に確定した値を使う」考え方）
+  const updateMessage = (updated: Message) => {
+    if (!state.current) return
+    state.current.messages = state.current.messages.map((m) => (m.id === updated.id ? updated : m))
+    mutate(state.current.messages, { revalidate: false })
+  }
+
   return {
     messages: data ?? [], error, isLoading, mutate,
-    bumpThreadReplyCount, removeMessage, decrementThreadReplyCount, updateMessageReactions,
+    bumpThreadReplyCount, removeMessage, decrementThreadReplyCount, updateMessageReactions, updateMessage,
   }
 }
