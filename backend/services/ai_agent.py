@@ -403,6 +403,17 @@ async def _run_chat_with_tools(
     結果をtoolメッセージとして返す、を繰り返す。最後の1ラウンドはtools自体を渡さず、
     モデルに必ずテキストで最終回答させる（ラウンド上限に達しても検索要求だけが続き
     テキストの回答が返らない、という空振りを防ぐ）。
+    **バグ修正（2026-09-11）: 1ラウンド目はtool_choice="required"で強制的にsearch_documentsを
+    呼ばせる。**tool_choiceを指定せず（既定"auto"）モデルの判断に任せると、gpt-4.1-nanoは
+    実際に関数を呼び出さないまま「search_documentsを実行しています。少々お待ちください。」の
+    ような予告の文章だけを返して応答を終えてしまうことがある（ユーザーからの報告で発覚、実機で
+    再現・検証済み。プロンプトへ「予告だけで終えるな」という指示を追加しても改善せず、8問中6問が
+    同じ失敗をした。1ラウンド目のみtool_choice="required"にする対処では、同条件で8問中8問とも
+    実際に検索してから正しく回答するようになった）。この対処は「このチャンネルに索引済み文書が
+    ある」場合にのみ提示されるツール（use_tools、doc_search.channel_has_indexed_documents）に対する
+    ものなので、雑談等ドキュメントと無関係な発言でも1回だけ余分にsearch_documentsが呼ばれる
+    （実機検証では最終的な回答の質・自然さに悪影響は無かった）。2ラウンド目以降は"auto"のままとし、
+    ドキュメントが不要な場合にまで毎ラウンド強制することはしない。
     戻り値: (最終応答テキスト, 集計済みusage{prompt_tokens,completion_tokens},
     citations[{folder_id,folder_name}]（実際に検索結果として使われた文書、重複排除済み）)"""
     client = ai_client.get_client()
@@ -413,9 +424,12 @@ async def _run_chat_with_tools(
     max_rounds = SEARCH_DOCUMENTS_MAX_ROUNDS if use_tools else 0
 
     for round_num in range(max_rounds + 1):
+        round_tools = tools if round_num < max_rounds else None
+        extra = {"tool_choice": "required"} if round_num == 0 and round_tools else {}
         res = await client.chat.completions.create(
             model=model, messages=messages, max_completion_tokens=MAX_OUTPUT_TOKENS,
-            tools=tools if round_num < max_rounds else None,
+            tools=round_tools,
+            **extra,
             **_completion_extra_kwargs(model),
         )
         if res.usage:
