@@ -6,6 +6,7 @@ import { useMe } from '../hooks/useMe'
 import { useDms } from '../hooks/useDms'
 import { apiFetch, ApiError } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
+import { currentUiZoomScale } from '../lib/uiZoom'
 import { useToast } from './Toast'
 
 const ROLE_LABELS: Record<string, string> = { admin: 'システム管理者', member: '一般' }
@@ -133,13 +134,28 @@ export default function ProfileCard({
   )
 
   if (anchor) {
-    const openUpward = anchor.bottom + CARD_HEIGHT_ESTIMATE > window.innerHeight
+    // ユーザーからの報告「画面を最大化し文字サイズを大/特大にすると、リアクション一覧（同じ
+    // anchor+position:fixed方式のEmojiGridPopover）が画面外にはみ出す」と同種のバグをこちらにも
+    // 発見したため同じ考え方で修正した（詳細な原理はEmojiGridPopover・currentUiZoomScaleのコメント
+    // 参照）。anchorはUI全体ズーム（lib/uiZoom.ts）適用後の実際の画面座標を返すが、
+    // CARD_WIDTH/CARD_HEIGHT_ESTIMATEはカード自身のCSS px指定を書いた定数のため、実際の画面上の
+    // footprint（scale倍）より小さく見積もってしまう分をscaleを掛けて補正する。さらにこのカード
+    // 自身もズーム済みsubtreeの子孫であるため、`style.left`等に代入する値はブラウザによって
+    // 描画時に「もう一度」scale倍されてしまう（実機検証で確認済み）ため、計算した画面上の実座標を
+    // scaleで割り戻してから代入する
+    const scale = currentUiZoomScale()
+    const marginPx = 6 * scale
+    const edgePaddingPx = 8 * scale
+    const widthPx = CARD_WIDTH * scale
+    const heightEstimatePx = CARD_HEIGHT_ESTIMATE * scale
+    const openUpward = anchor.bottom + heightEstimatePx > window.innerHeight
+    const leftOnScreen = Math.min(Math.max(anchor.left, edgePaddingPx), window.innerWidth - widthPx - edgePaddingPx)
     const style: CSSProperties = {
       position: 'fixed',
-      left: Math.min(Math.max(anchor.left, 8), window.innerWidth - CARD_WIDTH - 8),
+      left: leftOnScreen / scale,
       ...(openUpward
-        ? { bottom: window.innerHeight - anchor.top + 6 }
-        : { top: anchor.bottom + 6 }),
+        ? { bottom: (window.innerHeight - anchor.top + marginPx) / scale }
+        : { top: (anchor.bottom + marginPx) / scale }),
     }
     return createPortal(
       <div

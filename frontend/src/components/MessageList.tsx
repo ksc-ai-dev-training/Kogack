@@ -4,6 +4,7 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
+import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
@@ -718,11 +719,34 @@ export function EmojiGridPopover({
   // +6は下開き時に実際に使うanchor.bottomとの間隔（下記style参照）。この分を含めずに判定すると
   // 「ギリギリ収まる」と判定されたケースで実際には6px分だけ画面下端をはみ出すことがあったため
   // （実機検証で発見）、判定にも同じ余白を含める
-  const openUpward = anchor.bottom + 6 + EMOJI_GRID_HEIGHT_ESTIMATE > window.innerHeight
+  //
+  // ユーザーからの報告「画面を最大化し文字サイズを大/特大にすると、リアクション一覧が画面外に
+  // はみ出す」を受けて追加: このポップオーバーはdocument.bodyへcreatePortalされるため、UI全体
+  // ズーム（lib/uiZoom.ts、document.documentElementへ`zoom`スタイルを設定する方式）の対象subtree
+  // 内にある。ここで実機検証により2点のズーム由来のズレを特定した。(1) anchor
+  // （getBoundingClientRect）・window.innerWidth/innerHeightはズームに関わらず常に画面上の実際の
+  // 座標/サイズを返す一方、EMOJI_GRID_WIDTH/EMOJI_GRID_HEIGHT_ESTIMATEはポップオーバー自身のCSS px
+  // 指定（w-[240px]等）をそのまま書いた定数のため、実際の画面上の footprint（scale倍）より小さく
+  // 見積もってしまい、はみ出し判定・位置計算の両方が狂う → 判定用の定数にscaleを掛けて補正する。
+  // (2) このポップオーバー自身もズーム済みsubtreeの子孫のため、`style.left`等に代入した値は
+  // レンダリング時にブラウザ自身によって「もう一度」scale倍される（w-[240px]が実際には
+  // 240*scale pxとして描画されるのと全く同じ理屈）。(1)で計算した値は既に画面上の実座標系の値
+  // であるため、代入前にscaleで割り戻して「ブラウザに再度scale倍された結果が画面上の実座標に
+  // 一致する」ようにする必要がある（実機検証で、割り戻さないとポップオーバーが意図した位置より
+  // さらにscale倍ずれて画面外へ大きくはみ出すことを確認済み）
+  const scale = currentUiZoomScale()
+  const marginPx = 6 * scale
+  const edgePaddingPx = 8 * scale
+  const widthPx = EMOJI_GRID_WIDTH * scale
+  const heightEstimatePx = EMOJI_GRID_HEIGHT_ESTIMATE * scale
+  const openUpward = anchor.bottom + marginPx + heightEstimatePx > window.innerHeight
+  const leftOnScreen = Math.min(Math.max(anchor.right - widthPx, edgePaddingPx), window.innerWidth - widthPx - edgePaddingPx)
   const style: CSSProperties = {
     position: 'fixed',
-    left: Math.min(Math.max(anchor.right - EMOJI_GRID_WIDTH, 8), window.innerWidth - EMOJI_GRID_WIDTH - 8),
-    ...(openUpward ? { bottom: window.innerHeight - anchor.top + 6 } : { top: anchor.bottom + 6 }),
+    left: leftOnScreen / scale,
+    ...(openUpward
+      ? { bottom: (window.innerHeight - anchor.top + marginPx) / scale }
+      : { top: (anchor.bottom + marginPx) / scale }),
   }
 
   return createPortal(
