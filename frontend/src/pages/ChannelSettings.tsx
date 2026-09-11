@@ -743,12 +743,38 @@ function DocScopeTabBody({
       toast('公開チャンネルには限定公開のフォルダを含められません', 'error')
       return
     }
+    // フォルダ（parent_folder_id無しのitem_type='folder'）のチェックボックスは、その配下の
+    // 全ファイルとも連動させる（ユーザーからの明示的な要望「フォルダにチェックを入れたら
+    // 自動的にそのフォルダの中にあるファイルすべてにチェックが入るようにしてほしい」、
+    // 2026-09-11）。**単なる見た目の便宜ではなく機能上も必要**: 索引化（doc_chunks）は
+    // 個々のファイル自身に対して行われ、フォルダ自身のindex_status は常に'not_applicable'の
+    // ままindex_status='ready'になることが無いため（doc_search.search・channel_has_indexed_documents
+    // 参照）、フォルダのidだけをchannel_doc_foldersに入れても実際には何も検索対象に含まれない。
+    // 中のファイルを個別にチェックして初めてAI検索が機能する仕様のため、この連動が無いと
+    // 「フォルダにチェックを入れたのに何も参照されない」という分かりにくい状態になっていた。
+    const children = f.parent_folder_id === null && f.item_type === 'folder'
+      ? folders.filter((c) => c.parent_folder_id === f.id)
+      : []
+    const willCheck = !selected.has(f.id)
     setSelected((prev) => {
       const next = new Set(prev)
-      if (next.has(f.id)) next.delete(f.id)
-      else next.add(f.id)
+      if (willCheck) next.add(f.id)
+      else next.delete(f.id)
+      for (const c of children) {
+        // 公開チャンネルで限定公開の子ファイルは連動対象から除外する（disabled表示のチェック
+        // ボックスを裏側から勝手にONにしてしまわないよう、上のガードと同じ条件で守る）
+        if (isPublic && c.is_restricted) continue
+        if (willCheck) next.add(c.id)
+        else next.delete(c.id)
+      }
       return next
     })
+    // フォルダをチェックした際、連動して子ファイルにもチェックが入ったことがその場で見えるよう、
+    // まだ畳まれていれば展開する（未チェック化の際は畳んだままにする、チェックを外しただけで
+    // 表示状態まで変えると挙動が読みにくくなるため）
+    if (willCheck && children.length > 0) {
+      setExpandedFolders((prev) => new Set(prev).add(f.id))
+    }
   }
 
   const save = async (force = false) => {
