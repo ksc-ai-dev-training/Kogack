@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useAiSettings } from '../hooks/useAiSettings'
@@ -7,6 +7,8 @@ import { useDocFolders } from '../hooks/useDocFolders'
 import { useRecurringPosts } from '../hooks/useRecurringPosts'
 import { useTriggerRules } from '../hooks/useTriggerRules'
 import { useOverlayClose } from '../hooks/useOverlayClose'
+import { useReportDirty } from '../lib/unsavedChanges'
+import { GuardedLink } from '../components/GuardedLink'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
@@ -48,9 +50,9 @@ export default function ChannelSettings() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-none border-b border-line bg-surface px-7 py-3.5">
-        <Link to={`/channels/${channelId}`} className="text-xs text-accent-700 hover:underline">
+        <GuardedLink to={`/channels/${channelId}`} className="text-xs text-accent-700 hover:underline">
           ← # {channel?.name ?? ''} に戻る
-        </Link>
+        </GuardedLink>
         <div className="mt-1 text-[15px] font-bold text-ink">チャンネル設定</div>
       </div>
 
@@ -101,6 +103,18 @@ function ChannelInfoForm({
   const [name, setName] = useState(channel.name)
   const [topic, setTopic] = useState(channel.topic ?? '')
   const [saving, setSaving] = useState(false)
+  // 未保存の変更ガード（2026-09-11）。propの channel.name/topic は再検証のたびに更新されうる
+  // （trimされる等、微妙にlocal stateとズレることもある）ため、保存済みの値を専用のstateで
+  // 別管理し、保存成功時に更新する。**useRefではなくuseStateにしている**のは、useRefへの
+  // 単純な代入（baselineRef.current = ...）は値を変えるだけで再レンダーを引き起こさず、
+  // その後たまたま他の理由（他のstate更新等）で再レンダーが起きるまでuseReportDirty側の
+  // 判定が更新されない実バグを実機検証で発見したため（setName(trimmed)等の「保存後に入力欄も
+  // 揃える」処理が、末尾空白等が無く値が変わらない場合はReactの同値bailoutで再レンダー自体を
+  // 起こさず、保存直後もダイアログが出続ける不具合として顕在化した）。setBaselineは常に新しい
+  // オブジェクトを渡すため、値の変化に関わらず確実に再レンダーが起き、その場でdirty判定が
+  // 正しく更新される。
+  const [baseline, setBaseline] = useState({ name: channel.name, topic: channel.topic ?? '' })
+  useReportDirty(name !== baseline.name || topic !== baseline.topic)
 
   const save = async () => {
     const trimmed = name.trim()
@@ -110,10 +124,15 @@ function ChannelInfoForm({
     }
     setSaving(true)
     try {
+      const trimmedTopic = topic.trim()
       await apiFetch(`/api/channels/${channelId}`, {
         method: 'PUT',
-        body: JSON.stringify({ name: trimmed, topic: topic.trim() }),
+        body: JSON.stringify({ name: trimmed, topic: trimmedTopic }),
       })
+      // 入力欄も保存した値（trim後）に揃える
+      setName(trimmed)
+      setTopic(trimmedTopic)
+      setBaseline({ name: trimmed, topic: trimmedTopic })
       await onSaved()
       toast('チャンネル情報を更新しました')
     } catch (e) {
@@ -451,6 +470,11 @@ function CharacterTab({
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // 未保存の変更ガード（2026-09-11）。アイコンの新規選択（file !== null、まだアップロード
+  // していない）も未保存の変更として扱う。useRefではなくuseStateにしている理由は
+  // ChannelInfoForm.baselineのコメントを参照（保存成功時の再レンダーを確実にするため）
+  const [baseline, setBaseline] = useState({ name: settings.persona_name ?? 'Kogack AI', tone: settings.persona_tone ?? '' })
+  useReportDirty(name !== baseline.name || tone !== baseline.tone || file !== null)
 
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
   useEffect(() => {
@@ -481,14 +505,19 @@ function CharacterTab({
     setSaving(true)
     try {
       const iconUrl = file ? (await uploadIcon(file)).url : settings.persona_icon_url
+      const trimmedTone = tone.trim()
       await apiFetch(`/api/channels/${channelId}/ai-settings/character`, {
         method: 'PUT',
         body: JSON.stringify({
           persona_name: trimmed,
           persona_icon_url: iconUrl,
-          persona_tone: tone.trim() || null,
+          persona_tone: trimmedTone || null,
         }),
       })
+      // ChannelInfoForm.saveと同じ理由で、入力欄も保存した値（trim後）に揃える
+      setName(trimmed)
+      setTone(trimmedTone)
+      setBaseline({ name: trimmed, tone: trimmedTone })
       await mutate()
       setFile(null)
       toast('キャラクタを更新しました')
@@ -587,6 +616,10 @@ function PromptTab({
   const toast = useToast()
   const [prompt, setPrompt] = useState(settings.behavior_prompt ?? '')
   const [saving, setSaving] = useState(false)
+  // 未保存の変更ガード（2026-09-11）。useRefではなくuseStateにしている理由は
+  // ChannelInfoForm.baselineのコメントを参照
+  const [baseline, setBaseline] = useState(settings.behavior_prompt ?? '')
+  useReportDirty(prompt !== baseline)
 
   const save = async () => {
     setSaving(true)
@@ -595,6 +628,7 @@ function PromptTab({
         method: 'PUT',
         body: JSON.stringify({ behavior_prompt: prompt }),
       })
+      setBaseline(prompt)
       await mutate()
       toast('振る舞い定義を更新しました')
     } catch (e) {
@@ -715,6 +749,13 @@ function DocScopeTabBody({
   const [selected, setSelected] = useState(() => new Set(settings.folder_ids))
   const [policy, setPolicy] = useState(settings.out_of_scope_policy)
   const [saving, setSaving] = useState(false)
+  // 未保存の変更ガード（2026-09-11）。selectedはSetのため、並び順に依存しないソート済み配列で
+  // 比較する。保存成功時（force=trueの経路も含む）にbaselineを更新する。useRefではなく
+  // useStateにしている理由はChannelInfoForm.baselineのコメントを参照
+  const [baseline, setBaseline] = useState({ selected: [...settings.folder_ids].sort(), policy: settings.out_of_scope_policy })
+  const isDirty =
+    policy !== baseline.policy || JSON.stringify([...selected].sort()) !== JSON.stringify(baseline.selected)
+  useReportDirty(isDirty)
   // フォルダ名クリックで中身を展開/折りたたみする（ユーザーからの明示的な要望「フォルダ名をクリックすると
   // その中のファイルが表示されて、一つずつチェックボックスで選択できるみたいな感じ」）。既に選択済みの
   // ファイルを含むフォルダは初期状態から展開しておく（保存済みの選択が畳まれて見えなくなるのを防ぐ）
@@ -784,6 +825,7 @@ function DocScopeTabBody({
         method: 'PUT',
         body: JSON.stringify({ folder_ids: Array.from(selected), out_of_scope_policy: policy, force }),
       })
+      setBaseline({ selected: [...selected].sort(), policy })
       await mutate()
       toast('参照ドキュメント範囲を保存しました')
     } catch (e) {
@@ -1034,6 +1076,11 @@ function AutoResponseTab({
   const [saving, setSaving] = useState(false)
   const [editingCategory, setEditingCategory] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState('')
+  // 未保存の変更ガード（2026-09-11）。追加パネルの入力途中（newCategory）は対象外とし、
+  // 実際に保存対象となるrules配列の変更のみを見る。useRefではなくuseStateにしている理由は
+  // ChannelInfoForm.baselineのコメントを参照
+  const [baseline, setBaseline] = useState(JSON.stringify(settings.auto_response_rules))
+  useReportDirty(JSON.stringify(rules) !== baseline)
 
   const setLevel = (category: string, level: AutoResponseRule['response_level']) => {
     setRules((prev) => prev.map((r) => (r.request_category === category ? { ...r, response_level: level } : r)))
@@ -1084,6 +1131,7 @@ function AutoResponseTab({
         method: 'PUT',
         body: JSON.stringify({ rules }),
       })
+      setBaseline(JSON.stringify(rules))
       await mutate()
       toast('自動対応範囲を保存しました')
     } catch (e) {

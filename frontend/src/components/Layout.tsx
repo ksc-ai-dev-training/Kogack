@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, NavLink, useMatch, useNavigate, useSearchParams } from 'react-router'
+import { useMatch, useNavigate, useSearchParams } from 'react-router'
 import { apiFetch } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
@@ -10,6 +10,8 @@ import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { usePushSubscription } from '../hooks/usePushSubscription'
 import { useUiZoom } from '../hooks/useUiZoom'
 import { UI_ZOOM_LABELS, UI_ZOOM_ORDER } from '../lib/uiZoom'
+import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
+import { GuardedLink, GuardedNavLink } from './GuardedLink'
 import NotificationSettingsButton from './NotificationSettingsButton'
 import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
@@ -69,7 +71,12 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const settingsTab = searchParams.get('tab') ?? 'admin'
   const adminTab = searchParams.get('tab') ?? 'users'
 
+  const guardNavigation = useUnsavedChangesGuard()
+
   const logout = async () => {
+    // 未保存の変更ガード（2026-09-11）: ログアウトはLinkではないため、GuardedLink同様に
+    // ここでも確認を挟む
+    if (!(await guardNavigation())) return
     await apiFetch('/api/auth/logout', { method: 'POST' })
     // useMe()のSWRキャッシュを更新しないと、App.tsx側は依然ログイン中と判断して
     // /login を / へ跳ね返してしまう（ログアウトボタンが効かないように見えるバグの原因）。
@@ -112,13 +119,13 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               setMode={setNotifMode}
             />
           )}
-          <NavLink
+          <GuardedNavLink
             to="/search"
             title="横断検索"
             className="rounded p-1.5 text-ink-subtle hover:bg-surface-muted hover:text-ink-muted"
           >
             🔍
-          </NavLink>
+          </GuardedNavLink>
         </div>
 
         {settingsMatch ? (
@@ -126,12 +133,12 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">チャンネル設定</div>
             <ul>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=admin`}
                   className={navItemClass(settingsTab === 'admin')}
                 >
                   <span className="text-sm">👤</span>チャンネル管理者
-                </Link>
+                </GuardedLink>
               </li>
             </ul>
             <div className="mb-1.5 mt-4.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">
@@ -139,60 +146,60 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </div>
             <ul>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=general`}
                   className={navItemClass(settingsTab === 'general')}
                 >
                   <span className="text-sm">⚙️</span>基本設定
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=character`}
                   className={navItemClass(settingsTab === 'character')}
                 >
                   <span className="text-sm">🎭</span>キャラクタ
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=prompt`}
                   className={navItemClass(settingsTab === 'prompt')}
                 >
                   <span className="text-sm">📝</span>振る舞い定義
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=docscope`}
                   className={navItemClass(settingsTab === 'docscope')}
                 >
                   <span className="text-sm">📁</span>参照ドキュメント範囲
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=skills`}
                   className={navItemClass(settingsTab === 'skills')}
                 >
                   <span className="text-sm">🛠️</span>スキル
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=reaction`}
                   className={navItemClass(settingsTab === 'reaction')}
                 >
                   <span className="text-sm">💬</span>反応モード
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=auto`}
                   className={navItemClass(settingsTab === 'auto')}
                 >
                   <span className="text-sm">🎚️</span>自動対応範囲
-                </Link>
+                </GuardedLink>
               </li>
             </ul>
             <div className="mb-1.5 mt-4.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">
@@ -200,20 +207,20 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </div>
             <ul>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=recurring`}
                   className={navItemClass(settingsTab === 'recurring')}
                 >
                   <span className="text-sm">🔁</span>定期投稿
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link
+                <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=trigger`}
                   className={navItemClass(settingsTab === 'trigger')}
                 >
                   <span className="text-sm">⚡</span>自動応答トリガー
-                </Link>
+                </GuardedLink>
               </li>
             </ul>
           </div>
@@ -222,24 +229,24 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">管理コンソール</div>
             <ul>
               <li>
-                <Link to="/admin?tab=users" className={navItemClass(adminTab === 'users')}>
+                <GuardedLink to="/admin?tab=users" className={navItemClass(adminTab === 'users')}>
                   <span className="text-sm">👤</span>利用者管理
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link to="/admin?tab=docs" className={navItemClass(adminTab === 'docs')}>
+                <GuardedLink to="/admin?tab=docs" className={navItemClass(adminTab === 'docs')}>
                   <span className="text-sm">📁</span>ドキュメント参照範囲
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link to="/admin?tab=usage" className={navItemClass(adminTab === 'usage')}>
+                <GuardedLink to="/admin?tab=usage" className={navItemClass(adminTab === 'usage')}>
                   <span className="text-sm">💰</span>AI利用状況・コスト
-                </Link>
+                </GuardedLink>
               </li>
               <li>
-                <Link to="/admin?tab=audit" className={navItemClass(adminTab === 'audit')}>
+                <GuardedLink to="/admin?tab=audit" className={navItemClass(adminTab === 'audit')}>
                   <span className="text-sm">📋</span>監査ログ
-                </Link>
+                </GuardedLink>
               </li>
             </ul>
           </div>
@@ -262,7 +269,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                 const mentions = c.unread_mention_count ?? 0
                 return (
                   <li key={c.id} className="my-px">
-                    <NavLink to={`/channels/${c.id}`} className={({ isActive }) => navItemClass(isActive)}>
+                    <GuardedNavLink to={`/channels/${c.id}`} className={({ isActive }) => navItemClass(isActive)}>
                       <span className="flex-none text-ink-subtle">{c.is_public ? '#' : '🔒'}</span>
                       <span className={`min-w-0 flex-1 truncate ${unread > 0 ? 'font-bold text-ink' : ''}`}>
                         {c.name}
@@ -281,7 +288,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                           {unread > 99 ? '99+' : unread}
                         </span>
                       ) : null}
-                    </NavLink>
+                    </GuardedNavLink>
                   </li>
                 )
               })}
@@ -309,7 +316,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                 const firstMember = d.members[0]
                 return (
                   <li key={d.id} className="my-px">
-                    <NavLink to={`/dms/${d.id}`} className={({ isActive }) => navItemClass(isActive)}>
+                    <GuardedNavLink to={`/dms/${d.id}`} className={({ isActive }) => navItemClass(isActive)}>
                       {d.is_self && <span className="flex-none text-[13px]">📝</span>}
                       {firstMember?.picture_url ? (
                         <img
@@ -334,7 +341,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                           {d.unread_count > 99 ? '99+' : d.unread_count}
                         </span>
                       )}
-                    </NavLink>
+                    </GuardedNavLink>
                   </li>
                 )
               })}
@@ -366,7 +373,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </div>
           </div>
           {me.role === 'admin' && (
-            <NavLink
+            <GuardedNavLink
               to="/admin"
               className={({ isActive }) =>
                 `mb-2 flex items-center gap-1.5 rounded-[7px] px-2 py-1.5 text-xs font-medium ${
@@ -375,7 +382,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               }
             >
               🛠 管理コンソール
-            </NavLink>
+            </GuardedNavLink>
           )}
           <div className="flex items-center gap-2">
             <button
