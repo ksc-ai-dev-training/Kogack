@@ -52,7 +52,7 @@ export default function Login() {
 
   return (
     <div
-      className="flex min-h-screen items-center justify-center p-6"
+      className="flex min-h-[calc(100vh/var(--ui-zoom))] w-[calc(100vw/var(--ui-zoom))] items-center justify-center p-6"
       style={{
         background:
           'radial-gradient(circle at 20% 15%, #eef4ff 0%, var(--color-surface-muted) 45%, #eef2f7 100%)',

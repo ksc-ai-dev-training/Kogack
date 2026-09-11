@@ -42,6 +42,12 @@
   --color-code-text: #6d28d9;
 }
 
+/* UI全体の表示倍率（src/lib/uiZoom.ts）。実際の値は documentElement のインラインstyleで
+   上書きされるが、Layout/Login の h-[calc(100vh/var(--ui-zoom))] が常に解決できるよう既定を置く。 */
+:root {
+  --ui-zoom: 1;
+}
+
 body {
   @apply bg-surface-muted text-ink;
   font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", -apple-system, sans-serif;

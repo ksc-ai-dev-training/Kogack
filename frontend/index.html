@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kogack | AIネイティブチャットシステム</title>
+    <script>
+      // UI全体の表示倍率（src/lib/uiZoom.ts と同じ設定）をReactマウント前に適用し、初回描画の
+      // ちらつきを防ぐ。段階を増減するときは src/lib/uiZoom.ts の UI_ZOOM_SCALES と両方直すこと。
+      (function () {
+        try {
+          var z = localStorage.getItem('kogack_ui_zoom')
+          var s = z === 'small' ? 0.9 : z === 'large' ? 1.1 : z === 'xlarge' ? 1.25 : 1
+          document.documentElement.style.setProperty('--ui-zoom', String(s))
+          if (s !== 1) document.documentElement.style.zoom = String(s)
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

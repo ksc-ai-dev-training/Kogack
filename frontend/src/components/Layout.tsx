@@ -7,6 +7,8 @@ import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
 import { useScheduledMessages } from '../hooks/useScheduledMessages'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
+import { useUiZoom } from '../hooks/useUiZoom'
+import { UI_ZOOM_LABELS, UI_ZOOM_ORDER } from '../lib/uiZoom'
 import NotificationSettingsButton from './NotificationSettingsButton'
 import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
@@ -46,6 +48,8 @@ export default function Layout({ me, children }: { me: Me; children: React.React
     setMode: setNotifMode,
     supported: notifSupported,
   } = useDesktopNotifications(joined, dms, me.id)
+  // UI全体の表示倍率（案A、ユーザーからの要望「設定で文字の大きさを変えたい」）
+  const { zoom: uiZoom, setZoom: setUiZoom } = useUiZoom()
   const [modalOpen, setModalOpen] = useState(false)
   const [dmModalOpen, setDmModalOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
@@ -70,7 +74,9 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   }
 
   return (
-    <div className="flex h-screen bg-surface-muted">
+    // documentElement の zoom で全体を拡大する（src/lib/uiZoom.ts）。ビューポート基準の全画面
+    // サイズだけは zoom で割り戻さないと縦横スクロールが出るため calc で補正する。
+    <div className="flex h-[calc(100vh/var(--ui-zoom))] w-[calc(100vw/var(--ui-zoom))] bg-surface-muted">
       <aside className="flex w-[260px] flex-none flex-col border-r border-line bg-surface-subtle">
         <div className="flex h-14 flex-none items-center gap-2 border-b border-line bg-surface px-4">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent-600 to-accent-700 text-xs font-bold text-white">
@@ -334,6 +340,27 @@ export default function Layout({ me, children }: { me: Me; children: React.React
         )}
 
         <div className="flex-none border-t border-line p-3">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="flex-none text-[11px] text-ink-subtle">文字サイズ</span>
+            <div className="flex flex-1 overflow-hidden rounded-md border border-line">
+              {UI_ZOOM_ORDER.map((z) => (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={() => setUiZoom(z)}
+                  aria-pressed={uiZoom === z}
+                  title={`文字・表示の大きさを「${UI_ZOOM_LABELS[z]}」にする`}
+                  className={`flex-1 border-l border-line py-0.5 text-[11px] first:border-l-0 ${
+                    uiZoom === z
+                      ? 'bg-accent-600 font-semibold text-white'
+                      : 'text-ink-muted hover:bg-surface-muted'
+                  }`}
+                >
+                  {UI_ZOOM_LABELS[z]}
+                </button>
+              ))}
+            </div>
+          </div>
           {me.role === 'admin' && (
             <NavLink
               to="/admin"
