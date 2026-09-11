@@ -96,6 +96,13 @@ async def delete_message(message_id: int, user: CurrentUser = Depends(require_au
 
 class EditMessageRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
+    # 添付ファイルの編集（ユーザーからの明示的な要望「ファイルは編集の時に削除する機能も付けたい」、
+    # 2026-09-11）。remove_attachment_idsは既存の添付から外すもの、new_attachmentsはA-21で
+    # アップロード済みの新規ファイル（Composerの送信前と同じ「先にアップロード→参照だけ渡す」
+    # パターン）。@メンションは編集画面自体にボタンを置かない方針になったため対象外のまま
+    # （message_blocksは編集で更新しない）。
+    remove_attachment_ids: list[str] = Field(default_factory=list)
+    new_attachments: list[AttachmentInput] = Field(default_factory=list)
 
 
 @router.put("/{message_id}")
@@ -105,11 +112,10 @@ async def edit_message(message_id: int, body: EditMessageRequest, user: CurrentU
     要件定義書上のF-xxに対応付けられた機能ではない新規追加。**A-12削除と異なり投稿者本人限定
     （adminバイパスは無い）**——削除は「消す」だけだが編集は「本文を書き換える」ため、本人以外に
     許可すると本人が言っていない内容を第三者が作文できてしまう。システム通知（F-43）・AI/BOT発言は
-    sender_user_idを持たないため自然に対象外になる（本人チェックで弾かれる）。本文以外
-    （@メンションの構造化message_blocks・添付ファイル）は編集の対象外とした——本文の再解析は
-    通知の再送信・AIの再起動等の副作用に発展しうるため、今回は単純な誤字修正用途を想定し
-    本文の書き換えのみに絞った（編集後の本文に新しく「@氏名」等を書いてもクリック可能な
-    メンションとしては扱われず、リンク化・太字等の装飾記法のみそのまま解釈される）。"""
+    sender_user_idを持たないため自然に対象外になる（本人チェックで弾かれる）。@メンションの構造化
+    message_blocksは編集の対象外（編集画面自体にメンションボタンを置かない方針、ユーザーとの合意
+    どおり）——本文の再解析は通知の再送信・AIの再起動等の副作用に発展しうるため。添付ファイルは
+    追加・削除の両方に対応した（ユーザーからの明示的な要望）。"""
     pool = get_pool()
     row = await pool.fetchrow(
         "SELECT channel_id, dm_id, sender_user_id FROM messages WHERE id = $1 AND deleted_at IS NULL",
@@ -135,10 +141,24 @@ async def edit_message(message_id: int, body: EditMessageRequest, user: CurrentU
     if row["sender_user_id"] != user.id:
         raise HTTPException(403, detail="権限がありません")
 
-    updated = await pool.fetchrow(
-        "UPDATE messages SET body = $2, edited_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
-        message_id, body.body,
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        updated = await conn.fetchrow(
+            "UPDATE messages SET body = $2, edited_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
+            message_id, body.body,
+        )
+        if body.remove_attachment_ids:
+            try:
+                remove_ids = [int(x) for x in body.remove_attachment_ids]
+            except ValueError:
+                raise HTTPException(422, detail="remove_attachment_idsは数値のIDです")
+            # message_idも条件に含め、他の発言の添付を誤って消せないようにする
+            await conn.execute(
+                "DELETE FROM message_attachments WHERE message_id = $1 AND id = ANY($2::bigint[])",
+                message_id, remove_ids,
+            )
+        if body.new_attachments:
+            await insert_attachments(conn, message_id, user.id, body.new_attachments)
+
     blocks_by_message = await fetch_blocks_grouped(pool, [message_id])
     attachments_by_message = await fetch_attachments_grouped(pool, [message_id])
     reactions_by_message = await fetch_reactions_grouped(pool, [message_id], user.id)

@@ -2,12 +2,18 @@ import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type 
 import { createPortal } from 'react-dom'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
-import { apiFetch } from '../lib/api'
+import { apiFetch, uploadAttachment } from '../lib/api'
+import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
 import { EMOJI_LIST } from './Composer'
-import type { CitationPayload, MentionSourceMember, Message, MessageReaction } from '../types'
+import type { AttachmentPayload, CitationPayload, MentionSourceMember, Message, MessageAttachment, MessageReaction } from '../types'
+
+// Composer.tsxのMAX_ATTACHMENT_BYTESと同じ上限（F-07、05-1_詳細設計書_DB設計.html 3.6節）。
+// 発言の編集でファイルを追加する際もこの上限を適用する（ユーザーからの要望「編集の時にも
+// ファイルのボタンを付けてほしい」に伴う添付ファイル編集対応、2026-09-11）
+const MAX_EDIT_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 export function formatTime(iso: string) {
   const d = new Date(iso)
@@ -724,17 +730,35 @@ export default function MessageList({
 
   // 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージに限っては、メッセージを
   // 送った後でも編集できる機能が欲しい」）。同時に編集できるのは1件のみ（メッセージid単位でstate
-  // を持つ、絵文字ピッカーのemojiPickerForと同じ考え方）。本文以外（@メンション・添付ファイル）は
-  // 編集対象外（バックエンドの設計判断どおり、本文のテキストのみを書き換える）
+  // を持つ、絵文字ピッカーのemojiPickerForと同じ考え方）。@メンションは編集画面自体に候補ピッカーを
+  // 置かない方針（ユーザーとの合意どおり、「編集の時にはメンションボタン自体をなくしてよい」）。
+  // 添付ファイルは追加・削除の両方に対応する（ユーザーからの明示的な要望）。書式ボタン・絵文字挿入は
+  // Composer.tsxと同じ挙動を共有モジュール（lib/textFormatting.ts）経由で再現する
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
+  // 既存の添付ファイルのうち「削除」を押してまだ外れていないものだけを保持する（起点はstartEditで
+  // m.attachmentsをそのままコピー）。新規に追加したファイルは別配列（editNewAttachments）で持ち、
+  // 保存時にこの2つから「もう表示されていない既存添付のid（=削除対象）」と「新規添付」を組み立てる
+  const [editKeptAttachments, setEditKeptAttachments] = useState<MessageAttachment[]>([])
+  const [editNewAttachments, setEditNewAttachments] = useState<AttachmentPayload[]>([])
+  const [editUploading, setEditUploading] = useState(false)
+  const [editEmojiAnchor, setEditEmojiAnchor] = useState<DOMRect | null>(null)
+  const editFileInputRef = useRef<HTMLInputElement>(null)
+
   const startEdit = (m: Message) => {
     setEditingId(m.id)
     setEditBody(m.body)
+    setEditKeptAttachments(m.attachments ?? [])
+    setEditNewAttachments([])
+    setEditEmojiAnchor(null)
   }
-  const cancelEdit = () => setEditingId(null)
-  const saveEdit = async (messageId: string) => {
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditEmojiAnchor(null)
+  }
+  const saveEdit = async (m: Message) => {
     const trimmed = editBody.trim()
     if (!trimmed) {
       toast('本文を入力してください', 'error')
@@ -742,9 +766,15 @@ export default function MessageList({
     }
     setSavingEdit(true)
     try {
-      const updated = await apiFetch<Message>(`/api/messages/${messageId}`, {
+      const keptIds = new Set(editKeptAttachments.map((a) => a.id))
+      const removeAttachmentIds = (m.attachments ?? []).filter((a) => !keptIds.has(a.id)).map((a) => a.id)
+      const updated = await apiFetch<Message>(`/api/messages/${m.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ body: trimmed }),
+        body: JSON.stringify({
+          body: trimmed,
+          remove_attachment_ids: removeAttachmentIds,
+          new_attachments: editNewAttachments,
+        }),
       })
       onEdited?.(updated)
       setEditingId(null)
@@ -752,6 +782,73 @@ export default function MessageList({
       toast(e instanceof Error ? e.message : '編集に失敗しました', 'error')
     } finally {
       setSavingEdit(false)
+    }
+  }
+
+  // 編集中の書式ボタン（太字・斜体・下線・取り消し線・コード・箇条書き）。Composer.tsxの
+  // wrapSelection/wrapCode/insertBulletListと同じアルゴリズム（lib/textFormatting.ts、共有）
+  const applyEditWrap = (prefix: string, suffix: string) => {
+    const el = editTextareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? editBody.length
+    const end = el.selectionEnd ?? editBody.length
+    const r = wrapSelectionText(editBody, start, end, prefix, suffix)
+    setEditBody(r.body)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(r.selStart, r.selEnd)
+    })
+  }
+  const applyEditCode = () => {
+    const el = editTextareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? editBody.length
+    const end = el.selectionEnd ?? editBody.length
+    const r = wrapCodeText(editBody, start, end)
+    setEditBody(r.body)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(r.selStart, r.selEnd)
+    })
+  }
+  const applyEditBulletList = () => {
+    const el = editTextareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? editBody.length
+    const end = el.selectionEnd ?? editBody.length
+    const r = insertBulletListText(editBody, start, end)
+    setEditBody(r.body)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(r.selStart, r.selEnd)
+    })
+  }
+  const insertEditEmoji = (emoji: string) => {
+    const el = editTextareaRef.current
+    const cursor = el?.selectionStart ?? editBody.length
+    setEditBody(editBody.slice(0, cursor) + emoji + editBody.slice(cursor))
+    setEditEmojiAnchor(null)
+    requestAnimationFrame(() => {
+      const pos = cursor + emoji.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+  const pickEditFile = async (file: File | null) => {
+    if (!file) return
+    if (file.size > MAX_EDIT_ATTACHMENT_BYTES) {
+      toast('ファイルサイズは20MBまでです', 'error')
+      return
+    }
+    setEditUploading(true)
+    try {
+      const uploaded = await uploadAttachment(file)
+      setEditNewAttachments((prev) => [...prev, uploaded])
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'アップロードに失敗しました', 'error')
+    } finally {
+      setEditUploading(false)
+      if (editFileInputRef.current) editFileInputRef.current.value = ''
     }
   }
 
@@ -875,8 +972,67 @@ export default function MessageList({
                   )}
                 </div>
                 {isEditing ? (
-                  <div className="mt-1">
+                  <div className="mt-1 rounded-lg border border-accent-600 p-2">
+                    {/* 書式ボタン（Composer.tsxと同じ、通常投稿と揃える。ユーザーからの明示的な
+                        要望「編集の時にも通常のメッセージと同じように書式のボタンを付けてほしい」）。
+                        @メンションボタンは編集画面には置かない方針（ユーザーとの合意どおり） */}
+                    <div className="mb-1.5 flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        title="太字（**で囲みます）"
+                        onClick={() => applyEditWrap('**', '**')}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted"
+                      >
+                        B
+                      </button>
+                      <button
+                        type="button"
+                        title="斜体（_で囲みます）"
+                        onClick={() => applyEditWrap('_', '_')}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic text-ink-subtle hover:bg-surface-muted"
+                      >
+                        I
+                      </button>
+                      <button
+                        type="button"
+                        title="下線（++で囲みます）"
+                        onClick={() => applyEditWrap('++', '++')}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle underline hover:bg-surface-muted"
+                      >
+                        U
+                      </button>
+                      <button
+                        type="button"
+                        title="取り消し線（~~で囲みます）"
+                        onClick={() => applyEditWrap('~~', '~~')}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"
+                      >
+                        S
+                      </button>
+                      <button
+                        type="button"
+                        title="コード（複数行を選択するとコードブロックになります）"
+                        onClick={applyEditCode}
+                        className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
+                      >
+                        {'</>'}
+                      </button>
+                      <button
+                        type="button"
+                        title="箇条書き（行頭に「- 」を付けます）"
+                        onClick={applyEditBulletList}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                          <circle cx="4" cy="6" r="1.3" fill="currentColor" />
+                          <circle cx="4" cy="10" r="1.3" fill="currentColor" />
+                          <circle cx="4" cy="14" r="1.3" fill="currentColor" />
+                          <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    </div>
                     <textarea
+                      ref={editTextareaRef}
                       autoFocus
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
@@ -884,21 +1040,106 @@ export default function MessageList({
                         // Composer.tsxと同じ規約: Enter=改行、Ctrl+Enter（Macは⌘+Enter）=保存、Escape=取消
                         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                           e.preventDefault()
-                          saveEdit(m.id)
-                        } else if (e.key === 'Escape') {
+                          saveEdit(m)
+                          return
+                        }
+                        if (e.key === 'Escape') {
                           e.preventDefault()
                           cancelEdit()
+                          return
+                        }
+                        // 箇条書きの行でEnterを押すと次の行にも自動で「- 」を続ける（Composer.tsxと同じ）
+                        if (e.key === 'Enter' && !e.shiftKey && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
+                          const r = continueBulletOnEnter(editBody, e.currentTarget.selectionStart)
+                          if (r) {
+                            e.preventDefault()
+                            const el = e.currentTarget
+                            setEditBody(r.body)
+                            requestAnimationFrame(() => {
+                              el.focus()
+                              el.setSelectionRange(r.selStart, r.selEnd)
+                            })
+                          }
                         }
                       }}
                       rows={Math.min(10, Math.max(2, editBody.split('\n').length))}
                       maxLength={4000}
-                      className="w-full resize-none rounded-lg border border-accent-600 px-2.5 py-1.5 text-[13.5px] leading-[1.75] text-ink outline-none focus:ring-4 focus:ring-accent-50"
+                      className="w-full resize-none break-words border-none bg-transparent text-[13.5px] leading-[1.75] text-ink outline-none"
                     />
-                    <div className="mt-1 flex items-center gap-2 text-[11.5px]">
+                    {(editKeptAttachments.length > 0 || editNewAttachments.length > 0 || editUploading) && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {editKeptAttachments.map((a) => (
+                          <span
+                            key={a.id}
+                            className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-subtle px-2 py-1 text-[11.5px] text-ink-muted"
+                          >
+                            📎 {a.file_name}
+                            <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
+                            <button
+                              type="button"
+                              onClick={() => setEditKeptAttachments((prev) => prev.filter((x) => x.id !== a.id))}
+                              title="添付を外す"
+                              className="text-ink-subtle hover:text-danger-text"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        {editNewAttachments.map((a, i) => (
+                          <span
+                            key={`${a.storage_path}-${i}`}
+                            className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-subtle px-2 py-1 text-[11.5px] text-ink-muted"
+                          >
+                            📎 {a.file_name}
+                            <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
+                            <button
+                              type="button"
+                              onClick={() => setEditNewAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                              title="添付を外す"
+                              className="text-ink-subtle hover:text-danger-text"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        {editUploading && <span className="px-1 py-1 text-[11.5px] text-ink-subtle">アップロード中…</span>}
+                      </div>
+                    )}
+                    <div className="mt-1.5 flex items-center gap-2 text-[11.5px]">
+                      <input
+                        ref={editFileInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={(e) => pickEditFile(e.target.files?.[0] ?? null)}
+                      />
+                      <button
+                        type="button"
+                        title="ファイルを添付"
+                        onClick={() => editFileInputRef.current?.click()}
+                        className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+                      >
+                        📎
+                      </button>
+                      <button
+                        type="button"
+                        title="絵文字を挿入"
+                        onClick={(e) => {
+                          // バグ修正（実機検証で発見）: getBoundingClientRect()をsetState updater内で
+                          // e.currentTargetから呼ぶと、DOM仕様上イベント終了後にcurrentTargetがnullへ
+                          // 戻ることがあり（Reactが更新を同期実行しない場合）、nullに対する呼び出しで
+                          // 例外が発生しReactツリー全体がクラッシュしていた。呼び出し側（同期的な
+                          // イベントハンドラ本体）でrectを先に確定させ、updaterには確定済みの値だけを渡す
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setEditEmojiAnchor((v) => (v ? null : rect))
+                        }}
+                        className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+                      >
+                        😀
+                      </button>
                       <button
                         type="button"
                         disabled={savingEdit}
-                        onClick={() => saveEdit(m.id)}
+                        onClick={() => saveEdit(m)}
                         className="rounded-md bg-accent-600 px-2.5 py-1 font-semibold text-white disabled:opacity-40"
                       >
                         {savingEdit ? '保存中…' : '保存'}
@@ -913,6 +1154,13 @@ export default function MessageList({
                       </button>
                       <span className="text-ink-subtle">Ctrl+Enterで保存・Escapeで取消</span>
                     </div>
+                    {editEmojiAnchor && (
+                      <EmojiGridPopover
+                        anchor={editEmojiAnchor}
+                        onSelect={insertEditEmoji}
+                        onClose={() => setEditEmojiAnchor(null)}
+                      />
+                    )}
                   </div>
                 ) : m.generation_status === 'generating' ? (
                   <div className="mt-0.5 flex items-center gap-2 text-[12.5px] text-ink-subtle">
