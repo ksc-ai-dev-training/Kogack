@@ -26,14 +26,15 @@ export default function ChannelView() {
   const { channel, error: channelError } = useChannel(channelId)
   const { joined, mutate: mutateChannelsList } = useChannels()
   const { members } = useChannelMembers(channelId)
-  // F-41 メンション候補。先頭は @channel（チャンネル全員への通知）・@here（送信時点でアクティブな
-  // 参加者への通知）、次にチャンネルAI（有効なときだけ。画面モックアップS-03どおり。無効な
-  // チャンネルでは「@ペルソナ名」と書いてもAIは応答しないため候補に出さない）、その後に参加者。
-  // @channel・@here・AIメンションはいずれもID参照化しない（Composer.MentionCandidate の
-  // isChannel / isHere / isAi 参照）。いずれもチャンネル会話のみ（スレッド返信・DMには出さない）。
+  // F-41 メンション候補。先頭は @channel（チャンネル全員への通知）、次にチャンネルAI（有効な
+  // ときだけ。画面モックアップS-03どおり。無効なチャンネルでは「@ペルソナ名」と書いてもAIは
+  // 応答しないため候補に出さない）、その後に参加者、**@here（送信時点でアクティブな参加者への
+  // 通知）は一覧の一番下**（ユーザーからの明示的な要望「@hereを一番下に表示されるようにして」、
+  // 2026-09-11）。@channel・@here・AIメンションはいずれもID参照化しない
+  // （Composer.MentionCandidate の isChannel / isHere / isAi 参照）。いずれもチャンネル会話のみ
+  // （スレッド返信・DMには出さない）。
   const mentionCandidatesWithAi: MentionCandidate[] = [
     { id: 'channel', name: 'channel', isChannel: true },
-    { id: 'here', name: 'here', isHere: true },
     ...(channel?.ai_is_enabled
       ? [
           {
@@ -45,6 +46,7 @@ export default function ChannelView() {
         ]
       : []),
     ...members.filter((m) => m.is_active),
+    { id: 'here', name: 'here', isHere: true },
   ]
   // highlightIdがスレッド返信宛て（threadIdも同時に付いている）の場合は、返信自体ではなく
   // スレッドの元発言（threadId）を中心に本体タイムラインをアンカーする。ThreadPanelへ渡す
