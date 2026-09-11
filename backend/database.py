@@ -61,6 +61,10 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 -- S-08利用者管理の「最終ログイン」列用（05-3画面設計に記載済みだがDB/API側が未反映だった抜けをbackfill）
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+-- F-41 @here（2026-09-11、ユーザーからの明示的な要望）用の在席判定。A-04（/api/auth/me）が
+-- ポーリングのたびに更新する（タブが非表示だとポーリング自体が止まるため、更新が続いている＝
+-- 実際にタブを開いて見ていることの目印になる。mentions.pyのHERE_ACTIVE_WINDOW_SECONDS参照）
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
 -- T-02 channels
 CREATE TABLE IF NOT EXISTS channels (

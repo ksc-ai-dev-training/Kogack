@@ -333,9 +333,13 @@ export function renderMessageBody(
       b.block_type === 'mention',
   )
   const mentionDefs = mentions.map((block) => {
-    // @channel（payload.kind='channel'）は個人宛てと違いtarget_user_id/display_name_snapshotを持たない
+    // @channel（payload.kind='channel'）・@here（payload.kind='here'）は個人宛てと違い
+    // target_user_id/display_name_snapshotを持たない
     if (block.payload.kind === 'channel') {
       return { needle: '@channel', label: '@channel' }
+    }
+    if (block.payload.kind === 'here') {
+      return { needle: '@here', label: '@here' }
     }
     const current = members?.find((m) => m.id === block.payload.target_user_id)?.name
     return {

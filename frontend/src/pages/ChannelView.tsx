@@ -26,13 +26,14 @@ export default function ChannelView() {
   const { channel, error: channelError } = useChannel(channelId)
   const { joined, mutate: mutateChannelsList } = useChannels()
   const { members } = useChannelMembers(channelId)
-  // F-41 メンション候補。先頭は @channel（チャンネル全員への通知）、次にチャンネルAI（有効なとき
-  // だけ。画面モックアップS-03どおり。無効なチャンネルでは「@ペルソナ名」と書いてもAIは応答しない
-  // ため候補に出さない）、その後に参加者。@channelとAIメンションはいずれもID参照化しない
-  // （Composer.MentionCandidate の isChannel / isAi 参照）。@channelはチャンネル会話のみ（スレッド
-  // 返信・DMには出さない）。
+  // F-41 メンション候補。先頭は @channel（チャンネル全員への通知）・@here（送信時点でアクティブな
+  // 参加者への通知）、次にチャンネルAI（有効なときだけ。画面モックアップS-03どおり。無効な
+  // チャンネルでは「@ペルソナ名」と書いてもAIは応答しないため候補に出さない）、その後に参加者。
+  // @channel・@here・AIメンションはいずれもID参照化しない（Composer.MentionCandidate の
+  // isChannel / isHere / isAi 参照）。いずれもチャンネル会話のみ（スレッド返信・DMには出さない）。
   const mentionCandidatesWithAi: MentionCandidate[] = [
     { id: 'channel', name: 'channel', isChannel: true },
+    { id: 'here', name: 'here', isHere: true },
     ...(channel?.ai_is_enabled
       ? [
           {

@@ -32,6 +32,9 @@ export interface MentionCandidate {
   /** @channel（チャンネル全員への通知）。選択するとmentions配列へkind='channel'のエントリを
    * 追加し、本文には「@channel」を挿入する。チャンネル会話でのみ候補に含める（DM・スレッド返信では出さない）。 */
   isChannel?: boolean
+  /** @here（送信時点でアクティブだった参加者への通知）。選択するとmentions配列へkind='here'の
+   * エントリを追加し、本文には「@here」を挿入する。@channelと同様チャンネル会話でのみ候補に含める。 */
+  isHere?: boolean
   /** プロフィール画像URL（未設定時はnull/undefined）。実際に発言したときのAvatar（MessageList.tsx）
    * と同じく画像優先→無ければ色付き頭文字にフォールバックする（ユーザーからの指摘で追加。
    * 従来は候補一覧が常に色付き頭文字のみで、発言時のアイコンと一致していなかった） */
@@ -391,6 +394,13 @@ export default function Composer({
           ? prev
           : [...prev, { target_user_id: 'channel', display_name_snapshot: candidate.name, kind: 'channel' }],
       )
+    } else if (candidate.isHere) {
+      // @here はkind='here'として送る（対象者の特定はバックエンドが送信時点で行う）。重複選択も1件だけ
+      setMentions((prev) =>
+        prev.some((m) => m.kind === 'here')
+          ? prev
+          : [...prev, { target_user_id: 'here', display_name_snapshot: candidate.name, kind: 'here' }],
+      )
     } else if (!candidate.isAi) {
       setMentions((prev) => [...prev, { target_user_id: candidate.id, display_name_snapshot: candidate.name }])
     }
@@ -541,6 +551,10 @@ export default function Composer({
                 <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] bg-danger-text text-[13px] font-bold text-white">
                   @
                 </span>
+              ) : c.isHere ? (
+                <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] bg-ok-text text-[13px] font-bold text-white">
+                  @
+                </span>
               ) : (
                 <span
                   className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
@@ -552,6 +566,9 @@ export default function Composer({
               <span className="truncate text-[12.5px] font-bold text-ink">{c.name}</span>
               {c.isChannel && (
                 <span className="ml-auto flex-none text-[11px] text-ink-subtle">チャンネル全員に通知</span>
+              )}
+              {c.isHere && (
+                <span className="ml-auto flex-none text-[11px] text-ink-subtle">今アクティブな人に通知</span>
               )}
             </button>
           ))}

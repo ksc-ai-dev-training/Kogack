@@ -40,10 +40,11 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
     joinedのunread_countはT-22 read_states（未読バッジ、基本設計書4.2節）を使って算出する。
     unread_mention_countは同じ期間条件のうち自分がF-41メンションされた発言の件数（サイドバーで
     「名指しされた」と「チャンネルが賑やか」を区別するための赤バッジ用。message_blocksの
-    block_type='mention'で、payload.target_user_id=自分（個人宛て）または payload.kind='channel'
-    （@channel＝チャンネル全員宛て、参加者なら全員カウント）のいずれかをJOIN。1発言に個人宛てと
-    @channelが両方あっても二重に数えないよう count(DISTINCT msg.id)。AIメンションはmessage_blocks
-    に入らないため対象外＝正しい）。"""
+    block_type='mention'で、payload.target_user_id=自分（個人宛て）／payload.kind='channel'
+    （@channel＝チャンネル全員宛て、参加者なら全員カウント）／payload.user_idsに自分のidを含む
+    （@here＝送信時点でアクティブだった参加者宛て、mentions.py参照）のいずれかをJOIN。1発言に
+    複数該当しても二重に数えないよう count(DISTINCT msg.id)。AIメンションはmessage_blocksに
+    入らないため対象外＝正しい）。"""
     pool = get_pool()
     joined = await pool.fetch(
         """SELECT c.*,
@@ -55,7 +56,11 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
                (SELECT count(DISTINCT msg.id) FROM messages msg
                 JOIN message_blocks mb ON mb.message_id = msg.id
                   AND mb.block_type = 'mention'
-                  AND (mb.payload->>'target_user_id' = $1::text OR mb.payload->>'kind' = 'channel')
+                  AND (
+                    mb.payload->>'target_user_id' = $1::text
+                    OR mb.payload->>'kind' = 'channel'
+                    OR mb.payload->'user_ids' ? $1::text
+                  )
                 WHERE msg.channel_id = c.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
                   AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)
@@ -639,7 +644,9 @@ async def post_message(
                VALUES ($1, 'human', $2, $3) RETURNING *""",
             channel_id, user.id, body.body,
         )
-        blocks = await insert_mention_blocks(conn, row["id"], body.mentions, channel_id=channel_id)
+        blocks = await insert_mention_blocks(
+            conn, row["id"], body.mentions, channel_id=channel_id, sender_user_id=user.id,
+        )
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     await trigger_matcher.maybe_trigger(channel_id, body.body)
     await ai_agent.maybe_trigger(channel_id, body.body, user.id)

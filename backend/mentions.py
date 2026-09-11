@@ -6,12 +6,18 @@ import json
 
 from pydantic import BaseModel, Field
 
+# F-41 @here（2026-09-11、ユーザーからの明示的な要望）。在席判定の有効期間（秒）。この秒数以内に
+# users.last_seen_at（A-04ポーリングのたびに更新、routers/auth.py参照）が更新されている参加者を
+# 「今アクティブ」とみなす。ユーザーとの合意により既定30秒（短すぎると本当に見ている人しか
+# 拾えず、長すぎると既に離席した人にも届いてしまうトレードオフ）
+HERE_ACTIVE_WINDOW_SECONDS = 30
+
 
 class MentionInput(BaseModel):
     target_user_id: str
     display_name_snapshot: str = Field(min_length=1, max_length=100)
-    # kind='channel' は @channel（チャンネル全員への通知）。target_user_id は使わず、
-    # payload に {"kind": "channel"} を1件だけ保存する。チャンネル発言でのみ有効（DMでは黙って無視）。
+    # kind='channel' は @channel（チャンネル全員への通知）。kind='here' は @here（今アクティブな
+    # 参加者への通知）。いずれもtarget_user_idは使わない。チャンネル発言でのみ有効（DMでは黙って無視）。
     kind: str = "user"
 
 
@@ -26,11 +32,13 @@ def _block_out(row) -> dict:
 
 async def insert_mention_blocks(
     conn, message_id: int, mentions: list[MentionInput], *, channel_id: int | None = None, dm_id: int | None = None,
+    sender_user_id: int | None = None,
 ) -> list[dict]:
     """mentionsのうち当該チャンネル/DMの参加者であるものだけをT-07へ保存する
     （基本設計書5.22節「設計判断」: target_user_idが参加者であることをAPI側で検証）。
     参加者でないtarget_user_idは黙って除外する（メッセージ送信自体は失敗させない）。
     channel_id・dm_idはどちらか一方を指定する（messages.channel_id/dm_idと同じ排他関係）。
+    sender_user_idは@here（在席判定）で送信者自身を対象から除くために使う。
     バグ修正（2026-09-04）: 従来はchannel_id専用でDMは対象外（呼び出し元がif文で分岐して
     空リストを返すだけ）だったが、ユーザーからの要望でDMでもメンションできるようにするため、
     direct_message_membersを見る経路を追加した"""
@@ -51,7 +59,31 @@ async def insert_mention_blocks(
         blocks.append(_block_out(row))
         sort_order += 1
 
-    user_mentions = [m for m in mentions if m.kind != "channel"]
+    # @here（今アクティブな参加者への通知）。送信時点でHERE_ACTIVE_WINDOW_SECONDS以内に
+    # last_seen_atが更新されている参加者（送信者自身は除く）をその場でスナップショットし、
+    # payload {"kind":"here","user_ids":[...]} を1件保存する。@channelと異なり対象を個々の
+    # user_idで特定するため、A-05のunread_mention_countはpayload.user_idsに自分のidが
+    # 含まれるかで判定する（jsonbの`?`演算子、配列要素の存在チェック）
+    if channel_id is not None and any(m.kind == "here" for m in mentions):
+        active_rows = await conn.fetch(
+            """SELECT cm.user_id FROM channel_members cm
+               JOIN users u ON u.id = cm.user_id
+               WHERE cm.channel_id = $1 AND u.is_active = true
+                 AND u.last_seen_at IS NOT NULL
+                 AND u.last_seen_at > now() - make_interval(secs => $2)
+                 AND cm.user_id IS DISTINCT FROM $3""",
+            channel_id, HERE_ACTIVE_WINDOW_SECONDS, sender_user_id,
+        )
+        active_ids = [str(r["user_id"]) for r in active_rows]
+        row = await conn.fetchrow(
+            """INSERT INTO message_blocks (message_id, block_type, payload, sort_order)
+               VALUES ($1, 'mention', $2::jsonb, $3) RETURNING block_type, payload, sort_order""",
+            message_id, json.dumps({"kind": "here", "user_ids": active_ids}), sort_order,
+        )
+        blocks.append(_block_out(row))
+        sort_order += 1
+
+    user_mentions = [m for m in mentions if m.kind not in ("channel", "here")]
     candidate_ids = [int(m.target_user_id) for m in user_mentions if m.target_user_id.isdigit()]
     if not candidate_ids:
         return blocks

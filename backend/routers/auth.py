@@ -206,7 +206,17 @@ async def logout(response: Response, user: CurrentUser = Depends(require_auth)):
 
 @router.get("/me")
 async def me(user: CurrentUser = Depends(require_auth)):
-    # A-04: ログイン中ユーザー情報
+    # A-04: ログイン中ユーザー情報。F-41 @here（在席判定、2026-09-11）用にlast_seen_atを更新する。
+    # このエンドポイントは全ログイン中タブが3秒間隔でポーリングし続け、タブが非表示になると
+    # 自動的に止まる（frontend/src/hooks/useMe.ts）ため、更新が続いている＝実際にタブを開いて
+    # 見ていることの目印になる。書き込み頻度を抑えるため前回の記録から20秒以上経っているときだけ
+    # UPDATEする（mentions.pyのHERE_ACTIVE_WINDOW_SECONDS=30秒より十分短い間隔で更新されれば足りる）
+    pool = get_pool()
+    await pool.execute(
+        """UPDATE users SET last_seen_at = now() WHERE id = $1
+           AND (last_seen_at IS NULL OR last_seen_at < now() - interval '20 seconds')""",
+        user.id,
+    )
     return {
         "id": str(user.id), "email": user.email, "name": user.name,
         "role": user.role, "picture_url": user.picture_url,

@@ -287,7 +287,7 @@ async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser =
                VALUES ($1, 'human', $2, $3) RETURNING *""",
             dm_id, user.id, body.body,
         )
-        blocks = await insert_mention_blocks(conn, row["id"], body.mentions, dm_id=dm_id)
+        blocks = await insert_mention_blocks(conn, row["id"], body.mentions, dm_id=dm_id, sender_user_id=user.id)
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
