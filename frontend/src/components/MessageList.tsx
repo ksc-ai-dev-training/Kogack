@@ -4,6 +4,7 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
+import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
@@ -473,22 +474,162 @@ export function Avatar({
   )
 }
 
-// F-07 ファイル共有。ダウンロードはA-22（/api/attachments/{id}）を通常のリンク遷移で叩く
+// アプリ上でのファイルプレビュー（ユーザーからの明示的な要望「画像ファイルや文書ファイル、PDF、
+// テキストファイルをクリックするとダウンロードされる仕組みになると思うが、このファイルをアプリ上で
+// 表示させることはできますか」、2026-09-11）。バックエンドのプレビュー対象拡張子判定
+// （routers/attachments.py _preview_content_type）と揃える。SVGは画像として一般的だが
+// インラインスクリプトを実行できる既知のリスクがあるため意図的に対象外にしている
+// （バックエンド側の判断と同じ理由）
+type PreviewKind = 'image' | 'pdf' | 'text'
+const PREVIEW_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
+const PREVIEW_TEXT_EXT = new Set(['txt', 'md', 'csv', 'json', 'log'])
+function attachmentPreviewKind(fileName: string): PreviewKind | null {
+  const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : ''
+  if (PREVIEW_IMAGE_EXT.has(ext)) return 'image'
+  if (ext === 'pdf') return 'pdf'
+  if (PREVIEW_TEXT_EXT.has(ext)) return 'text'
+  return null
+}
+
+function AttachmentPreviewModal({
+  attachmentId,
+  fileName,
+  kind,
+  onClose,
+}: {
+  attachmentId: string
+  fileName: string
+  kind: PreviewKind
+  onClose: () => void
+}) {
+  const overlayClose = useOverlayClose(onClose)
+  const [text, setText] = useState<string | null>(null)
+  const [textError, setTextError] = useState<string | null>(null)
+  const previewUrl = `/api/attachments/${attachmentId}/preview`
+  const downloadUrl = `/api/attachments/${attachmentId}`
+
+  useEffect(() => {
+    if (kind !== 'text') return
+    let cancelled = false
+    fetch(previewUrl, { credentials: 'same-origin' })
+      .then((res) => {
+        if (!res.ok) throw new Error('プレビューを取得できませんでした')
+        return res.text()
+      })
+      .then((t) => {
+        if (!cancelled) setText(t)
+      })
+      .catch((e) => {
+        if (!cancelled) setTextError(e instanceof Error ? e.message : 'プレビューを取得できませんでした')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [kind, previewUrl])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.6)] p-6"
+      {...overlayClose}
+    >
+      <div
+        className="flex max-h-[86vh] w-full max-w-[860px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{fileName}</span>
+          <div className="flex flex-none items-center gap-2">
+            <a
+              href={downloadUrl}
+              className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] text-ink-muted hover:bg-surface-subtle"
+            >
+              ダウンロード
+            </a>
+            <button
+              type="button"
+              onClick={onClose}
+              title="閉じる"
+              className="rounded-md px-2 py-1 text-ink-subtle hover:bg-surface-muted"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto bg-surface-subtle p-3">
+          {kind === 'image' && (
+            <img src={previewUrl} alt={fileName} className="mx-auto max-h-[70vh] max-w-full object-contain" />
+          )}
+          {kind === 'pdf' && (
+            <iframe
+              src={previewUrl}
+              title={fileName}
+              className="h-[70vh] w-full rounded-md border border-line bg-surface"
+            />
+          )}
+          {kind === 'text' &&
+            (textError ? (
+              <p className="text-[12.5px] text-danger-text">{textError}</p>
+            ) : text === null ? (
+              <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 text-[12.5px] leading-[1.6] text-ink">
+                {text}
+              </pre>
+            ))}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// F-07 ファイル共有。プレビュー対象形式（画像・PDF・プレーンテキスト）はクリックでアプリ内モーダルを
+// 開き、それ以外はA-22（/api/attachments/{id}）への通常のリンク遷移でダウンロードする
 // （同一オリジンのためCookieが自動的に付き、A-22側の参加者チェックを経てFileResponseが返る）
 function AttachmentList({ attachments }: { attachments: Message['attachments'] }) {
+  const [previewFor, setPreviewFor] = useState<{ id: string; fileName: string; kind: PreviewKind } | null>(null)
   if (!attachments || attachments.length === 0) return null
   return (
     <div className="mt-1.5 flex flex-wrap gap-1.5">
-      {attachments.map((a) => (
-        <a
-          key={a.id}
-          href={`/api/attachments/${a.id}`}
-          className="flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] text-ink hover:border-line-strong hover:bg-surface-subtle"
-        >
-          📎 <span className="max-w-[220px] truncate">{a.file_name}</span>
-          <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
-        </a>
-      ))}
+      {attachments.map((a) => {
+        const kind = attachmentPreviewKind(a.file_name)
+        return kind ? (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => setPreviewFor({ id: a.id, fileName: a.file_name, kind })}
+            className="flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] text-ink hover:border-line-strong hover:bg-surface-subtle"
+          >
+            📎 <span className="max-w-[220px] truncate">{a.file_name}</span>
+            <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
+          </button>
+        ) : (
+          <a
+            key={a.id}
+            href={`/api/attachments/${a.id}`}
+            className="flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] text-ink hover:border-line-strong hover:bg-surface-subtle"
+          >
+            📎 <span className="max-w-[220px] truncate">{a.file_name}</span>
+            <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
+          </a>
+        )
+      })}
+      {previewFor && (
+        <AttachmentPreviewModal
+          attachmentId={previewFor.id}
+          fileName={previewFor.fileName}
+          kind={previewFor.kind}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
     </div>
   )
 }

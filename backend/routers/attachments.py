@@ -27,6 +27,34 @@ router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
 _MAX_BYTES = 20 * 1024 * 1024  # 20MB（05-1_詳細設計書_DB設計.html 3.6節）
 
+# アプリ上でのファイルプレビュー（ユーザーからの明示的な要望「画像ファイルや文書ファイル、PDF、
+# テキストファイルをクリックするとダウンロードされる仕組みになると思うが、このファイルをアプリ上で
+# 表示させることはできますか」、2026-09-11）。A-22ダウンロードは意図的に全形式をoctet-stream＋
+# Content-Disposition: attachmentに固定し、ブラウザでのインライン実行（例: アップロードされた
+# HTMLの実行）を避ける設計判断をしていた。この安全策は維持しつつ、明確に安全と判断できる形式
+# （画像・PDF・プレーンテキスト）だけを対象に、別エンドポイント（/preview）で正しいContent-Type・
+# inlineとして配信する。**SVGは画像として一般的だがインラインスクリプトを実行できる既知のリスクが
+# あるため、意図的にプレビュー対象から除外している**（A-22が全形式を固定していた本来の理由と同じ）。
+# Word/Excel/PowerPoint等は元々ブラウザがネイティブ表示できないため対象外のまま（引き続きA-22の
+# ダウンロードのみ）。
+_PREVIEW_IMAGE_EXT = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
+_PREVIEW_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".log"}
+
+
+def _preview_content_type(file_name: str) -> str | None:
+    """プレビュー対象として安全と判断した拡張子ならContent-Typeを返す。対象外（未対応形式・
+    拡張子偽装によるものを含め一切）はNoneを返し、呼び出し元は404でプレビューを拒否する。
+    テキストは実際のファイル内容に関わらず常にtext/plainとして返す（例えば.mdファイルの中身に
+    <script>タグが書かれていても、ブラウザにHTMLとして解釈・実行させないための防御）。"""
+    ext = Path(file_name).suffix.lower()
+    if ext in _PREVIEW_IMAGE_EXT:
+        return _PREVIEW_IMAGE_EXT[ext]
+    if ext == ".pdf":
+        return "application/pdf"
+    if ext in _PREVIEW_TEXT_EXT:
+        return "text/plain; charset=utf-8"
+    return None
+
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "attachments"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -92,3 +120,48 @@ async def download_attachment(attachment_id: int, user: CurrentUser = Depends(re
     if not path.is_relative_to(UPLOAD_DIR.resolve()) or not path.is_file():
         raise HTTPException(404, detail="見つかりません")
     return FileResponse(path, filename=row["file_name"], media_type="application/octet-stream")
+
+
+@router.get("/{attachment_id}/preview")
+async def preview_attachment(attachment_id: int, user: CurrentUser = Depends(require_auth)):
+    """アプリ上でのファイルプレビュー（ユーザーからの明示的な要望、2026-09-11。冒頭のコメント参照）。
+    権限判定はA-22ダウンロードと全く同じ（require_thread_access）順序で行う——先に参加者かどうかを
+    確認してから「この形式はプレビュー非対応」を返すことで、非参加者に対しては形式の情報すら
+    渡さない（既存のA-22・総論5.3節「存在を伏せる」と同じ考え方を崩さない）。"""
+    row = await get_pool().fetchrow(
+        "SELECT message_id, file_name, storage_path FROM message_attachments WHERE id = $1", attachment_id
+    )
+    if row is None:
+        raise HTTPException(404, detail="見つかりません")
+    await require_thread_access(message_id=row["message_id"], user=user)
+
+    content_type = _preview_content_type(row["file_name"])
+    if content_type is None:
+        raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
+
+    ascii_fallback = row["file_name"].encode("ascii", "replace").decode("ascii")
+    headers = {
+        "Content-Disposition": (
+            f'inline; filename="{ascii_fallback}"; filename*=utf-8\'\'{quote(row["file_name"])}'
+        )
+    }
+
+    if storage.is_configured():
+        try:
+            data = await storage.download(storage.ATTACHMENT_BUCKET, row["storage_path"])
+        except FileNotFoundError:
+            raise HTTPException(404, detail="見つかりません")
+        except storage.StorageError as e:
+            raise HTTPException(502, detail=str(e))
+    else:
+        path = (UPLOAD_DIR / row["storage_path"]).resolve()
+        if not path.is_relative_to(UPLOAD_DIR.resolve()) or not path.is_file():
+            raise HTTPException(404, detail="見つかりません")
+        data = path.read_bytes()
+
+    if content_type.startswith("text/plain"):
+        # テキストは実際のバイト列をUTF-8として解釈し直して返す（元のエンコーディングが不明でも
+        # 表示自体は継続させ、壊れた文字はreplaceで代替文字にする）
+        text = data.decode("utf-8", errors="replace")
+        return Response(content=text, media_type=content_type, headers=headers)
+    return Response(content=data, media_type=content_type, headers=headers)
