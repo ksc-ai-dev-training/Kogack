@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { getDraft, setDraft } from '../lib/drafts'
@@ -170,8 +170,21 @@ export default function Composer({
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
-  // 3行目以降は入力に合わせて自動的に高さを広げ、10行を超えたらそれ以上は広げずスクロールにする
-  useEffect(() => {
+  // 3行目以降は入力に合わせて自動的に高さを広げ、10行を超えたらそれ以上は広げずスクロールにする。
+  // バグ修正（ユーザーからの報告「縦スクロールが出てくるような長い文章を打ち込むと、カーソルの
+  // 位置がちょっとずれる」）: 10行を超えてtextareaが内部スクロール可能になった状態でこの効果が
+  // 走ると、`el.style.height = 'auto'`で一旦高さを本文全体が収まるサイズまで戻す（＝この瞬間だけ
+  // スクロール不要な状態になりscrollTopが暗黙的に0へ戻る）→その後maxHeightへ戻すが、scrollTopは
+  // 0のまま復元されない、という挙動になる。ところがキー入力自体はこの効果が走る「前」に、
+  // ブラウザ自身がネイティブに「カーソル位置が見えるようにスクロール」を済ませているため、
+  // 結果としてこの効果がその正しいスクロール位置を毎キー入力のたびに踏みつぶして0へ戻し、
+  // カーソルが一瞬ずれて見える（実際には高さの付け直し後に何らかの拍子で戻ることもあるが、
+  // それがちらつき・ずれとして体感される）。対策として、高さを付け直す前のscrollTopを保存し、
+  // 高さ確定後に復元する。`useEffect`（描画後に非同期実行）ではなく`useLayoutEffect`
+  // （DOM更新後・ブラウザの描画前に同期実行）にすることで、ずれた状態が一瞬でも画面に
+  // 表示されてしまうのを防ぐ。ハイライト用オーバーレイ（highlightRef）のscrollTopも
+  // 同じタイミングで揃える（textareaのonScrollイベント経由の同期を待たない）
+  useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     const style = window.getComputedStyle(el)
@@ -180,10 +193,13 @@ export default function Composer({
     const minHeight = lineHeight * MIN_ROWS + paddingY
     const maxHeight = lineHeight * MAX_ROWS + paddingY
 
+    const prevScrollTop = el.scrollTop
     el.style.height = 'auto'
     const next = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)
     el.style.height = `${next}px`
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
+    el.scrollTop = prevScrollTop
+    if (highlightRef.current) highlightRef.current.scrollTop = el.scrollTop
   }, [body])
 
   // 下書きの永続化（ユーザーからの明示的な要望）。setBodyの呼び出し箇所（通常入力・絵文字挿入・
