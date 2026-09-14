@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 
 from database import get_pool
 from mentions import MentionInput, insert_mention_blocks
+from services import ai_agent, trigger_matcher
 
 POLL_INTERVAL_SECONDS = 30
 
@@ -104,6 +105,26 @@ async def _dispatch_due_messages() -> None:
                 await conn.execute(
                     "UPDATE messages SET updated_at = now() WHERE id = $1", row["thread_parent_id"]
                 )
+        if row["channel_id"] is not None:
+            # バグ修正（2026-09-14、ユーザーからの報告「メンションでAIに呼びかけたメッセージを
+            # 予約投稿してもAIが反応しない」）: A-11（channels.post_message）・A-14
+            # （messages.post_reply）はいずれもメッセージ作成後にtrigger_matcher.maybe_trigger
+            # （F-38自動応答トリガー）・ai_agent.maybe_trigger（チャンネルAIへの@メンション応答）を
+            # 呼んでいるが、この予約投稿ディスパッチャは一度もこれらを呼んでおらず、予約投稿は
+            # 「@Kogack AI」等のメンションを含んでいてもAIが一切反応しない・自動応答トリガーの
+            # キーワードに一致していても発火しない状態だった（通常投稿・スレッド返信とは異なる
+            # 発言経路のため、この抜けはcurl等の単体API検証だけでは気づけない）。
+            # trigger_matcher（F-38）はスレッド返信を対象外とする既存スコープ（trigger_matcher.py
+            # 冒頭コメント「対象はA-11のみ」）に合わせ、thread_parent_idがNULL（＝チャンネル本体の
+            # 予約投稿）のときだけ呼ぶ。ai_agent.maybe_triggerはA-11・A-14の両方に対応するため
+            # thread_idをそのまま渡し（NULLならチャンネル本体、非NULLならそのスレッドへの返信として
+            # 応答する）、いずれも通常投稿と同じfire-and-forget（内部でasyncio.create_task）のため
+            # ディスパッチループ自体をブロックしない。
+            if row["thread_parent_id"] is None:
+                await trigger_matcher.maybe_trigger(row["channel_id"], row["body"])
+            await ai_agent.maybe_trigger(
+                row["channel_id"], row["body"], row["sender_user_id"], thread_id=row["thread_parent_id"]
+            )
 
 
 async def _dispatch_recurring_posts() -> None:
