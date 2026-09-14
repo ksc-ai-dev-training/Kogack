@@ -37,7 +37,9 @@
 # F-14 やりとりの要約（start_summary/_generate_summary_and_post）はA-15（routers/channels.py）から
 # 呼ばれる別経路で、メンション応答と同じ生成中プレースホルダ方式・T-13コスト記録を再利用しつつ、
 # システムプロンプトと参照する発言範囲（チャンネル直近100件、またはthread_id指定時はスレッド全体）
-# が異なる。自動対応範囲・スキル等のスコープ外事項はこちらにも同様に適用される。
+# が異なる。自動対応範囲・スキル等のスコープ外事項はこちらにも同様に適用される。チャット上で
+# 「要約して」等と呼びかけられた場合（maybe_trigger内のlooks_like_summarize_request判定）も、
+# 通常のメンション応答ではなくこの経路（共通ヘルパー_launch_summary）を起動する（2026-09-14）。
 import asyncio
 import json
 import traceback
@@ -103,37 +105,21 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   正直に「その機能はまだ利用できません」と答え、存在しない空き状況を作り出さないこと
 - 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない"""
 
-# チャット上での要約依頼（「要約して」等）への対応（ユーザーからの報告「要約してと送ると
-# 要約できませんと返ってきて、しかもその後実際に要約ボタンを押すと要約結果にもその『できません』
-# という文言が混ざり込んでおかしくなる」不具合の修正、2026-09-14）。当初はFIXED_RULESへ「要約は
-# ボタンを押すよう案内せよ」という指示を追加する形で試みたが、実機検証（3パターンの言い回しで
-# 確認）でgpt-4.1-nanoが指示を無視し「役に立とうとして」実際に要約文を書いてしまう挙動を
-# 3/3で確認した（Slice 3のout_of_scope_policy='strict'で見られたのと同じ、小型モデル特有の
-# 過剰な奉仕傾向）。プロンプトの言い回しをさらに強めても模型の指示追従性に賭け続けることになる
-# ため、LLM呼び出し自体を行わず確定的に案内する方式へ切り替えた（@channel/@here・detect_mentionと
-# 同じ、素朴な文字列一致による決定的判定という設計方針を踏襲）。
-SUMMARY_GUIDANCE_MESSAGE = "要約は画面上部（スレッド内ならそのスレッド上部）の「📝 要約」ボタンから実行できます。"
-
-
+# チャット上での要約依頼（「要約して」等）への対応。当初（2026-09-14）はチャット上で要約を
+# 頼まれても実行する手段が無く「できません」という趣旨の返答をしてしまい、後に実際に要約ボタンを
+# 押すとその「できません」発言まで要約対象の会話履歴に混ざり込んで結果がおかしくなる不具合が
+# あったため、要約ボタン（A-15 start_summary）の利用を案内するだけの確定的な応答へ変更した
+# （LLM呼び出し自体を行わず文字列一致で判定・固定文言を返す方式。プロンプトでの指示だけでは
+# gpt-4.1-nanoが「役に立とうとして」指示を無視し実際に要約文を書いてしまう挙動が実機検証で
+# 3/3確認されたため）。**2026-09-14、ユーザーからの明示的な要望で、案内するだけでなく実際に
+# 要約ボタンと同じ処理を自動実行するよう変更した**（`_looks_like_summarize_request`の判定
+# ロジック自体は変更なし。判定後の挙動を「案内のみ」から「start_summaryと同じ生成処理を起動」に
+# 差し替えた。案内メッセージ・専用のガード用post関数は使わなくなったため削除した）。
 def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
     """本文からメンション記法を取り除いたうえで「要約」という語の有無だけを見る、detect_mentionと
     同じ素朴な文字列一致（LLMの判断に依存しない）。「まとめて」等のより曖昧な言い回しは日常会話
     （雑談の「まとめ」等）との誤検知が多いため対象外とし、比較的一意な「要約」という語に絞った"""
     return "要約" in body.replace(f"@{persona_name}", "")
-
-
-async def _post_summary_guidance(channel_id: int, settings: dict, thread_id: int | None) -> None:
-    """チャット上で要約を頼まれた場合の確定的な案内発言を投稿する（_looks_like_summarize_request
-    参照）。OpenAI APIを一切呼ばないためgeneration_status='generating'のプレースホルダ段階を経ず、
-    最初から確定済みの発言として投稿する（T-13コスト記録も対象外、実際にAPIを使っていないため）"""
-    persona_name = settings["persona_name"] or "Kogack AI"
-    persona_icon_url = settings["persona_icon_url"]
-    await get_pool().execute(
-        """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body,
-               bot_display_name, bot_icon_url)
-           VALUES ($1, $2, 'ai', $3, $4, $5)""",
-        channel_id, thread_id, SUMMARY_GUIDANCE_MESSAGE, persona_name, persona_icon_url,
-    )
 
 
 # search_documentsのOpenAI Function Calling定義（Slice 3、2026-09-09）。1回の応答生成につき
@@ -386,7 +372,9 @@ async def maybe_trigger(channel_id: int, body: str, requested_by: int, thread_id
     thread_id指定時（スレッド返信、ユーザーからの明示的な要望で対応）はreaction_modeに関わらず
     常に明示的なメンションを要求する（proactiveをスレッド内の人間同士のやり取りにまで広げると、
     毎回AIが割り込んでくる形になり要望の範囲を超えるため。「呼びかけたら答える」という
-    最小限の対応にとどめた。基本設計書8.1節に設計判断として追記）。"""
+    最小限の対応にとどめた。基本設計書8.1節に設計判断として追記）。
+    メンションされた本文が要約依頼に見える場合（_looks_like_summarize_request）は通常の応答生成
+    ではなく要約ボタン（A-15）と同じ処理を起動する（2026-09-14、ユーザーからの明示的な要望）。"""
     if not ai_client.is_configured():
         return
     settings = await _fetch_settings(channel_id)
@@ -397,7 +385,7 @@ async def maybe_trigger(channel_id: int, body: str, requested_by: int, thread_id
     if requires_mention and not detect_mention(body, persona_name):
         return
     if _looks_like_summarize_request(body, persona_name):
-        asyncio.create_task(_post_summary_guidance(channel_id, settings, thread_id))
+        await _launch_summary(channel_id, thread_id, settings, requested_by)
         return
     asyncio.create_task(_generate_and_post(channel_id, settings, requested_by, thread_id))
 
@@ -681,15 +669,24 @@ async def _fetch_summary_source_rows(channel_id: int, thread_id: int | None):
 
 
 async def start_summary(channel_id: int, thread_id: int | None, requested_by: int) -> dict:
-    """A-15から呼ばれる。生成中プレースホルダを同期的に作成してから、実際の生成は
-    _generate_summary_and_postへ任せる非同期タスクとして起動する（8.7節と同じ方式）。
-    thread_id指定時はそのスレッドへの返信として、未指定時はチャンネル本体の新規発言として投稿する。"""
+    """A-15から呼ばれる。ボタン操作は条件を満たさない場合に黙って何もしないのではなく理由を
+    返す必要があるため、ここでis_configured/is_ai_enabledを検証してから_launch_summaryへ渡す
+    （チャット上の「要約して」検知＝maybe_triggerは既にこれらを検証済みのため、_launch_summaryを
+    直接呼び再検証しない。SummaryUnavailableもそちら側では投げない）。"""
     if not ai_client.is_configured():
         raise SummaryUnavailable("AI機能が設定されていないため要約できません")
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         raise SummaryUnavailable("このチャンネルのAIは無効になっています")
+    return await _launch_summary(channel_id, thread_id, settings, requested_by)
 
+
+async def _launch_summary(channel_id: int, thread_id: int | None, settings: dict, requested_by: int) -> dict:
+    """生成中プレースホルダを同期的に作成してから、実際の生成は_generate_summary_and_postへ任せる
+    非同期タスクとして起動する（8.7節と同じ方式）。thread_id指定時はそのスレッドへの返信として、
+    未指定時はチャンネル本体の新規発言として投稿する。呼び出し元（start_summary＝A-15ボタン、
+    maybe_trigger＝チャット上の「要約して」検知）がそれぞれの流儀で設定の妥当性を確認済みである
+    前提で、ここでは再検証しない。"""
     pool = get_pool()
     persona_name = settings["persona_name"] or "Kogack AI"
     persona_icon_url = settings["persona_icon_url"]
