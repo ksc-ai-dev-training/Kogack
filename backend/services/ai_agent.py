@@ -103,6 +103,39 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   正直に「その機能はまだ利用できません」と答え、存在しない空き状況を作り出さないこと
 - 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない"""
 
+# チャット上での要約依頼（「要約して」等）への対応（ユーザーからの報告「要約してと送ると
+# 要約できませんと返ってきて、しかもその後実際に要約ボタンを押すと要約結果にもその『できません』
+# という文言が混ざり込んでおかしくなる」不具合の修正、2026-09-14）。当初はFIXED_RULESへ「要約は
+# ボタンを押すよう案内せよ」という指示を追加する形で試みたが、実機検証（3パターンの言い回しで
+# 確認）でgpt-4.1-nanoが指示を無視し「役に立とうとして」実際に要約文を書いてしまう挙動を
+# 3/3で確認した（Slice 3のout_of_scope_policy='strict'で見られたのと同じ、小型モデル特有の
+# 過剰な奉仕傾向）。プロンプトの言い回しをさらに強めても模型の指示追従性に賭け続けることになる
+# ため、LLM呼び出し自体を行わず確定的に案内する方式へ切り替えた（@channel/@here・detect_mentionと
+# 同じ、素朴な文字列一致による決定的判定という設計方針を踏襲）。
+SUMMARY_GUIDANCE_MESSAGE = "要約は画面上部（スレッド内ならそのスレッド上部）の「📝 要約」ボタンから実行できます。"
+
+
+def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
+    """本文からメンション記法を取り除いたうえで「要約」という語の有無だけを見る、detect_mentionと
+    同じ素朴な文字列一致（LLMの判断に依存しない）。「まとめて」等のより曖昧な言い回しは日常会話
+    （雑談の「まとめ」等）との誤検知が多いため対象外とし、比較的一意な「要約」という語に絞った"""
+    return "要約" in body.replace(f"@{persona_name}", "")
+
+
+async def _post_summary_guidance(channel_id: int, settings: dict, thread_id: int | None) -> None:
+    """チャット上で要約を頼まれた場合の確定的な案内発言を投稿する（_looks_like_summarize_request
+    参照）。OpenAI APIを一切呼ばないためgeneration_status='generating'のプレースホルダ段階を経ず、
+    最初から確定済みの発言として投稿する（T-13コスト記録も対象外、実際にAPIを使っていないため）"""
+    persona_name = settings["persona_name"] or "Kogack AI"
+    persona_icon_url = settings["persona_icon_url"]
+    await get_pool().execute(
+        """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body,
+               bot_display_name, bot_icon_url)
+           VALUES ($1, $2, 'ai', $3, $4, $5)""",
+        channel_id, thread_id, SUMMARY_GUIDANCE_MESSAGE, persona_name, persona_icon_url,
+    )
+
+
 # search_documentsのOpenAI Function Calling定義（Slice 3、2026-09-09）。1回の応答生成につき
 # 複数回呼ばれる可能性があるが、ラウンド数はSEARCH_DOCUMENTS_MAX_ROUNDSで打ち切る
 # （無限ループ・コスト際限無い増大の防止）。
@@ -362,6 +395,9 @@ async def maybe_trigger(channel_id: int, body: str, requested_by: int, thread_id
     persona_name = settings["persona_name"] or "Kogack AI"
     requires_mention = thread_id is not None or settings["reaction_mode"] != "proactive"
     if requires_mention and not detect_mention(body, persona_name):
+        return
+    if _looks_like_summarize_request(body, persona_name):
+        asyncio.create_task(_post_summary_guidance(channel_id, settings, thread_id))
         return
     asyncio.create_task(_generate_and_post(channel_id, settings, requested_by, thread_id))
 
