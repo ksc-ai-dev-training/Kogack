@@ -7,7 +7,7 @@
 # 「自動応答トリガー」の6タブを実装し、「参照ドキュメント範囲」「スキル」「反応モード」「自動対応範囲」の
 # 4タブは対応する基盤（ドキュメント索引・自動対応分類）が未実装のため対象外（CLAUDE.md 実装状況節）。
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -717,6 +717,11 @@ async def post_message(
 
 class SummarizeRequest(BaseModel):
     thread_id: str | None = None
+    # 対象期間の指定（ユーザーからの明示的な要望「要約ボタンでも範囲を決められるようにしたい」、
+    # 2026-09-14）。YYYY-MM-DD形式、JSTの暦日として解釈し両端を含む（いずれも省略可。省略時は
+    # 従来どおり全期間／直近MAX_SUMMARY_CHANNEL_MESSAGES件）
+    since: str | None = None
+    until: str | None = None
 
 
 @router.post("/{channel_id}/summarize", status_code=201)
@@ -724,7 +729,8 @@ async def summarize_channel(
     channel_id: int, body: SummarizeRequest, user: CurrentUser = Depends(require_channel_member),
 ):
     """A-15: 要約実行（F-14）。thread_id指定時はそのスレッド全体、未指定時はチャンネル本体の
-    直近100件を対象とする（基本設計書5.6節）。実際の生成はservices/ai_agent.pyが非同期で行い
+    直近100件を対象とする（基本設計書5.6節）。since/until指定時はさらにその期間（JSTの暦日、
+    両端含む）に絞り込む。実際の生成はservices/ai_agent.pyが非同期で行い
     （メンション応答と同じgeneration_status='generating'の仮レコード方式、8.7節）、このAPIは
     投稿完了を待たずに返す。AI未設定・チャンネルAI無効の場合は400（maybe_triggerと異なり、
     明示的なボタン操作のため黙って何もしないのではなく理由を返す）。"""
@@ -738,8 +744,24 @@ async def summarize_channel(
         )
         if parent is None or parent["channel_id"] != channel_id:
             raise HTTPException(404, detail="見つかりません")
+
+    since_date: date | None = None
+    until_date: date | None = None
+    if body.since is not None:
+        try:
+            since_date = date.fromisoformat(body.since)
+        except ValueError:
+            raise HTTPException(422, detail="sinceはYYYY-MM-DD形式で指定してください")
+    if body.until is not None:
+        try:
+            until_date = date.fromisoformat(body.until)
+        except ValueError:
+            raise HTTPException(422, detail="untilはYYYY-MM-DD形式で指定してください")
+    if since_date is not None and until_date is not None and since_date > until_date:
+        raise HTTPException(422, detail="sinceはuntil以前の日付にしてください")
+
     try:
-        result = await ai_agent.start_summary(channel_id, thread_id, user.id)
+        result = await ai_agent.start_summary(channel_id, thread_id, user.id, since_date, until_date)
     except ai_agent.SummaryUnavailable as e:
         raise HTTPException(400, detail=str(e))
     return {

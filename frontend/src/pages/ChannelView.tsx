@@ -11,6 +11,7 @@ import Composer, { type MentionCandidate } from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
 import ChannelNotifButton from '../components/ChannelNotifButton'
+import SummarizeRangeButton, { type SummaryRange } from '../components/SummarizeRangeButton'
 import { useToast } from '../components/Toast'
 import type { AttachmentPayload, ChannelNotifMode, MentionPayload } from '../types'
 
@@ -186,12 +187,17 @@ export default function ChannelView() {
   // A-15: チャンネル本体の要約（F-14）。押した時点までの直近100件を対象に、要約結果は
   // このチャンネルへのAI発言として投稿される（生成中はMessageListが「生成中」を表示するため、
   // ここでは投稿完了を待たずすぐにボタンを元に戻す。mutateMessages()は3秒ポーリングを待たず
-  // プレースホルダ行を早く表示するための一手）
-  const summarize = async () => {
+  // プレースホルダ行を早く表示するための一手）。range指定時（ユーザーからの明示的な要望「要約
+  // ボタンでも範囲を決められるようにしたい」、2026-09-14）はその期間（JSTの暦日、両端含む）に
+  // 絞り込む。SummarizeRangeButtonのポップオーバーから渡される
+  const summarize = async (range?: SummaryRange) => {
     if (!channelId) return
     setSummarizing(true)
     try {
-      await apiFetch(`/api/channels/${channelId}/summarize`, { method: 'POST', body: JSON.stringify({}) })
+      await apiFetch(`/api/channels/${channelId}/summarize`, {
+        method: 'POST',
+        body: JSON.stringify({ since: range?.since, until: range?.until }),
+      })
       await mutateMessages()
     } catch (e) {
       toast(e instanceof Error ? e.message : '要約に失敗しました', 'error')
@@ -241,15 +247,11 @@ export default function ChannelView() {
             </button>
           )}
           {channel && (
-            <button
-              type="button"
-              disabled={summarizing}
-              onClick={summarize}
-              title="押した時点までの直近100件を要約します（F-14）"
-              className="flex-none rounded-[7px] border border-accent-100 bg-accent-50 px-2.5 py-1 text-xs font-semibold text-accent-700 hover:bg-accent-100 disabled:opacity-50"
-            >
-              📝 {summarizing ? '要約中...' : '要約'}
-            </button>
+            <SummarizeRangeButton
+              summarizing={summarizing}
+              onSummarize={summarize}
+              mainButtonTitle="押した時点までの直近100件を要約します（F-14。▾から対象期間を指定できます）"
+            />
           )}
           {channel && (
             <ChannelNotifButton

@@ -42,10 +42,16 @@
 # 通常のメンション応答ではなくこの経路（共通ヘルパー_launch_summary）を起動する（2026-09-14）。
 import asyncio
 import json
+import re
 import traceback
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from database import get_pool
 from services import ai_client, doc_search
+
+JST = ZoneInfo("Asia/Tokyo")  # F-14要約の対象期間指定（今日/今週/今月等）をJSTの暦日で解釈する
+# （routers/search.pyのF-42日付モディファイアと同じ考え方・同じタイムゾーン）
 
 MAX_HISTORY_MESSAGES = 20  # AI API手順書の目安「直近10往復まで」（human+aiであわせて概ね20件。bot発言混在のため厳密な往復数ではない）
 MAX_SUMMARY_CHANNEL_MESSAGES = 100  # F-14: チャンネル本体を要約する場合の対象件数上限（スレッド全体は上限なし）
@@ -135,6 +141,76 @@ def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
     （「要約するには」のような方法を尋ねる質問を誤って要約実行と扱わないため）"""
     text = body.replace(f"@{persona_name}", "")
     return any(pattern in text for pattern in _SUMMARIZE_REQUEST_PATTERNS)
+
+
+# 要約の対象期間指定（「今月分の要約して」「直近10日間分の要約して」）への対応（ユーザーからの
+# 明示的な要望、2026-09-14）。_looks_like_summarize_requestで既に「実際の要約依頼」であることが
+# 確定した本文に対してのみ呼ばれるため、ここでの誤検知は範囲の狭め方を誤る程度に留まり、
+# 「要約するには」の誤トリガー（別の2026-09-14の不具合）とはリスクの性質が異なる。LLMの解釈には
+# 頼らず素朴な文字列一致・正規表現で判定する（detect_mention・_looks_like_summarize_requestと
+# 同じ方針）。
+_RECENT_DAYS_RE = re.compile(r"直近\s*(\d{1,3})\s*日")
+
+
+def _parse_summary_range_from_text(text: str) -> tuple[date, date] | None:
+    """チャット本文から対象期間（今日/昨日/今週/先週/今月/先月/直近N日間）を検出し、JSTの暦日で
+    since・until（両端含む）を返す。該当する表現が無ければNone（従来どおり全期間／直近N件のまま）。
+    「先週」は「今週」の部分文字列ではない（別の語）ため、判定順序に依存しない。"""
+    today = datetime.now(JST).date()
+
+    m = _RECENT_DAYS_RE.search(text)
+    if m:
+        n = int(m.group(1))
+        if n >= 1:
+            return today - timedelta(days=n - 1), today
+    if "今日" in text:
+        return today, today
+    if "昨日" in text:
+        yesterday = today - timedelta(days=1)
+        return yesterday, yesterday
+    if "先週" in text:
+        this_monday = today - timedelta(days=today.weekday())
+        last_monday = this_monday - timedelta(days=7)
+        return last_monday, this_monday - timedelta(days=1)
+    if "今週" in text:
+        monday = today - timedelta(days=today.weekday())
+        return monday, today
+    if "先月" in text:
+        first_this_month = today.replace(day=1)
+        last_day_prev_month = first_this_month - timedelta(days=1)
+        first_prev_month = last_day_prev_month.replace(day=1)
+        return first_prev_month, last_day_prev_month
+    if "今月" in text:
+        return today.replace(day=1), today
+    return None
+
+
+def _range_bounds(since_date: date | None, until_date: date | None) -> tuple[datetime | None, datetime | None]:
+    """JSTの暦日（since_date〜until_date、両端含む）を、messages.created_at比較用のUTC対応
+    datetimeへ変換する（routers/search.pyのon_date/during_monthと同じ考え方）。片側のみの指定も
+    許容する（A-15ボタンのカスタム期間指定で片方だけ入力された場合等）。"""
+    since_dt = datetime.combine(since_date, time.min, tzinfo=JST) if since_date else None
+    until_dt = datetime.combine(until_date + timedelta(days=1), time.min, tzinfo=JST) if until_date else None
+    return since_dt, until_dt
+
+
+def _format_range_label(since_date: date | None, until_date: date | None) -> str:
+    """要約結果の本文冒頭に付ける対象期間の見出し行。プロンプトでの指示だけに頼ると小型モデルが
+    省略・誤記する懸念がある（2026-09-14に確認済みの傾向と同じ）ため、Python側で確定的に組み立てて
+    本文へ前置きする（_generate_summary_and_postのUPDATE時に連結。LLMの生成結果自体には含めない）。"""
+    if since_date is None and until_date is None:
+        return ""
+
+    def fmt(d: date) -> str:
+        return f"{d.year}年{d.month}月{d.day}日"
+
+    if since_date and until_date:
+        if since_date == until_date:
+            return f"（対象期間: {fmt(since_date)}）"
+        return f"（対象期間: {fmt(since_date)}〜{fmt(until_date)}）"
+    if since_date:
+        return f"（対象期間: {fmt(since_date)}以降）"
+    return f"（対象期間: 〜{fmt(until_date)}）"
 
 
 # search_documentsのOpenAI Function Calling定義（Slice 3、2026-09-09）。1回の応答生成につき
@@ -389,7 +465,9 @@ async def maybe_trigger(channel_id: int, body: str, requested_by: int, thread_id
     毎回AIが割り込んでくる形になり要望の範囲を超えるため。「呼びかけたら答える」という
     最小限の対応にとどめた。基本設計書8.1節に設計判断として追記）。
     メンションされた本文が要約依頼に見える場合（_looks_like_summarize_request）は通常の応答生成
-    ではなく要約ボタン（A-15）と同じ処理を起動する（2026-09-14、ユーザーからの明示的な要望）。"""
+    ではなく要約ボタン（A-15）と同じ処理を起動する（2026-09-14、ユーザーからの明示的な要望）。
+    さらに本文に「今月分」「直近10日間分」等の対象期間指定があれば絞り込む
+    （_parse_summary_range_from_text、2026-09-14、ユーザーからの明示的な要望）。"""
     if not ai_client.is_configured():
         return
     settings = await _fetch_settings(channel_id)
@@ -400,7 +478,11 @@ async def maybe_trigger(channel_id: int, body: str, requested_by: int, thread_id
     if requires_mention and not detect_mention(body, persona_name):
         return
     if _looks_like_summarize_request(body, persona_name):
-        await _launch_summary(channel_id, thread_id, settings, requested_by)
+        text = body.replace(f"@{persona_name}", "")
+        range_ = _parse_summary_range_from_text(text)
+        since_dt, until_dt = _range_bounds(*range_) if range_ else (None, None)
+        range_label = _format_range_label(*range_) if range_ else ""
+        await _launch_summary(channel_id, thread_id, settings, requested_by, since_dt, until_dt, range_label)
         return
     asyncio.create_task(_generate_and_post(channel_id, settings, requested_by, thread_id))
 
@@ -656,52 +738,81 @@ def _build_summary_prompt(settings: dict) -> str:
     )
 
 
-async def _fetch_summary_source_rows(channel_id: int, thread_id: int | None):
-    """要約対象を取得する。thread_id指定時はそのスレッド全体（元発言＋返信、上限なし。F-14の
-    「スレッド内であればそのスレッド全体」の記載どおり）、未指定時はチャンネル本体の直近100件。
-    いずれもgeneration_status IS NULLで絞り込み、生成中の（このリクエスト自身の仮レコードを
-    含む）AI発言を要約対象から除外する。"""
+async def _fetch_summary_source_rows(
+    channel_id: int, thread_id: int | None,
+    since_dt: datetime | None = None, until_dt: datetime | None = None,
+):
+    """要約対象を取得する。thread_id指定時はそのスレッド全体（元発言＋返信、既定は上限なし。
+    F-14の「スレッド内であればそのスレッド全体」の記載どおり）、未指定時はチャンネル本体の直近
+    MAX_SUMMARY_CHANNEL_MESSAGES件。since_dt/until_dt（_range_bounds参照。ユーザーからの明示的な
+    要望「今月分の要約して」「直近10日間分の要約して」で対象期間を絞れるようにした、2026-09-14）を
+    指定すると、この範囲内の発言にさらに絞り込む（チャンネル本体は絞り込み後も件数上限は維持し、
+    コストの際限ない増大を防ぐ。スレッド全体は従来どおり上限なしのまま）。いずれもgeneration_status
+    IS NULLで絞り込み、生成中の（このリクエスト自身の仮レコードを含む）AI発言を要約対象から除外する。"""
     pool = get_pool()
     if thread_id is not None:
+        conditions = ["(id = $1 OR thread_parent_id = $1)", "deleted_at IS NULL", "generation_status IS NULL"]
+        params: list = [thread_id]
+        if since_dt is not None:
+            params.append(since_dt)
+            conditions.append(f"created_at >= ${len(params)}")
+        if until_dt is not None:
+            params.append(until_dt)
+            conditions.append(f"created_at < ${len(params)}")
         rows = await pool.fetch(
-            """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
-               FROM messages
-               WHERE (id = $1 OR thread_parent_id = $1)
-                 AND deleted_at IS NULL AND generation_status IS NULL
-               ORDER BY created_at ASC""",
-            thread_id,
+            f"""SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+                FROM messages WHERE {' AND '.join(conditions)} ORDER BY created_at ASC""",
+            *params,
         )
         return list(rows)
+
+    conditions = ["channel_id = $1", "deleted_at IS NULL", "thread_parent_id IS NULL", "generation_status IS NULL"]
+    params = [channel_id]
+    if since_dt is not None:
+        params.append(since_dt)
+        conditions.append(f"created_at >= ${len(params)}")
+    if until_dt is not None:
+        params.append(until_dt)
+        conditions.append(f"created_at < ${len(params)}")
+    params.append(MAX_SUMMARY_CHANNEL_MESSAGES)
     rows = await pool.fetch(
-        """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
-           FROM messages
-           WHERE channel_id = $1 AND deleted_at IS NULL AND thread_parent_id IS NULL
-             AND generation_status IS NULL
-           ORDER BY created_at DESC LIMIT $2""",
-        channel_id, MAX_SUMMARY_CHANNEL_MESSAGES,
+        f"""SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+            FROM messages WHERE {' AND '.join(conditions)}
+            ORDER BY created_at DESC LIMIT ${len(params)}""",
+        *params,
     )
     return list(reversed(rows))
 
 
-async def start_summary(channel_id: int, thread_id: int | None, requested_by: int) -> dict:
+async def start_summary(
+    channel_id: int, thread_id: int | None, requested_by: int,
+    since_date: date | None = None, until_date: date | None = None,
+) -> dict:
     """A-15から呼ばれる。ボタン操作は条件を満たさない場合に黙って何もしないのではなく理由を
     返す必要があるため、ここでis_configured/is_ai_enabledを検証してから_launch_summaryへ渡す
     （チャット上の「要約して」検知＝maybe_triggerは既にこれらを検証済みのため、_launch_summaryを
-    直接呼び再検証しない。SummaryUnavailableもそちら側では投げない）。"""
+    直接呼び再検証しない。SummaryUnavailableもそちら側では投げない）。since_date/until_dateは
+    S-06要約ボタンの対象期間指定（ユーザーからの明示的な要望、2026-09-14。JSTの暦日、両端含む）"""
     if not ai_client.is_configured():
         raise SummaryUnavailable("AI機能が設定されていないため要約できません")
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         raise SummaryUnavailable("このチャンネルのAIは無効になっています")
-    return await _launch_summary(channel_id, thread_id, settings, requested_by)
+    since_dt, until_dt = _range_bounds(since_date, until_date)
+    range_label = _format_range_label(since_date, until_date)
+    return await _launch_summary(channel_id, thread_id, settings, requested_by, since_dt, until_dt, range_label)
 
 
-async def _launch_summary(channel_id: int, thread_id: int | None, settings: dict, requested_by: int) -> dict:
+async def _launch_summary(
+    channel_id: int, thread_id: int | None, settings: dict, requested_by: int,
+    since_dt: datetime | None = None, until_dt: datetime | None = None, range_label: str = "",
+) -> dict:
     """生成中プレースホルダを同期的に作成してから、実際の生成は_generate_summary_and_postへ任せる
     非同期タスクとして起動する（8.7節と同じ方式）。thread_id指定時はそのスレッドへの返信として、
     未指定時はチャンネル本体の新規発言として投稿する。呼び出し元（start_summary＝A-15ボタン、
     maybe_trigger＝チャット上の「要約して」検知）がそれぞれの流儀で設定の妥当性を確認済みである
-    前提で、ここでは再検証しない。"""
+    前提で、ここでは再検証しない。since_dt/until_dt/range_labelは対象期間指定（_range_bounds・
+    _format_range_labelの結果、2026-09-14）。"""
     pool = get_pool()
     persona_name = settings["persona_name"] or "Kogack AI"
     persona_icon_url = settings["persona_icon_url"]
@@ -712,24 +823,35 @@ async def _launch_summary(channel_id: int, thread_id: int | None, settings: dict
         channel_id, thread_id, persona_name, persona_icon_url,
     )
     message_id = placeholder["id"]
-    asyncio.create_task(_generate_summary_and_post(channel_id, thread_id, message_id, settings, requested_by))
+    asyncio.create_task(
+        _generate_summary_and_post(
+            channel_id, thread_id, message_id, settings, requested_by, since_dt, until_dt, range_label,
+        )
+    )
     return {"message_id": message_id, "thread_id": thread_id}
 
 
 async def _generate_summary_and_post(
     channel_id: int, thread_id: int | None, message_id: int, settings: dict, requested_by: int,
+    since_dt: datetime | None = None, until_dt: datetime | None = None, range_label: str = "",
 ) -> None:
     pool = get_pool()
     # A-74 生成の強制中断用の登録（_generate_and_postと同じ考え方。要約もgeneration_status='generating'の
     # プレースホルダを使うため、同じ「プロセス再起動でオーファン化する」リスクを持つ）
     _active_generations[message_id] = asyncio.current_task()
+
+    def _prefixed(body: str) -> str:
+        # 対象期間が指定されている場合、生成結果の冒頭に確定的に付け足す（LLMのプロンプト指示
+        # だけに任せると省略・誤記するリスクがあるため、_format_range_labelの出力をそのまま使う）
+        return f"{range_label}\n{body}" if range_label else body
+
     try:
-        rows = await _fetch_summary_source_rows(channel_id, thread_id)
+        rows = await _fetch_summary_source_rows(channel_id, thread_id, since_dt, until_dt)
         if not rows:
             await pool.execute(
                 """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()
                    WHERE id = $1 AND generation_status = 'generating'""",
-                message_id, "（要約する発言がありませんでした）",
+                message_id, _prefixed("（対象期間に要約する発言がありませんでした）" if range_label else "（要約する発言がありませんでした）"),
             )
             return
 
@@ -745,7 +867,7 @@ async def _generate_summary_and_post(
             max_completion_tokens=MAX_OUTPUT_TOKENS,
             **_completion_extra_kwargs(model),
         )
-        reply = (res.choices[0].message.content or "").strip() or "（要約を生成できませんでした）"
+        reply = _prefixed((res.choices[0].message.content or "").strip() or "（要約を生成できませんでした）")
 
         await pool.execute(
             """UPDATE messages SET body = $2, generation_status = NULL, updated_at = now()

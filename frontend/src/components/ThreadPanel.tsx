@@ -6,6 +6,7 @@ import MessageList, {
 } from './MessageList'
 import Composer, { type MentionCandidate } from './Composer'
 import ProfileCard from './ProfileCard'
+import SummarizeRangeButton, { type SummaryRange } from './SummarizeRangeButton'
 import { useToast } from './Toast'
 import type { AttachmentPayload, CitationPayload, MentionPayload, MentionSourceMember, Message } from '../types'
 
@@ -169,14 +170,16 @@ export default function ThreadPanel({
 
   // A-15: このスレッド全体の要約（F-14）。チャンネルのスレッドのみ対象（DMのスレッドにはAI機能が
   // 無いため、channel_idを持つ元発言のときだけボタンを表示する）。要約結果はこのスレッドへの
-  // 返信として投稿されるため、返信一覧を再取得して生成中プレースホルダをすぐ表示する。
-  const summarizeThread = async () => {
+  // 返信として投稿されるため、返信一覧を再取得して生成中プレースホルダをすぐ表示する。range指定時
+  // （ユーザーからの明示的な要望「要約ボタンでも範囲を決められるようにしたい」、2026-09-14）は
+  // その期間（JSTの暦日、両端含む）に絞り込む
+  const summarizeThread = async (range?: SummaryRange) => {
     if (!parentMessage?.channel_id) return
     setSummarizing(true)
     try {
       await apiFetch(`/api/channels/${parentMessage.channel_id}/summarize`, {
         method: 'POST',
-        body: JSON.stringify({ thread_id: messageId }),
+        body: JSON.stringify({ thread_id: messageId, since: range?.since, until: range?.until }),
       })
       await mutateReplies()
       onReplyPosted?.()
@@ -208,15 +211,14 @@ export default function ThreadPanel({
           <span className="truncate text-[11px] text-ink-subtle">{headerSub}</span>
         </div>
         {parentMessage?.channel_id && (
-          <button
-            type="button"
-            disabled={summarizing}
-            onClick={summarizeThread}
-            title="このスレッド全体を要約します（F-14）"
-            className="ml-auto flex-none rounded-[7px] border border-accent-100 bg-accent-50 px-2 py-1 text-[11px] font-semibold text-accent-700 hover:bg-accent-100 disabled:opacity-50"
-          >
-            📝 {summarizing ? '要約中...' : '要約'}
-          </button>
+          <div className="ml-auto">
+            <SummarizeRangeButton
+              summarizing={summarizing}
+              onSummarize={summarizeThread}
+              mainButtonTitle="このスレッド全体を要約します（F-14。▾から対象期間を指定できます）"
+              size="thread"
+            />
+          </div>
         )}
         <button
           type="button"
