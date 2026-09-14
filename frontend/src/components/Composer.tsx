@@ -134,9 +134,15 @@ export default function Composer({
    * 再マウントする実装（2026-09-14）のため、このpropもそのたびに新しい値で初期状態から始まる */
   draftKey?: string
 }) {
-  const [body, setBody] = useState(() => (draftKey ? getDraft(draftKey) : ''))
+  // バグ修正（ユーザーからの報告、2026-09-14）: 下書きの本文だけでなくmentions（構造化メンション、
+  // ハイライト表示・送信時の通知対象の両方に使う）も同じキーから復元する。従来はbodyのみ復元して
+  // いたため、本文には「@氏名」の文字列こそ残るが、mentions stateは再マウントのたびに空配列に
+  // リセットされ、青いハイライトが消え、実際に送信してもメンション通知が飛ばなくなっていた
+  // （getDraftはどちらの初期化子も初回レンダー時にしか呼ばれない=lazy initializerのため、
+  // 2回呼んでもlocalStorageアクセスはマウント毎に2回で済む）
+  const [body, setBody] = useState(() => (draftKey ? getDraft(draftKey).body : ''))
   const [sending, setSending] = useState(false)
-  const [mentions, setMentions] = useState<MentionPayload[]>([])
+  const [mentions, setMentions] = useState<MentionPayload[]>(() => (draftKey ? getDraft(draftKey).mentions : []))
   const [attachments, setAttachments] = useState<AttachmentPayload[]>([])
   const [uploading, setUploading] = useState(false)
   const [pickerQuery, setPickerQuery] = useState<string | null>(null)
@@ -183,11 +189,12 @@ export default function Composer({
   // 下書きの永続化（ユーザーからの明示的な要望）。setBodyの呼び出し箇所（通常入力・絵文字挿入・
   // 書式ボタン・メンション選択・送信/予約後のクリアなど）を個別に触らず、bodyの変化をまとめて
   // 1箇所で拾ってlib/drafts.tsへ書き込む（送信・送信予約成功後はbodyが''になるため、この効果が
-  // そのまま下書きの削除も兼ねる。lib/drafts.tsのsetDraftは空文字を渡すとエントリ自体を消す）
+  // そのまま下書きの削除も兼ねる。lib/drafts.tsのsetDraftは空文字を渡すとエントリ自体を消す）。
+  // mentionsもあわせて保存する（バグ修正、2026-09-14。上記のstate初期化コメント参照）
   useEffect(() => {
     if (!draftKey) return
-    setDraft(draftKey, body)
-  }, [draftKey, body])
+    setDraft(draftKey, body, mentions)
+  }, [draftKey, body, mentions])
 
   const filteredCandidates = (mentionCandidates ?? []).filter((c) =>
     c.name.toLowerCase().includes((pickerQuery ?? '').toLowerCase()),
