@@ -866,10 +866,21 @@ export default function Composer({
         </button>
       </div>
       <div className="relative">
+        {/* バグ修正（ユーザーからの報告「スレッドの入力欄で長文を打つと、右端のスクロールバーと
+            被って文字が見切れる場所がある」）: textareaは10行（MAX_ROWS）を超えると内部で
+            縦スクロール可能になり、Windows版Chrome/Edgeの既定スクロールバー（オーバーレイ式では
+            なく領域を占有するクラシックなスクロールバー）が表示された分だけ、実際の文字が使える
+            幅（clientWidth）が狭くなる。一方、背後のハイライト用div（このoverlay、実際に目に
+            見えているテキスト本体）はスクロールを持たない`overflow-hidden`のため幅が変わらず、
+            スクロールバーの分だけ余分に右へ文字を描画してしまい、textarea側のネイティブ
+            スクロールバーの下に隠れて見切れていた。`scrollbar-gutter: stable`を両要素に付け、
+            スクロールバーが実際に表示されるかどうかに関わらず常に同じ幅のガター（余白）を
+            確保することで、両者の実効幅を常に一致させる（スクロールバーの実ピクセル幅はOS・
+            ブラウザ依存のため、固定pxのpadding調整ではなくこのCSSプロパティで解決する） */}
         <div
           ref={highlightRef}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-[13px] text-ink"
+          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-[13px] text-ink [scrollbar-gutter:stable]"
         >
           {highlightNodes}
           {'​'}
@@ -886,7 +897,7 @@ export default function Composer({
           placeholder={placeholder}
           rows={MIN_ROWS}
           maxLength={4000}
-          className="relative w-full resize-none break-words border-none bg-transparent text-[13px] text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+          className="relative w-full resize-none break-words border-none bg-transparent text-[13px] text-transparent caret-ink outline-none placeholder:text-ink-subtle [scrollbar-gutter:stable]"
         />
       </div>
       {(attachments.length > 0 || uploading) && (
