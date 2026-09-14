@@ -146,6 +146,17 @@ export default function Composer({
   const [scheduleDate, setScheduleDate] = useState('')
   const [scheduleTime, setScheduleTime] = useState('')
   const [scheduling, setScheduling] = useState(false)
+  // リンク挿入ポップアップ（ユーザーからの明示的な要望「スラックみたいに、リンクもボタンを
+  // 押したら、テキストとリンクを設定する画面ポップアップが出てきてほしい」）。当初は🔗ボタンで
+  // 選択文字列を`[選択文字列](url)`へ直接書き換え「url」部分を選択状態にするだけの簡易実装
+  // だったが、今回テキスト・URLをそれぞれ入力するポップアップへ置き換えた（貼り付けでの自動変換
+  // ＝handlePasteは即座に変換する挙動のままにする方が使い勝手が良いため、そちらは変更していない）
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkText, setLinkText] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  // ポップアップの入力欄にフォーカスが移るとtextarea自身のselectionStart/Endが失われるため、
+  // 開いた時点の選択範囲をrefへ退避しておき、確定時にその範囲を置き換える
+  const linkSelectionRef = useRef({ start: 0, end: 0 })
   const toast = useToast()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -218,6 +229,7 @@ export default function Composer({
       setScheduleTime((prev) => prev || d.time)
       setPickerQuery(null)
       setEmojiOpen(false)
+      setLinkOpen(false)
     }
     setScheduleOpen((v) => !v)
   }
@@ -232,6 +244,7 @@ export default function Composer({
     if (!emojiOpen) {
       setPickerQuery(null)
       setScheduleOpen(false)
+      setLinkOpen(false)
     }
     setEmojiOpen((v) => !v)
     requestAnimationFrame(() => textareaRef.current?.focus())
@@ -362,26 +375,48 @@ export default function Composer({
     }
   }
 
-  // リンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい」）。記法はF-38の
-  // 既存の`**太字**`等と同じGFM（GitHub Flavored Markdown）風の`[表示文字](URL)`を採用した
-  // （Slack自体の`<url|text>`記法は他の書式と同様に独自すぎるため避けた）。GitHubのコメント欄の
-  // リンクボタンと同じ挙動: 選択範囲があればその文字列を表示文字として使い、無ければ「リンク文字列」
-  // という仮の文字列を使う。挿入後は「url」の部分だけを選択状態にし、そのまま実際のURLを
-  // 入力・貼り付けできるようにする（貼り付けについては下記handlePasteでも別途対応）
-  const insertLink = () => {
-    const el = textareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? body.length
-    const end = el.selectionEnd ?? body.length
+  // リンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい」）。記法は他の書式
+  // （`**太字**`等）と同じGFM（GitHub Flavored Markdown）風の`[表示文字](URL)`を採用した
+  // （Slack自体の`<url|text>`記法は他の書式と同様に独自すぎるため避けた）。当初はGitHubの
+  // コメント欄のリンクボタンと同じ「選択文字列を`[選択文字列](url)`へ直接書き換えurl部分を
+  // 選択状態にする」簡易実装だったが、ユーザーからの明示的な要望「スラックみたいに、リンクも
+  // ボタンを押したら、テキストとリンクを設定する画面ポップアップが出てきてほしい」を受け、
+  // テキスト・URLをそれぞれ入力するポップアップ方式に置き換えた。
+  const toggleLinkPopover = () => {
+    if (!linkOpen) {
+      const el = textareaRef.current
+      const start = el?.selectionStart ?? body.length
+      const end = el?.selectionEnd ?? body.length
+      linkSelectionRef.current = { start, end }
+      setLinkText(body.slice(start, end))
+      setLinkUrl('')
+      setPickerQuery(null)
+      setEmojiOpen(false)
+      setScheduleOpen(false)
+    }
+    setLinkOpen((v) => !v)
+  }
+
+  const LINK_URL_RE = /^https?:\/\/\S+$/
+  const confirmLink = () => {
+    const url = linkUrl.trim()
+    if (!LINK_URL_RE.test(url)) {
+      toast('URLはhttps://から始まる形式で入力してください', 'error')
+      return
+    }
+    // テキスト未入力時はURL自体を表示文字にする（Slackも同様に、テキストを指定しなければURLが
+    // そのまま表示される）
+    const text = linkText.trim() || url
+    const { start, end } = linkSelectionRef.current
     const before = body.slice(0, start)
-    const selected = body.slice(start, end) || 'リンク文字列'
     const after = body.slice(end)
-    const prefix = `[${selected}](`
-    setBody(before + prefix + 'url' + ')' + after)
-    setPickerQuery(null)
+    const inserted = `[${text}](${url})`
+    setBody(before + inserted + after)
+    setLinkOpen(false)
     requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(before.length + prefix.length, before.length + prefix.length + 'url'.length)
+      const pos = before.length + inserted.length
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(pos, pos)
     })
   }
 
@@ -489,6 +524,7 @@ export default function Composer({
     setActiveIndex(0)
     setScheduleOpen(false)
     setEmojiOpen(false)
+    setLinkOpen(false)
     requestAnimationFrame(() => {
       const pos = cursor + insertText.length
       el?.focus()
@@ -701,6 +737,58 @@ export default function Composer({
           </div>
         </div>
       )}
+      {linkOpen && (
+        <div
+          className="absolute bottom-full left-0 z-40 mb-2 w-[280px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
+          onKeyDown={(e) => {
+            // コンテナ全体で拾うことで、フォーカスがテキスト欄・URL欄・キャンセル/挿入ボタンの
+            // いずれにあってもEscapeで閉じられるようにする（各inputだけにハンドラを付けると、
+            // 「挿入」ボタンにフォーカスが移った状態でEscapeを押しても反応しない不具合があった）
+            if (e.key === 'Escape') setLinkOpen(false)
+          }}
+        >
+          <div className="mb-2 text-[12.5px] font-bold text-ink">リンクを挿入</div>
+          <label className="mb-0.5 block text-[11px] font-semibold text-ink-subtle">テキスト</label>
+          <input
+            type="text"
+            value={linkText}
+            onChange={(e) => setLinkText(e.target.value)}
+            placeholder="表示する文字列（省略時はURLを表示）"
+            className="mb-1.5 w-full rounded-md border border-line-strong px-2 py-1.5 text-[12px] text-ink outline-none"
+          />
+          <label className="mb-0.5 block text-[11px] font-semibold text-ink-subtle">URL</label>
+          <input
+            type="text"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                confirmLink()
+              }
+            }}
+            placeholder="https://"
+            autoFocus
+            className="w-full rounded-md border border-line-strong px-2 py-1.5 text-[12px] text-ink outline-none"
+          />
+          <div className="mt-2.5 flex justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => setLinkOpen(false)}
+              className="rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] text-ink-muted"
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              onClick={confirmLink}
+              className="rounded-md bg-accent-600 px-2.5 py-1 text-[11.5px] font-bold text-white"
+            >
+              挿入
+            </button>
+          </div>
+        </div>
+      )}
       {/* 書式ツールバー（太字・取り消し線・コード・箇条書き）は入力欄の「上」、ファイル添付・
           メンションは入力欄の「下」に配置する（ユーザーからの明示的な要望「役割が違うことを
           わかりやすくしたい」）。上段＝本文の見た目を変える書式、下段＝本文とは別に本文に
@@ -740,9 +828,11 @@ export default function Composer({
         </button>
         <button
           type="button"
-          title="リンク（選択した文字列にURLを設定します）"
-          onClick={insertLink}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] text-ink-subtle hover:bg-surface-muted"
+          title="リンク（テキストとURLを指定して挿入します）"
+          onClick={toggleLinkPopover}
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] hover:bg-surface-muted ${
+            linkOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+          }`}
         >
           🔗
         </button>
