@@ -130,8 +130,17 @@ export function useDesktopNotifications(
     for (const k of [...seen.keys()]) if (!liveKeys.has(k)) seen.delete(k)
 
     if (mentionHits.length === 0 && messageHits.length === 0) return
-    // Kogackのタブを見ている＝操作中なので、未読バッジで十分。通知は出さない（Slackの既定と同じ）
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') return
+    // Kogackのタブを見ている＝操作中なので、未読バッジで十分。通知は出さない（Slackの既定と同じ）。
+    // バグ修正（ユーザーからの質問「別ウィンドウや他アプリが前に出ていてKogackは後ろにあるが
+    // 部分的に見えている場合はどうなるか」を経て、2026-09-14）: 当初はdocument.visibilityStateだけを
+    // 見ていたが、これは「タブがそのウィンドウ内でアクティブか」「ウィンドウが最小化されていないか」
+    // しか反映せず、ウィンドウがOSのフォーカスを失っている（＝他のウィンドウ/アプリが前面にあり
+    // 実質的に見えていない）状態でも'visible'のままになる。document.hasFocus()（ウィンドウが実際に
+    // フォーカスを持っているか）も条件に加えることで、「他アプリが前面にあってKogackの内容が
+    // 見えていない」状態でも正しく通知が出るようにした
+    const isActivelyViewed =
+      typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus()
+    if (isActivelyViewed) return
 
     const fire = (title: string, body: string, tag: string, to: string) => {
       try {
