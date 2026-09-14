@@ -106,6 +106,14 @@ async def update_recurring_post(
             anchor_at = datetime.fromisoformat(body.anchor_at.replace("Z", "+00:00"))
         except ValueError:
             raise HTTPException(422, detail="anchor_atの形式が不正です")
+        # バグ修正（2026-09-14）: create_recurring_post（A-53）は未来日時のみを許可するが、この
+        # 更新側には同じ検証が抜けており、編集画面からは過去日時のanchor_atを保存できてしまって
+        # いた（ユーザーからの報告「予約メッセージを作成するときは過去を指定できないが、修正では
+        # 過去の日程を選択・保存できてしまう」）。anchor_atを実際に変更する場合のみ検証する
+        # （anchor_at未指定のis_activeトグルのみの更新等では、既存の（結果的に過去日時のままの）
+        # next_run_atをそのまま維持する既存の正常な再開フローを妨げないようにするため）
+        if anchor_at <= datetime.now(timezone.utc):
+            raise HTTPException(400, detail="未来の日時を指定してください")
         next_run_at = anchor_at
 
     row = await get_pool().fetchrow(
