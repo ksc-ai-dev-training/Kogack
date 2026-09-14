@@ -82,6 +82,13 @@ async def _dispatch_due_messages() -> None:
                         conn, message_row["id"], row["channel_id"],
                         [MentionInput(**m) for m in mentions_data],
                     )
+            if row["thread_parent_id"] is not None:
+                # バグ修正（2026-09-14）: routers/messages.py post_replyと同じ理由。予約投稿が
+                # スレッド返信の場合も元発言のupdated_atを更新しないと、本体タイムラインの
+                # sinceポーリングが「N件の返信」の増分を拾えない
+                await conn.execute(
+                    "UPDATE messages SET updated_at = now() WHERE id = $1", row["thread_parent_id"]
+                )
 
 
 async def _dispatch_recurring_posts() -> None:

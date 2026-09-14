@@ -63,7 +63,7 @@ async def delete_message(message_id: int, user: CurrentUser = Depends(require_au
     チャンネル・DMどちらの発言、スレッド返信・元発言のいずれも同じ経路で扱う。"""
     pool = get_pool()
     row = await pool.fetchrow(
-        """SELECT channel_id, dm_id, sender_user_id, sender_type, bot_display_name
+        """SELECT channel_id, dm_id, sender_user_id, sender_type, bot_display_name, thread_parent_id
            FROM messages WHERE id = $1 AND deleted_at IS NULL""",
         message_id,
     )
@@ -93,6 +93,10 @@ async def delete_message(message_id: int, user: CurrentUser = Depends(require_au
     await pool.execute(
         "UPDATE messages SET deleted_at = now(), deleted_by = $2 WHERE id = $1", message_id, user.id
     )
+    if row["thread_parent_id"] is not None:
+        # 削除対象がスレッド返信の場合、元発言のthread_reply_countも減るため、post_replyと同じ理由で
+        # 元発言のupdated_atを更新し、他の参加者の本体タイムラインにも反映されるようにする（2026-09-14）
+        await pool.execute("UPDATE messages SET updated_at = now() WHERE id = $1", row["thread_parent_id"])
     return {"id": str(message_id), "deleted": True}
 
 
@@ -286,6 +290,13 @@ async def post_reply(
             sender_user_id=user.id,
         )
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
+        # バグ修正（2026-09-14）: 元発言（スレッド元）のthread_reply_countは`_MESSAGES_SELECT`の
+        # サブクエリで都度計算するだけで、messages行自体には保存していない。そのため返信を投稿しても
+        # 元発言自身のupdated_atは変わらず、本体タイムラインのsinceベース差分ポーリング（updated_at基準、
+        # 2026-09-04の同種の修正で確立済み）がこの変化を拾えず、「N件の返信」表示が別のチャンネルへ
+        # 切り替えて戻るまで更新されない不具合が発生していた（ユーザーからの報告）。返信作成と同じ
+        # トランザクションで元発言のupdated_atも更新することで解消する
+        await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", message_id)
     if parent["channel_id"] is not None:
         await ai_agent.maybe_trigger(parent["channel_id"], body.body, user.id, thread_id=message_id)
     # デスクトップ通知②（ユーザーからの明示的な要望「自分の発言に対してスレッドで返信が来た時と、
