@@ -211,13 +211,37 @@ function renderInlineSegment(
       ),
     })
   }
+  // URL（priority 1）はコード（0）の次に優先する。太字・斜体・下線・取り消し線の記号（priority 2）
+  // より先に確定させないと、Google スプレッドシート/ドライブのURL等（base64url形式のIDに
+  // アンダースコアを含むことが多い）が斜体記法`_..._`のペアと誤って重なり、URL側が重なり解決で
+  // 負けてリンク化されない不具合が起きる（ユーザーからの報告「ウェブサイトのURLは飛べるが、
+  // Googleスプレッドシートやほかのリンクは飛べない」で発覚。単純なwebサイトURLは大抵アンダー
+  // スコアを含まないため気づかれにくかった）。
+  for (const u of findUrlMatches(text)) {
+    candidates.push({
+      start: u.start,
+      end: u.end,
+      priority: 1,
+      render: (key) => (
+        <a
+          key={key}
+          href={u.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-all text-accent-700 underline hover:text-accent-800"
+        >
+          {u.url}
+        </a>
+      ),
+    })
+  }
   for (const m of text.matchAll(BOLD_REGEX)) {
     const start = m.index ?? 0
     const content = m[1]
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 1,
+      priority: 2,
       render: (key) => <strong key={key} className="font-bold">{content}</strong>,
     })
   }
@@ -227,7 +251,7 @@ function renderInlineSegment(
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 1,
+      priority: 2,
       render: (key) => <em key={key} className="italic">{content}</em>,
     })
   }
@@ -237,7 +261,7 @@ function renderInlineSegment(
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 1,
+      priority: 2,
       render: (key) => <u key={key} className="underline">{content}</u>,
     })
   }
@@ -247,7 +271,7 @@ function renderInlineSegment(
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 1,
+      priority: 2,
       render: (key) => <s key={key} className="line-through">{content}</s>,
     })
   }
@@ -259,7 +283,7 @@ function renderInlineSegment(
       candidates.push({
         start: idx,
         end: idx + def.needle.length,
-        priority: 2,
+        priority: 3,
         render: (key) => (
           <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
             {def.label}
@@ -275,7 +299,7 @@ function renderInlineSegment(
       candidates.push({
         start: idx,
         end: idx + needle.length,
-        priority: 2,
+        priority: 3,
         render: (key) => (
           <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
             {needle}
@@ -284,24 +308,6 @@ function renderInlineSegment(
       })
       idx = text.indexOf(needle, idx + needle.length)
     }
-  }
-  for (const u of findUrlMatches(text)) {
-    candidates.push({
-      start: u.start,
-      end: u.end,
-      priority: 3,
-      render: (key) => (
-        <a
-          key={key}
-          href={u.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="break-all text-accent-700 underline hover:text-accent-800"
-        >
-          {u.url}
-        </a>
-      ),
-    })
   }
 
   candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
