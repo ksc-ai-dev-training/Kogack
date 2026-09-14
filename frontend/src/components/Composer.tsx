@@ -205,7 +205,7 @@ export default function Composer({
     if (m.start < highlightCursor) return
     if (m.start > highlightCursor) highlightNodes.push(body.slice(highlightCursor, m.start))
     highlightNodes.push(
-      <span key={i} className="rounded-[3px] bg-accent-100 text-accent-700">
+      <span key={i} className="rounded-[3px] bg-accent-200 text-accent-700">
         {body.slice(m.start, m.end)}
       </span>,
     )

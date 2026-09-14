@@ -324,7 +324,7 @@ function renderInlineSegment(
         end: idx + def.needle.length,
         priority: 4,
         render: (key) => (
-          <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
+          <span key={key} className="rounded bg-accent-200 px-1 font-semibold text-accent-700">
             {def.label}
           </span>
         ),
@@ -340,7 +340,7 @@ function renderInlineSegment(
         end: idx + needle.length,
         priority: 4,
         render: (key) => (
-          <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
+          <span key={key} className="rounded bg-accent-200 px-1 font-semibold text-accent-700">
             {needle}
           </span>
         ),
