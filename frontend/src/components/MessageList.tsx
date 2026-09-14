@@ -108,6 +108,22 @@ function findUrlMatches(text: string): { start: number; end: number; url: string
   return results
 }
 
+// 表示文字を指定したリンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい。
+// 欲を言うとslackみたいに文字指定してリンクを張り付けるとリンクが格納されるととてもうれしい」）。
+// 記法は他の簡易書式（`**太字**`等）と同じくGFM風の`[表示文字](URL)`を採用した（Slack自体の
+// `<url|text>`記法は他の書式と同じ理由で避けた。Composer.tsxの🔗ボタン・URL貼り付け時の
+// 自動変換のいずれもこの記法で本文へ挿入する）。表示文字は`]`・改行を含まない前提の簡易版
+const NAMED_LINK_REGEX = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g
+
+function findNamedLinkMatches(text: string): { start: number; end: number; label: string; url: string }[] {
+  const results: { start: number; end: number; label: string; url: string }[] = []
+  for (const m of text.matchAll(NAMED_LINK_REGEX)) {
+    const start = m.index ?? 0
+    results.push({ start, end: start + m[0].length, label: m[1], url: m[2] })
+  }
+  return results
+}
+
 // 簡易書式（太字・斜体・下線・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望「Slackの
 // メッセージ入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような機能を付けたい」
 // （2026-09-10最初の実装）と、続けて「コードボックスの中の文字は黒とは別の色にしてほしい。斜体や
@@ -212,9 +228,31 @@ function renderInlineSegment(
       ),
     })
   }
-  // URL（priority 1）はコード（0）の次に優先する。太字・斜体・下線・取り消し線の記号（priority 2）
-  // より先に確定させないと、Google スプレッドシート/ドライブのURL等（base64url形式のIDに
-  // アンダースコアを含むことが多い）が斜体記法`_..._`のペアと誤って重なり、URL側が重なり解決で
+  // 名前付きリンク（priority 1）はコード（0）の次、通常のURL自動リンク（priority 2）より前に
+  // 確定させる。`[表示文字](URL)`のURL部分が単体のURLとしても検出されうるため、先に確定させて
+  // 重なり解決でその内側のURL自動リンクを負かす（GoogleドライブURL等でアンダースコアが斜体記法と
+  // 誤って重ならないようにした2026-09-14の修正と同じ考え方）
+  for (const l of findNamedLinkMatches(text)) {
+    candidates.push({
+      start: l.start,
+      end: l.end,
+      priority: 1,
+      render: (key) => (
+        <a
+          key={key}
+          href={l.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent-700 underline hover:text-accent-800"
+        >
+          {l.label}
+        </a>
+      ),
+    })
+  }
+  // URL（priority 2）はコード・名前付きリンクの次に優先する。太字・斜体・下線・取り消し線の記号
+  // （priority 3）より先に確定させないと、Google スプレッドシート/ドライブのURL等（base64url形式の
+  // IDにアンダースコアを含むことが多い）が斜体記法`_..._`のペアと誤って重なり、URL側が重なり解決で
   // 負けてリンク化されない不具合が起きる（ユーザーからの報告「ウェブサイトのURLは飛べるが、
   // Googleスプレッドシートやほかのリンクは飛べない」で発覚。単純なwebサイトURLは大抵アンダー
   // スコアを含まないため気づかれにくかった）。
@@ -222,7 +260,7 @@ function renderInlineSegment(
     candidates.push({
       start: u.start,
       end: u.end,
-      priority: 1,
+      priority: 2,
       render: (key) => (
         <a
           key={key}
@@ -242,7 +280,7 @@ function renderInlineSegment(
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 2,
+      priority: 3,
       render: (key) => <strong key={key} className="font-bold">{content}</strong>,
     })
   }
@@ -252,7 +290,7 @@ function renderInlineSegment(
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 2,
+      priority: 3,
       render: (key) => <em key={key} className="italic">{content}</em>,
     })
   }
@@ -262,7 +300,7 @@ function renderInlineSegment(
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 2,
+      priority: 3,
       render: (key) => <u key={key} className="underline">{content}</u>,
     })
   }
@@ -272,7 +310,7 @@ function renderInlineSegment(
     candidates.push({
       start,
       end: start + m[0].length,
-      priority: 2,
+      priority: 3,
       render: (key) => <s key={key} className="line-through">{content}</s>,
     })
   }
@@ -284,7 +322,7 @@ function renderInlineSegment(
       candidates.push({
         start: idx,
         end: idx + def.needle.length,
-        priority: 3,
+        priority: 4,
         render: (key) => (
           <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
             {def.label}
@@ -300,7 +338,7 @@ function renderInlineSegment(
       candidates.push({
         start: idx,
         end: idx + needle.length,
-        priority: 3,
+        priority: 4,
         render: (key) => (
           <span key={key} className="rounded bg-accent-100 px-1 font-semibold text-accent-700">
             {needle}

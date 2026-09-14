@@ -362,6 +362,56 @@ export default function Composer({
     }
   }
 
+  // リンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい」）。記法はF-38の
+  // 既存の`**太字**`等と同じGFM（GitHub Flavored Markdown）風の`[表示文字](URL)`を採用した
+  // （Slack自体の`<url|text>`記法は他の書式と同様に独自すぎるため避けた）。GitHubのコメント欄の
+  // リンクボタンと同じ挙動: 選択範囲があればその文字列を表示文字として使い、無ければ「リンク文字列」
+  // という仮の文字列を使う。挿入後は「url」の部分だけを選択状態にし、そのまま実際のURLを
+  // 入力・貼り付けできるようにする（貼り付けについては下記handlePasteでも別途対応）
+  const insertLink = () => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? body.length
+    const end = el.selectionEnd ?? body.length
+    const before = body.slice(0, start)
+    const selected = body.slice(start, end) || 'リンク文字列'
+    const after = body.slice(end)
+    const prefix = `[${selected}](`
+    setBody(before + prefix + 'url' + ')' + after)
+    setPickerQuery(null)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(before.length + prefix.length, before.length + prefix.length + 'url'.length)
+    })
+  }
+
+  // 選択中の文字列の上にURLを貼り付けると、その文字列をリンクの表示テキストにしたリンクへ変換する
+  // （ユーザーからの明示的な要望「欲を言うとslackみたいに文字指定してリンクを張り付けるとリンクが
+  // 格納されるととてもうれしい」）。選択範囲が無い場合・貼り付けた内容がURL単体でない場合
+  // （複数行や前後にテキストを含む場合）はブラウザ標準の貼り付け動作のままにする（意図せず
+  // 通常のテキスト貼り付けまでリンク化してしまわないように、URLそのものだけの貼り付けに限定した）
+  const LINK_PASTE_URL_RE = /^https?:\/\/\S+$/
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    if (start === end) return
+    const pasted = e.clipboardData.getData('text/plain').trim()
+    if (!LINK_PASTE_URL_RE.test(pasted)) return
+    e.preventDefault()
+    const before = body.slice(0, start)
+    const selected = body.slice(start, end)
+    const after = body.slice(end)
+    const inserted = `[${selected}](${pasted})`
+    setBody(before + inserted + after)
+    requestAnimationFrame(() => {
+      const pos = before.length + inserted.length
+      el.focus()
+      el.setSelectionRange(pos, pos)
+    })
+  }
+
   // 箇条書きボタンは選択範囲を含む行全体を対象に行頭へ「- 」を付ける（既に全行付いていれば外す
   // トグル動作）。複数行の選択に含まれる空行（段落の区切り）はそのまま維持するが、対象が
   // その空行1行だけ（何も入力していない行にカーソルがある状態でボタンを押した場合）は
@@ -690,6 +740,14 @@ export default function Composer({
         </button>
         <button
           type="button"
+          title="リンク（選択した文字列にURLを設定します）"
+          onClick={insertLink}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] text-ink-subtle hover:bg-surface-muted"
+        >
+          🔗
+        </button>
+        <button
+          type="button"
           title="コード（複数行を選択するとコードブロックになります）"
           onClick={wrapCode}
           className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
@@ -724,6 +782,7 @@ export default function Composer({
           value={body}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onScroll={(e) => {
             if (highlightRef.current) highlightRef.current.scrollTop = e.currentTarget.scrollTop
           }}
