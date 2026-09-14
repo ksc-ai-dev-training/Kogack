@@ -286,6 +286,13 @@ export default function ChannelView() {
 
         <div className="flex-none border-t border-line px-5 py-2.5">
           <Composer
+            // key={channelId}: Composerは入力中の本文・添付ファイル等を自身のuseStateで保持するが、
+            // どの会話宛てかを識別するpropを持たない。ChannelViewはURLのchannelIdだけが変わる
+            // ナビゲーション（同じルート要素の再利用）では再マウントされないため、keyを外すと
+            // 「入力途中でチャンネルを切り替えると、切り替え先の投稿欄に前のチャンネルで打っていた
+            // 文章が残る」不具合が起きる（ユーザーからの報告、2026-09-14）。channelIdをkeyにして
+            // 切り替えのたびにComposerを確実に作り直し、入力状態を空にリセットする
+            key={channelId}
             placeholder={`# ${channel?.name ?? ''} にメッセージを送る（@でメンション）`}
             mentionCandidates={mentionCandidatesWithAi}
             aiPersonaName={channel?.ai_persona_name}

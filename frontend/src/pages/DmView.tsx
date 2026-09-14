@@ -134,6 +134,9 @@ export default function DmView() {
 
         <div className="flex-none border-t border-line px-5 py-2.5">
           <Composer
+            // key={dmId}: ChannelView.tsxと同じ理由（Composerは会話の識別propを持たず、DM切替時に
+            // 再マウントされないため入力途中の本文が残ってしまう不具合、2026-09-14）
+            key={dmId}
             placeholder={`${title} にメッセージを送る（@でメンション）`}
             mentionCandidates={mentionCandidates}
             scheduleTarget={{ dm_id: dmId }}

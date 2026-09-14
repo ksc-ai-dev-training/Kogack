@@ -338,6 +338,11 @@ export default function ThreadPanel({
 
       <div className="flex-none border-t border-line px-4 py-2.5">
         <Composer
+          // key={messageId}: ChannelView.tsx/DmView.tsxと同じ理由（Composerは会話の識別propを
+          // 持たず、別のスレッドへ切り替えても再マウントされないため入力途中の返信が残ってしまう
+          // 不具合、2026-09-14）。messageIdはT-05の主キー（全体で一意）のため、これだけで
+          // チャンネル/DMをまたいでも重複しない
+          key={messageId}
           placeholder="スレッドに返信"
           onSend={send}
           mentionCandidates={mentionCandidatesWithAi}
