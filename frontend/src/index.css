@@ -5,6 +5,12 @@
 @theme {
   --color-accent-50: #eff6ff;
   --color-accent-100: #dbeafe;
+  /* メンション候補一覧（Composer.tsx）で選択中の行の背景に使う。ユーザーからの明示的な要望
+     「メンション先を選択するときの背景色が薄くて見づらいので、もっと濃くしてほしい」を受け
+     bg-surface-subtle→bg-accent-100と変更した後、さらに「もっと濃い青にしましょう」との
+     追加要望を受けて新設した（2026-09-14）。accent-100より一段濃いがaccent-600（濃紺、
+     行内の黒文字が読めなくなる）ほどではない中間の濃さにする */
+  --color-accent-200: #bfdbfe;
   --color-accent-600: #1e40af;
   --color-accent-700: #1e3a8a;
 

@@ -547,9 +547,11 @@ export default function Composer({
               className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
                 // 選択中（キーボードの↑↓で移動した行）の背景色が薄すぎて分かりにくいとの
                 // ユーザーからの指摘を受け、従来のbg-surface-subtle（#fafbfc、ほぼ白）から
-                // bg-accent-100（#dbeafe）へ変更した。未選択行のホバーは従来どおり
-                // bg-surface-subtleのままにして、選択中とホバーのみを区別できるようにする
-                i === activeIndex ? 'bg-accent-100' : 'hover:bg-surface-subtle'
+                // bg-accent-100（#dbeafe）へ変更したところ、続けて「もっと濃い青にしましょう」との
+                // 追加要望を受け、新設のbg-accent-200（#bfdbfe、index.css参照）へさらに変更した。
+                // 未選択行のホバーは従来どおりbg-surface-subtleのままにして、選択中とホバーが
+                // 区別できるようにする
+                i === activeIndex ? 'bg-accent-200' : 'hover:bg-surface-subtle'
               }`}
             >
               {c.picture_url ? (
