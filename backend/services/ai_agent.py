@@ -10,6 +10,21 @@
 #     実ファイル（doc_folders.source='upload'）のみが検索対象で、Drive候補（source='drive'）は
 #     Google Workspace管理コンソールのdomainPolicyブロックにより実ファイルを取得できないため
 #     索引化できず、検索にヒットしない（services/doc_search.py参照）
+#   - search_channel_history（2026-09-14、ユーザーからの明示的な要望「AIが今までのチャンネルの
+#     会話を参照して回答できるようにしてほしい」）: 会話履歴として毎回渡すのは直近
+#     MAX_HISTORY_MESSAGES（20件）のみのままとし（2026-09-02にユーザー自身が「直近だけ送る」
+#     方針へ絞った経緯を踏襲、コストを増やさない）、それより古い話題を聞かれたときだけAIが
+#     このツールでチャンネルの過去の発言を検索できるようにする（search_documentsと同じ
+#     Function Calling方式、services/channel_history_search.py参照）。search_documentsと異なり
+#     索引の有無に関わらず常時利用可能なツールとして提示する（メッセージ本文にembeddingを
+#     持たせておらずpg_trgmの部分一致のみのため、事前索引という概念自体が無い）。
+#   - チャンネル参加者情報（2026-09-14、ユーザーからの明示的な要望「AIにメンションして、この
+#     チャンネルに参加している人の情報を得られるようにしてほしい」）: A-46（参加者一覧）と同じ
+#     氏名・chadmin区分を、_fetch_channel_context（チャンネル名・説明文）と同じ考え方で
+#     システムプロンプトへ都度渡す（参加者一覧自体は非公開情報ではなく、既にF-41メンション候補や
+#     補足03メンバー一覧で参加者全員に見えている情報のため、AIへ渡すこと自体に問題は無い）。
+#     要約生成（_build_summary_prompt）には使わない（要約は会話内容そのものの要約が主目的で、
+#     参加者一覧を渡す意義が薄いため）
 #   - スキル（T-11・F-12）とその引き継ぎ先（fallback_handoff_user_id・F-17）、自動対応範囲分類
 #     （T-12・F-16）はいずれもシステムプロンプトへ配線した（_build_skills_section・
 #     _build_auto_response_section）。自動対応範囲の「人が対応」区分は、基本設計書8.1節が
@@ -48,7 +63,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from database import get_pool
-from services import ai_client, doc_search
+from services import ai_client, channel_history_search, doc_search
 
 JST = ZoneInfo("Asia/Tokyo")  # F-14要約の対象期間指定（今日/今週/今月等）をJSTの暦日で解釈する
 # （routers/search.pyのF-42日付モディファイアと同じ考え方・同じタイムゾーン）
@@ -214,7 +229,7 @@ def _format_range_label(since_date: date | None, until_date: date | None) -> str
 
 
 # search_documentsのOpenAI Function Calling定義（Slice 3、2026-09-09）。1回の応答生成につき
-# 複数回呼ばれる可能性があるが、ラウンド数はSEARCH_DOCUMENTS_MAX_ROUNDSで打ち切る
+# 複数回呼ばれる可能性があるが、ラウンド数はMAX_TOOL_ROUNDSで打ち切る
 # （無限ループ・コスト際限無い増大の防止）。
 SEARCH_DOCUMENTS_TOOL = {
     "type": "function",
@@ -234,7 +249,37 @@ SEARCH_DOCUMENTS_TOOL = {
         },
     },
 }
-SEARCH_DOCUMENTS_MAX_ROUNDS = 3
+
+# search_channel_historyのOpenAI Function Calling定義（2026-09-14、ユーザーからの明示的な要望）。
+# search_documentsと異なり、索引済み文書の有無に関わらず常に提示する（services/
+# channel_history_search.pyはpg_trgmの部分一致のみで事前索引という概念が無いため）。
+SEARCH_CHANNEL_HISTORY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_channel_history",
+        "description": (
+            "このチャンネルの過去の会話を検索する。あなたに渡されている会話履歴は直近の発言のみ"
+            "（それより前は含まれない）ため、『前に決まったこと』『以前話していた件』のように、"
+            "直近の会話履歴だけでは分からない過去の話題について聞かれた場合は、推測で答えず"
+            "必ずこの関数で実際に検索してから回答すること。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "検索したいキーワードを空白区切りで並べたもの（例: 'オフサイト 名前'）。"
+                        "1つの完全なフレーズとしてではなく、単語ごとに区切って渡すこと（部分一致の"
+                        "組み合わせで検索するため、区切ったほうがヒットしやすい）。"
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+MAX_TOOL_ROUNDS = 3  # search_documents・search_channel_historyいずれも共通の上限（無限ループ・コスト際限無い増大の防止）
 
 
 def _build_doc_scope_section(out_of_scope_policy: str) -> str:
@@ -268,7 +313,7 @@ def _build_doc_scope_section(out_of_scope_policy: str) -> str:
 
 def _build_system_prompt(
     settings: dict, auto_response_section: str = "", skills_section: str = "", requester_name: str = "",
-    channel_context: dict | None = None, doc_scope_section: str = "",
+    channel_context: dict | None = None, doc_scope_section: str = "", members_section: str = "",
 ) -> str:
     persona_name = settings["persona_name"] or "Kogack AI"
     persona_tone = settings["persona_tone"] or "自然な日本語"
@@ -283,9 +328,19 @@ def _build_system_prompt(
         context_line = f'あなたが常駐しているチャンネルは「{channel_context["name"]}」です。'
         if channel_context.get("topic"):
             context_line += f'説明文: {channel_context["topic"]}'
-        if channel_context.get("creator_name"):
+        # バグ修正（2026-09-14、ユーザーからの明示的な要望でチャンネル参加者情報を追加した際に
+        # 発覚）: members_sectionを同時に渡す場合、作成者名をここでも重ねて言及すると、gpt-4.1-nano
+        # が「あなたが常駐する場所を作った人物」と「あなた自身」を関連づけてしまい、後段の
+        # 参加者一覧に同じ名前が出てきた際に「そして私、{作成者名}です」のように自分自身をその
+        # 人物であるかのように名乗ってしまう挙動を実機検証で繰り返し確認した（抽象的な
+        # 「あなたはこの中の誰でもない」という注意書きを足しても解消しなかった一方、作成者名の
+        # 重複言及そのものを無くしたところ解消した）。members_section側で「（作成者）」タグとして
+        # 1箇所にまとめる（_build_members_section参照）ため、ここでは重複を避けて省略する
+        if channel_context.get("creator_name") and not members_section:
             context_line += f'（作成者: {channel_context["creator_name"]}）'
         lines.append(context_line)
+    if members_section:
+        lines.append(members_section)
     if requester_name:
         # バグ修正（2026-09-04）: 利用者が表示名を変更した後も、AIの返答が変更前の名前で
         # 呼びかけ続ける事象が実際に発生した。会話履歴中の人間発言のラベル（_rows_to_chat_messages）は
@@ -426,6 +481,67 @@ async def _fetch_channel_context(channel_id: int) -> dict:
     return dict(row)
 
 
+async def _fetch_channel_members(channel_id: int) -> list[dict]:
+    """ユーザーからの明示的な要望「AIにメンションして、このチャンネルに参加している人の情報を
+    得られるようにしてほしい」への対応。A-46（GET /channels/{id}/members）と同じ氏名・chadmin
+    区分を取得する。無効化アカウント（is_active=false）は実質退出済みと同様のため除外し、
+    F-41メンション候補の絞り込み（is_active）と同じ基準にする。氏名順に返す（A-46と同じ）"""
+    rows = await get_pool().fetch(
+        """SELECT u.name, cm.is_channel_admin
+           FROM channel_members cm JOIN users u ON u.id = cm.user_id
+           WHERE cm.channel_id = $1 AND u.is_active = true ORDER BY u.name""",
+        channel_id,
+    )
+    return [dict(r) for r in rows]
+
+
+def _build_members_section(members: list[dict], persona_name: str, creator_name: str | None = None) -> str:
+    """チャンネル参加者一覧を「# チャンネル参加者」節として列挙する。ここで渡す氏名・chadmin区分は
+    非公開情報ではなく、既にF-41メンション候補・補足03メンバー一覧で参加者全員に見えている情報の
+    ため、AIへ渡すこと自体に問題は無い（_fetch_channel_context・_build_skills_section等と同じ
+    考え方）。参加者が1人もいない（想定しないが念のため）場合は節自体を省略する。
+    **実機検証で判明した不具合と、複数回の切り分けの末にたどり着いた真因**: gpt-4.1-nanoが
+    「そして私、{名前}です」「チャンネル管理者は私です」のように一覧中の人物（特に
+    チャンネル作成者）を自分自身であるかのように名乗ってしまう不具合があった。以下の対策は
+    いずれも単独では解消しなかった（実機で複数回再現を確認済み）: (1)「あなたは一覧の誰でも
+    ない」という抽象的な注意書き、(2) ペルソナ名との明示的な対比、(3) 具体的な回答例の提示、
+    (4) チャンネル管理者・作成者を名指しして「あなたと同一視しないこと」と明記する注意書き。
+    依頼者本人との一致・chadmin区分の有無を変えても再現条件は変わらなかった一方、
+    **チャンネル作成者（_fetch_channel_contextが渡す「作成者」）がこの一覧にも含まれる
+    ケース（実運用ではほぼ常に起こる——作成者は必ず参加者としても登録される）でのみ再現し、
+    作成者がこの一覧に含まれない・別チャンネルの作成者と一覧の人物が異なるケースでは
+    一度も再現しなかった**。さらに、そのケースの中でも「チャンネル情報の行（あなたが常駐する
+    チャンネルの説明）で作成者名に触れたうえで、この一覧でも同じ名前にもう一度触れる」という
+    "同じ名前への2重の言及"を無くす（_build_system_promptのchannel_context行から作成者名の
+    言及を省き、代わりにこの一覧の該当メンバーへ「（作成者）」タグとして一本化する）ことで、
+    この不具合の再現条件下で複数回の実機検証を行い解消を確認した。抽象的な「あなたはこの中の
+    誰でもない」という注意書きの精度を上げるより、そもそも同じ人物名を2つの文脈から重複して
+    言及しないという構造上の変更のほうが効いたことになる。"""
+    if not members:
+        return ""
+    lines = [
+        "", "# チャンネル参加者",
+        f"あなたの名前は「{persona_name}」というAIです。以下は全員人間の参加者であり、"
+        f"あなた（{persona_name}）はこの中の誰でもありません。",
+        "このチャンネルに参加している人間の利用者は次のとおりです。",
+    ]
+    for m in members:
+        tags = []
+        if creator_name and m["name"] == creator_name:
+            tags.append("作成者")
+        if m["is_channel_admin"]:
+            tags.append("チャンネル管理者")
+        label = f"{m['name']}（{'・'.join(tags)}）" if tags else m["name"]
+        lines.append(f"- {label}")
+    example_names = "、".join(m["name"] + "さん" for m in members)
+    lines.append(
+        f"回答するときは、上記の誰か（チャンネル管理者・作成者を含む）を「私」と呼んだり、あなた"
+        f"（{persona_name}）がその人物であるかのように述べたりしないこと。一人称「私」は"
+        f"一切使わず、全員を氏名で呼ぶこと。回答例:「参加者は{example_names}です」"
+    )
+    return "\n".join(lines)
+
+
 async def _resolve_sender_names(rows) -> dict[int, str]:
     """履歴整形用にsender_user_idのnameだけ別途取得する（_generate_and_post・要約生成で共有）"""
     user_ids = {r["sender_user_id"] for r in rows if r["sender_user_id"] is not None}
@@ -515,38 +631,43 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
 
 
 async def _run_chat_with_tools(
-    messages: list[dict], model: str, channel_id: int, use_tools: bool,
+    messages: list[dict], model: str, channel_id: int, use_doc_tools: bool,
 ) -> tuple[str, dict, list[dict]]:
-    """search_documentsのFunction Callingを扱いながら1回の応答生成を完了させる（Slice 3、
-    2026-09-09）。use_tools=Falseの場合は最初からツール無しで単発呼び出しする（従来どおりの
-    プレーンな会話応答、_generate_summary_and_postと同じ形。use_tools=Trueの場合は最大
-    SEARCH_DOCUMENTS_MAX_ROUNDS回まで、モデルからの検索要求→doc_search.search()実行→
-    結果をtoolメッセージとして返す、を繰り返す。最後の1ラウンドはtools自体を渡さず、
-    モデルに必ずテキストで最終回答させる（ラウンド上限に達しても検索要求だけが続き
-    テキストの回答が返らない、という空振りを防ぐ）。
-    **バグ修正（2026-09-11）: 1ラウンド目はtool_choice="required"で強制的にsearch_documentsを
-    呼ばせる。**tool_choiceを指定せず（既定"auto"）モデルの判断に任せると、gpt-4.1-nanoは
-    実際に関数を呼び出さないまま「search_documentsを実行しています。少々お待ちください。」の
-    ような予告の文章だけを返して応答を終えてしまうことがある（ユーザーからの報告で発覚、実機で
-    再現・検証済み。プロンプトへ「予告だけで終えるな」という指示を追加しても改善せず、8問中6問が
-    同じ失敗をした。1ラウンド目のみtool_choice="required"にする対処では、同条件で8問中8問とも
-    実際に検索してから正しく回答するようになった）。この対処は「このチャンネルに索引済み文書が
-    ある」場合にのみ提示されるツール（use_tools、doc_search.channel_has_indexed_documents）に対する
-    ものなので、雑談等ドキュメントと無関係な発言でも1回だけ余分にsearch_documentsが呼ばれる
-    （実機検証では最終的な回答の質・自然さに悪影響は無かった）。2ラウンド目以降は"auto"のままとし、
-    ドキュメントが不要な場合にまで毎ラウンド強制することはしない。
+    """search_documents・search_channel_historyのFunction Callingを扱いながら1回の応答生成を
+    完了させる（Slice 3・2026-09-09でsearch_documentsのみ実装、2026-09-14に
+    search_channel_historyを追加）。search_channel_historyは常に提示する（索引の有無という概念が
+    無いため）。use_doc_tools=Trueの場合のみsearch_documentsもあわせて提示する（このチャンネルに
+    索引済み文書がある場合のみ、doc_search.channel_has_indexed_documents）。最大MAX_TOOL_ROUNDS回
+    まで、モデルからの検索要求→対応する検索を実行→結果をtoolメッセージとして返す、を繰り返す。
+    最後の1ラウンドはtools自体を渡さず、モデルに必ずテキストで最終回答させる（ラウンド上限に
+    達しても検索要求だけが続きテキストの回答が返らない、という空振りを防ぐ）。
+    **バグ修正（2026-09-11）: use_doc_tools=Trueのときのみ、1ラウンド目はtool_choice="required"で
+    強制的にいずれかの関数を呼ばせる。**tool_choiceを指定せず（既定"auto"）モデルの判断に任せると、
+    gpt-4.1-nanoは実際に関数を呼び出さないまま「search_documentsを実行しています。少々お待ち
+    ください。」のような予告の文章だけを返して応答を終えてしまうことがある（ユーザーからの報告で
+    発覚、実機で再現・検証済み。プロンプトへ「予告だけで終えるな」という指示を追加しても改善せず、
+    8問中6問が同じ失敗をした。1ラウンド目のみtool_choice="required"にする対処では、同条件で
+    8問中8問とも実際に検索してから正しく回答するようになった）。2ラウンド目以降は"auto"のままと
+    する。**search_channel_historyは常時提示するツールのため、これを"required"の対象に含めると
+    雑談を含むすべてのメンション応答で毎回1回分余計なツール呼び出しが強制されコストが増え続けて
+    しまう**（use_doc_tools=Falseのときは"required"にしない設計はこの理由による。ユーザー自身が
+    2026-09-02に「直近の履歴だけ送ってコストを抑える」方針を選んだ経緯と同じ考え方）。
     戻り値: (最終応答テキスト, 集計済みusage{prompt_tokens,completion_tokens},
-    citations[{folder_id,folder_name}]（実際に検索結果として使われた文書、重複排除済み）)"""
+    citations[{folder_id,folder_name}]（search_documentsが実際に検索結果として使った文書、
+    重複排除済み。search_channel_historyの結果はcitationの対象外——文書フォルダのような
+    参照先IDを持たないため）)"""
     client = ai_client.get_client()
     total_prompt_tokens = 0
     total_completion_tokens = 0
     citations: dict[int, str] = {}
-    tools = [SEARCH_DOCUMENTS_TOOL] if use_tools else None
-    max_rounds = SEARCH_DOCUMENTS_MAX_ROUNDS if use_tools else 0
+    tools = [SEARCH_CHANNEL_HISTORY_TOOL]
+    if use_doc_tools:
+        tools.append(SEARCH_DOCUMENTS_TOOL)
+    max_rounds = MAX_TOOL_ROUNDS
 
     for round_num in range(max_rounds + 1):
         round_tools = tools if round_num < max_rounds else None
-        extra = {"tool_choice": "required"} if round_num == 0 and round_tools else {}
+        extra = {"tool_choice": "required"} if round_num == 0 and use_doc_tools else {}
         res = await client.chat.completions.create(
             model=model, messages=messages, max_completion_tokens=MAX_OUTPUT_TOKENS,
             tools=round_tools,
@@ -570,21 +691,31 @@ async def _run_chat_with_tools(
             "tool_calls": [tc.model_dump() for tc in tool_calls],
         })
         for tc in tool_calls:
-            if tc.function.name != "search_documents":
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": "不明な関数です"})
-                continue
             try:
                 query = json.loads(tc.function.arguments).get("query", "")
             except (json.JSONDecodeError, AttributeError):
                 query = ""
-            results = await doc_search.search(channel_id, query) if query else []
-            for r in results:
-                citations[r["folder_id"]] = r["folder_name"]
-            content = (
-                "\n\n---\n\n".join(f"[{r['folder_name']}]\n{r['content']}" for r in results)
-                if results
-                else "関連する内容が見つかりませんでした。"
-            )
+            if tc.function.name == "search_documents":
+                results = await doc_search.search(channel_id, query) if query else []
+                for r in results:
+                    citations[r["folder_id"]] = r["folder_name"]
+                content = (
+                    "\n\n---\n\n".join(f"[{r['folder_name']}]\n{r['content']}" for r in results)
+                    if results
+                    else "関連する内容が見つかりませんでした。"
+                )
+            elif tc.function.name == "search_channel_history":
+                results = await channel_history_search.search(channel_id, query) if query else []
+                content = (
+                    "\n\n".join(
+                        f"[{r['created_at'].strftime('%Y-%m-%d %H:%M')}] {r['sender_name']}: {r['body']}"
+                        for r in results
+                    )
+                    if results
+                    else "関連する過去の発言が見つかりませんでした。"
+                )
+            else:
+                content = "不明な関数です"
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
 
     # ここには到達しない想定（最後のラウンドはtools=Noneのためtool_callsが必ず空になり、
@@ -641,26 +772,30 @@ async def _generate_and_post(
             "SELECT name FROM users WHERE id = $1", requested_by
         )
         channel_context = await _fetch_channel_context(channel_id)
+        members_section = _build_members_section(
+            await _fetch_channel_members(channel_id), persona_name, channel_context.get("creator_name")
+        )
         auto_response_section = await _build_auto_response_section(channel_id, settings)
         skills_section = await _build_skills_section(channel_id, settings)
         # search_documentsツールは、このチャンネルの参照範囲に索引済み文書が1件でもある場合のみ
         # 提示する（Slice 3、2026-09-09）。無ければツール自体を持たせず、doc_scope_sectionも省略
-        # （検索対象が無いのにツールだけ提示しても、モデルが空振りの検索を試みるだけで無駄）
-        use_tools = await doc_search.channel_has_indexed_documents(channel_id)
-        doc_scope_section = _build_doc_scope_section(settings["out_of_scope_policy"]) if use_tools else ""
+        # （検索対象が無いのにツールだけ提示しても、モデルが空振りの検索を試みるだけで無駄）。
+        # search_channel_history（2026-09-14）はこの判定に関わらず常に提示する（_run_chat_with_tools参照）
+        use_doc_tools = await doc_search.channel_has_indexed_documents(channel_id)
+        doc_scope_section = _build_doc_scope_section(settings["out_of_scope_policy"]) if use_doc_tools else ""
         messages: list[dict] = [
             {
                 "role": "system",
                 "content": _build_system_prompt(
                     settings, auto_response_section, skills_section, requester_name or "", channel_context,
-                    doc_scope_section,
+                    doc_scope_section, members_section,
                 ),
             }
         ]
         messages += _rows_to_chat_messages(history_rows, names)
 
         model = ai_client.get_model()
-        reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_tools)
+        reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_doc_tools)
 
         # WHERE generation_status='generating' は、生成の完了とほぼ同時にcancel_generationが
         # 呼ばれた場合の競合対策（cancel_generation側が既にキャンセル済みメッセージへ更新していれば
