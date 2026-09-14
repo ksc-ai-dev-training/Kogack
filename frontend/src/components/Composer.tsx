@@ -545,7 +545,11 @@ export default function Composer({
                 selectCandidate(c)
               }}
               className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
-                i === activeIndex ? 'bg-surface-subtle' : 'hover:bg-surface-subtle'
+                // 選択中（キーボードの↑↓で移動した行）の背景色が薄すぎて分かりにくいとの
+                // ユーザーからの指摘を受け、従来のbg-surface-subtle（#fafbfc、ほぼ白）から
+                // bg-accent-100（#dbeafe）へ変更した。未選択行のホバーは従来どおり
+                // bg-surface-subtleのままにして、選択中とホバーのみを区別できるようにする
+                i === activeIndex ? 'bg-accent-100' : 'hover:bg-surface-subtle'
               }`}
             >
               {c.picture_url ? (
