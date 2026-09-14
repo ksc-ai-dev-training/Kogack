@@ -352,6 +352,7 @@ export default function ThreadPanel({
             dm_id: parentMessage?.dm_id ?? undefined,
             thread_parent_id: messageId,
           }}
+          draftKey={`t:${messageId}`}
         />
       </div>
     </aside>

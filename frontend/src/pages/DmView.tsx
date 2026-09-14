@@ -140,6 +140,7 @@ export default function DmView() {
             placeholder={`${title} にメッセージを送る（@でメンション）`}
             mentionCandidates={mentionCandidates}
             scheduleTarget={{ dm_id: dmId }}
+            draftKey={dmId ? `d:${dmId}` : undefined}
             onSend={async (body, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
               if (!dmId) return
               await apiFetch(`/api/dms/${dmId}/messages`, {

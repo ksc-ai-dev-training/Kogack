@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { apiFetch, uploadAttachment } from '../lib/api'
+import { getDraft, setDraft } from '../lib/drafts'
 import { useToast } from './Toast'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
@@ -119,6 +120,7 @@ export default function Composer({
   mentionCandidates,
   aiPersonaName,
   scheduleTarget,
+  draftKey,
 }: {
   placeholder: string
   onSend: (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => Promise<void>
@@ -127,8 +129,12 @@ export default function Composer({
    * 同じ値をそのまま渡す想定 */
   aiPersonaName?: string
   scheduleTarget?: ScheduleTarget
+  /** 下書きの永続化キー（lib/drafts.ts。チャンネルは`c:<id>`、DMは`d:<id>`、スレッドは`t:<messageId>`）。
+   * 未指定時は下書きを保存・復元しない。呼び出し元は会話が変わるたびComposerをkey propで
+   * 再マウントする実装（2026-09-14）のため、このpropもそのたびに新しい値で初期状態から始まる */
+  draftKey?: string
 }) {
-  const [body, setBody] = useState('')
+  const [body, setBody] = useState(() => (draftKey ? getDraft(draftKey) : ''))
   const [sending, setSending] = useState(false)
   const [mentions, setMentions] = useState<MentionPayload[]>([])
   const [attachments, setAttachments] = useState<AttachmentPayload[]>([])
@@ -162,6 +168,15 @@ export default function Composer({
     el.style.height = `${next}px`
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
   }, [body])
+
+  // 下書きの永続化（ユーザーからの明示的な要望）。setBodyの呼び出し箇所（通常入力・絵文字挿入・
+  // 書式ボタン・メンション選択・送信/予約後のクリアなど）を個別に触らず、bodyの変化をまとめて
+  // 1箇所で拾ってlib/drafts.tsへ書き込む（送信・送信予約成功後はbodyが''になるため、この効果が
+  // そのまま下書きの削除も兼ねる。lib/drafts.tsのsetDraftは空文字を渡すとエントリ自体を消す）
+  useEffect(() => {
+    if (!draftKey) return
+    setDraft(draftKey, body)
+  }, [draftKey, body])
 
   const filteredCandidates = (mentionCandidates ?? []).filter((c) =>
     c.name.toLowerCase().includes((pickerQuery ?? '').toLowerCase()),

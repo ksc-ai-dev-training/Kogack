@@ -297,6 +297,7 @@ export default function ChannelView() {
             mentionCandidates={mentionCandidatesWithAi}
             aiPersonaName={channel?.ai_persona_name}
             scheduleTarget={{ channel_id: channelId }}
+            draftKey={channelId ? `c:${channelId}` : undefined}
             onSend={async (body, mentions: MentionPayload[], attachments: AttachmentPayload[]) => {
               if (!channelId) return
               await apiFetch(`/api/channels/${channelId}/messages`, {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type 
 import { createPortal } from 'react-dom'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
+import { useDraftKeys } from '../hooks/useDraftKeys'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
 import { currentUiZoomScale } from '../lib/uiZoom'
@@ -881,6 +882,10 @@ export default function MessageList({
   const { me } = useMe()
   const confirm = useConfirm()
   const toast = useToast()
+  // メッセージ下書きの永続化（ユーザーからの明示的な要望「下書きが残っているチャンネルや
+  // スレッドは見てわかるような記述やマークを付けてほしい」）。サイドバーはチャンネル・DM分を
+  // 表示するため対象外だが、スレッドはサイドバーに一覧が無いため「💬 N件の返信」導線の隣に表示する
+  const draftKeys = useDraftKeys()
   // F-40 プロフィールカード。開いている対象はメッセージid単位で持つ（表示するのはsender_user_idの
   // プロフィール）。anchorはクリックした要素の座標で、画面下寄りの発言（一番下の投稿欄近く）で
   // カードが投稿欄の裏に隠れないよう、ProfileCard側でdocument.bodyへポータル配置する際の基準にする
@@ -1098,6 +1103,9 @@ export default function MessageList({
         // 明示的な要望。従来はthread_reply_count>0のとき下の「💬 N件の返信」導線のみだった）。
         // システム通知は引き続き対象外
         const showReplyButton = !isSystemNotice && !!onOpenThread
+        // このメッセージをスレッド元として書きかけの返信（下書き）が残っているか（lib/drafts.ts、
+        // ユーザーからの明示的な要望）。サイドバーに一覧の無いスレッドはここで示す
+        const hasThreadDraft = showReplyButton && draftKeys.has(`t:${m.id}`)
         // リアクションは投稿者本人限定にせず、この会話にいる誰でも付けられる（Slack等と同じ一般的な
         // 挙動）。システム通知（参加・退出の記録）へのリアクションも、返信・削除と異なり記録の
         // 信頼性を損なわないため対象外にしない（バックエンドA-75も同じ判断）
@@ -1407,13 +1415,24 @@ export default function MessageList({
                 )}
                 <AttachmentList attachments={m.attachments} />
                 <ReactionPills reactions={m.reactions} onToggle={(emoji) => toggleReaction(m.id, emoji)} />
-                {onOpenThread && (m.thread_reply_count ?? 0) > 0 && (
+                {onOpenThread && ((m.thread_reply_count ?? 0) > 0 || hasThreadDraft) && (
                   <button
                     type="button"
                     onClick={() => onOpenThread(m.id)}
                     className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-semibold text-accent-700 hover:border-line-strong hover:bg-surface-subtle"
                   >
-                    💬 {m.thread_reply_count}件の返信{openThreadId === m.id ? ' — スレッドを表示中' : ''}
+                    {(m.thread_reply_count ?? 0) > 0 ? (
+                      <>
+                        💬 {m.thread_reply_count}件の返信{openThreadId === m.id ? ' — スレッドを表示中' : ''}
+                      </>
+                    ) : (
+                      // 返信は0件だが、書きかけの返信（下書き）だけが残っている場合の導線
+                      // （ユーザーからの明示的な要望。押すとスレッドを開いて続きを書ける）
+                      <>💬 返信を書きかけです</>
+                    )}
+                    {hasThreadDraft && (
+                      <span title="下書きがあります" aria-label="下書きがあります">✏️</span>
+                    )}
                   </button>
                 )}
               </div>

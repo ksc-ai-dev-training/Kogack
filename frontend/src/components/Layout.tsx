@@ -10,6 +10,7 @@ import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadTitleBadge } from '../hooks/useUnreadTitleBadge'
 import { usePushSubscription } from '../hooks/usePushSubscription'
 import { useUiZoom } from '../hooks/useUiZoom'
+import { useDraftKeys } from '../hooks/useDraftKeys'
 import { UI_ZOOM_LABELS, UI_ZOOM_ORDER } from '../lib/uiZoom'
 import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
 import { GuardedLink, GuardedNavLink } from './GuardedLink'
@@ -43,6 +44,9 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const { joined } = useChannels()
   const { dms } = useDms()
   const { items: scheduledItems } = useScheduledMessages()
+  // メッセージ下書きの永続化（ユーザーからの明示的な要望「下書きが残っているチャンネルやDMは
+  // 見てわかるような記述やマークを付けてほしい」）。lib/drafts.ts参照
+  const draftKeys = useDraftKeys()
   // ブラウザのデスクトップ通知①（既存ポーリングのunread_count/unread_mention_count増分に相乗り。
   // タブ非表示時のみ通知）。notif_modeはサーバー側（me.notif_mode）を正とする（2026-09-11、②追加時に変更）
   const {
@@ -277,6 +281,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                 const muted = c.notif_mode === 'off'
                 const unread = muted ? 0 : (c.unread_count ?? 0)
                 const mentions = muted ? 0 : (c.unread_mention_count ?? 0)
+                const hasDraft = draftKeys.has(`c:${c.id}`)
                 return (
                   <li key={c.id} className="my-px">
                     <GuardedNavLink to={`/channels/${c.id}`} className={({ isActive }) => navItemClass(isActive)}>
@@ -284,6 +289,11 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                       <span className={`min-w-0 flex-1 truncate ${unread > 0 ? 'font-bold text-ink' : ''}`}>
                         {c.name}
                       </span>
+                      {hasDraft && (
+                        <span title="下書きがあります" aria-label="下書きがあります" className="flex-none text-[11px]">
+                          ✏️
+                        </span>
+                      )}
                       {mentions > 0 ? (
                         // 名指しされた発言がある＝赤い@バッジ（「チャンネルが賑やか」なだけの
                         // グレーの件数バッジと区別する）
@@ -324,6 +334,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                 // 紛らわしい（DmView.tsxのタイトル表記と揃える）
                 const label = d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、')
                 const firstMember = d.members[0]
+                const hasDraft = draftKeys.has(`d:${d.id}`)
                 return (
                   <li key={d.id} className="my-px">
                     <GuardedNavLink to={`/dms/${d.id}`} className={({ isActive }) => navItemClass(isActive)}>
@@ -346,6 +357,11 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                       <span className={`min-w-0 flex-1 truncate ${d.unread_count > 0 ? 'font-bold text-ink' : ''}`}>
                         {label}
                       </span>
+                      {hasDraft && (
+                        <span title="下書きがあります" aria-label="下書きがあります" className="flex-none text-[11px]">
+                          ✏️
+                        </span>
+                      )}
                       {d.unread_count > 0 && (
                         <span className="flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-accent-600 px-1 text-[10px] font-bold text-white">
                           {d.unread_count > 99 ? '99+' : d.unread_count}
