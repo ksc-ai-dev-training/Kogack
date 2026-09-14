@@ -7,6 +7,7 @@ import { useChannels } from '../hooks/useChannels'
 import { useDms } from '../hooks/useDms'
 import { useScheduledMessages } from '../hooks/useScheduledMessages'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
+import { useUnreadTitleBadge } from '../hooks/useUnreadTitleBadge'
 import { usePushSubscription } from '../hooks/usePushSubscription'
 import { useUiZoom } from '../hooks/useUiZoom'
 import { UI_ZOOM_LABELS, UI_ZOOM_ORDER } from '../lib/uiZoom'
@@ -54,6 +55,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   // デスクトップ通知②（Web Push、タブ・ブラウザを閉じていても届く）。①の許可が下りたタイミングで
   // Service Workerの登録・購読を試みる（VAPID未設定ならサーバー側で何もしないだけで①は影響を受けない）
   usePushSubscription(notifPermission)
+  // ブラウザのタブタイトルに未読件数を表示する（ユーザーからの明示的な要望「通知が来たときに、
+  // ブラウザのタイトル部分でも新着メッセージが分かるようにしてほしい」）。通知の許可状態に関わらず
+  // 常時反映する（サイドバーの未読バッジと同じソース、useDesktopNotifications.tsとは独立）
+  useUnreadTitleBadge(joined, dms)
   // UI全体の表示倍率（案A、ユーザーからの要望「設定で文字の大きさを変えたい」）
   const { zoom: uiZoom, setZoom: setUiZoom } = useUiZoom()
   const [modalOpen, setModalOpen] = useState(false)
