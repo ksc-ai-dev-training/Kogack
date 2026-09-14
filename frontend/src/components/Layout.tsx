@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMatch, useNavigate, useSearchParams } from 'react-router'
 import { apiFetch } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
@@ -47,6 +47,13 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   // メッセージ下書きの永続化（ユーザーからの明示的な要望「下書きが残っているチャンネルやDMは
   // 見てわかるような記述やマークを付けてほしい」）。lib/drafts.ts参照
   const draftKeys = useDraftKeys()
+  // バグ修正（2026-09-14、ユーザーからの報告「DMを送ると相手に通知が二つ送られてくる」）:
+  // ①②は独立に動く設計だが、②はタブの表示状態に関わらず常に届くため、①が発火する条件
+  // （タブが非表示/非フォーカス）と重なると同じ新着に対して両方が発火し二重通知になっていた。
+  // ②の購読が実際に成立したかをrefで持ち、①（useDesktopNotifications）へ渡して発火時に
+  // 参照させる（Reactの再レンダーは不要なためstateではなくref。usePushSubscriptionが成功時に
+  // このrefへ書き込む）
+  const pushActiveRef = useRef(false)
   // ブラウザのデスクトップ通知①（既存ポーリングのunread_count/unread_mention_count増分に相乗り。
   // タブ非表示時のみ通知）。notif_modeはサーバー側（me.notif_mode）を正とする（2026-09-11、②追加時に変更）
   const {
@@ -55,10 +62,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
     mode: notifMode,
     setMode: setNotifMode,
     supported: notifSupported,
-  } = useDesktopNotifications(joined, dms, me.id, me.notif_mode)
+  } = useDesktopNotifications(joined, dms, me.id, me.notif_mode, pushActiveRef)
   // デスクトップ通知②（Web Push、タブ・ブラウザを閉じていても届く）。①の許可が下りたタイミングで
   // Service Workerの登録・購読を試みる（VAPID未設定ならサーバー側で何もしないだけで①は影響を受けない）
-  usePushSubscription(notifPermission)
+  usePushSubscription(notifPermission, pushActiveRef)
   // ブラウザのタブタイトルに未読件数を表示する（ユーザーからの明示的な要望「通知が来たときに、
   // ブラウザのタイトル部分でも新着メッセージが分かるようにしてほしい」）。通知の許可状態に関わらず
   // 常時反映する（サイドバーの未読バッジと同じソース、useDesktopNotifications.tsとは独立）

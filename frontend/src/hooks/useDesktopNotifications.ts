@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { useNavigate } from 'react-router'
 import { apiFetch } from '../lib/api'
 import type { Channel, Dm } from '../types'
@@ -39,6 +39,14 @@ export function desktopNotificationsEnabled(): boolean {
 // しつつ、A-62（PUT /api/users/me）で永続化する。
 export function useDesktopNotifications(
   joined: Channel[], dms: Dm[], meId: string | undefined, initialMode: NotifMode,
+  // ②（Web Push、usePushSubscription.ts）が実際に購読済みかどうか（バグ修正、2026-09-14）。
+  // ①②は独立に動く設計だが、②はタブの表示状態に関わらず常に届くため、①が発火する条件
+  // （タブが非表示/非フォーカス）は②の対象条件を包含してしまい、同じ新着に対して2つの
+  // OS通知が二重に出てしまっていた（ユーザーからの報告「DMを送ると相手に通知が二つ送られて
+  // くる」）。②が実際に有効なときは①の発火をスキップし、②が使えない環境（非対応ブラウザ・
+  // VAPID未設定・購読失敗等）でのみ①がフォールバックとして働くようにする。Reactの再レンダーを
+  // 起こす必要は無く「発火する瞬間の最新値」だけ見られればよいため、propではなくrefで受け取る
+  pushActiveRef?: MutableRefObject<boolean>,
 ) {
   const navigate = useNavigate()
   const [permission, setPermission] = useState<NotifPermission>(currentPermission)
@@ -146,6 +154,8 @@ export function useDesktopNotifications(
     const isActivelyViewed =
       typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus()
     if (isActivelyViewed) return
+    // ②（Web Push）が有効なら、そちらが同じ新着を届けるためここでは出さない（二重通知の防止）
+    if (pushActiveRef?.current) return
 
     const fire = (title: string, body: string, tag: string, to: string) => {
       try {

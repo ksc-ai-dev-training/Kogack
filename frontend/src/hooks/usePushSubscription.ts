@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type MutableRefObject } from 'react'
 import { apiFetch } from '../lib/api'
 import type { NotifPermission } from './useDesktopNotifications'
 
@@ -22,7 +22,14 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 // 実機検証メモ: pushManager.subscribe()はブラウザから実際にGoogleのプッシュ配送基盤（Chromeは
 // FCM）へ登録しに行く実ネットワーク通信のため、数秒〜十数秒かかることがある（実測で約15秒
 // かかったケースを確認済み）。この遅延自体は正常な挙動で、ここでは何もしない（待つだけでよい）。
-export function usePushSubscription(permission: NotifPermission) {
+export function usePushSubscription(
+  permission: NotifPermission,
+  // 実際に購読が成立したかをuseDesktopNotifications.ts（①）へ伝えるためのref（バグ修正、
+  // 2026-09-14。「DMを送ると相手に通知が二つ届く」不具合の解消。①が発火判定のたびにこの値を
+  // 読み、trueなら①自身の発火をスキップする）。購読に失敗した場合はfalseのまま（＝①が
+  // フォールバックとして働き続ける）で、成功時のみtrueへ更新する
+  activeRef?: MutableRefObject<boolean>,
+) {
   const attemptedRef = useRef(false)
 
   useEffect(() => {
@@ -56,6 +63,7 @@ export function usePushSubscription(permission: NotifPermission) {
           method: 'POST',
           body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
         })
+        if (activeRef) activeRef.current = true
       } catch {
         // Service Worker登録・購読・サーバーへの保存のいずれに失敗しても、①（タブが開いている間の
         // 通知）は引き続き動くため、ここでは静かに諦める（ユーザー操作を要求するほどの機能ではない）
