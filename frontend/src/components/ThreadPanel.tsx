@@ -232,7 +232,7 @@ export default function ThreadPanel({
         </button>
       </div>
 
-      <div ref={bodyRef} className="flex-1 overflow-y-auto py-1.5">
+      <div ref={bodyRef} className="flex-1 overflow-y-auto overflow-x-hidden py-1.5">
         {parentMessage && (
           <div className="group relative flex gap-2.5 border-b border-line px-4 py-3">
             <Avatar

@@ -145,7 +145,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
         </div>
 
         {settingsMatch ? (
-          <div className="flex-1 overflow-y-auto px-2.5 py-3.5">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3.5">
             <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">チャンネル設定</div>
             <ul>
               <li>
@@ -241,7 +241,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </ul>
           </div>
         ) : adminMatch ? (
-          <div className="flex-1 overflow-y-auto px-2.5 py-3.5">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3.5">
             <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">管理コンソール</div>
             <ul>
               <li>
@@ -267,7 +267,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             </ul>
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto px-2.5 py-3.5">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3.5">
             <div className="flex items-center justify-between px-2 pb-1.5">
               <span className="text-[11px] font-bold tracking-wide text-ink-subtle">チャンネル</span>
               <button
