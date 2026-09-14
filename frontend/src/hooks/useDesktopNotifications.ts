@@ -101,7 +101,11 @@ export function useDesktopNotifications(
       ...dms.map((d) => ({
         key: `d:${d.id}`,
         count: d.unread_count,
-        mentions: 0, // DMに「メンション未読」の区別は設けない（DM自体が自分宛て）
+        // DM本体は既にcountの増分で常時通知されるため「メンション」区別は本来不要だが、
+        // スレッド返信限定で「自分の発言への返信」「スレッド内メンション」を伝える必要がある
+        // （2026-09-14、ユーザーからの明示的な要望）。DM本体分と重複しないようbackendの
+        // unread_mention_countはスレッド返信のみを対象にしている（routers/dms.py参照）
+        mentions: d.unread_mention_count ?? 0,
         label: d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、'),
         to: `/dms/${d.id}`,
         isDm: true,

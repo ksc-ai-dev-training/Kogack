@@ -225,6 +225,9 @@ export interface Dm {
   is_self: boolean
   created_at: string
   unread_count: number
+  /** DM本体は常時通知対象のため対象外、スレッド返信限定（自分の発言への返信／スレッド内での
+   * 個人宛てメンション）の件数（2026-09-14、Channelのunread_mention_countのDM版） */
+  unread_mention_count: number
 }
 
 export interface DmsResponse {

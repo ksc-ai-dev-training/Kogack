@@ -2,6 +2,8 @@
 # スレッドはチャンネル・DMどちらの発言にもぶら下がれる（T-05.thread_parent_idは自己参照FKで
 # channel_id/dm_idを問わない）ため、権限判定は元発言のchannel_id/dm_idに応じて分岐する
 # （require_thread_access）。返信自体はネストしない（返信への返信は対象外）。
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -10,7 +12,7 @@ from auth_helpers import CurrentUser, require_auth, require_thread_access
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped, toggle_reaction
-from services import ai_agent
+from services import ai_agent, push_sender
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -286,6 +288,18 @@ async def post_reply(
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     if parent["channel_id"] is not None:
         await ai_agent.maybe_trigger(parent["channel_id"], body.body, user.id, thread_id=message_id)
+    # デスクトップ通知②（ユーザーからの明示的な要望「自分の発言に対してスレッドで返信が来た時と、
+    # スレッド内でメンションされたときにも通知が来てほしい」、2026-09-14）。通常のスレッド返信は
+    # 全参加者への配信対象外のままだが、この2種類に限りnotify_thread_replyが対象者だけへ送る
+    url = (
+        f"/channels/{parent['channel_id']}?thread={message_id}"
+        if parent["channel_id"] is not None
+        else f"/dms/{parent['dm_id']}?thread={message_id}"
+    )
+    asyncio.create_task(push_sender.notify_thread_reply(
+        channel_id=parent["channel_id"], dm_id=parent["dm_id"], thread_parent_id=message_id,
+        sender_id=user.id, sender_name=user.name, body=body.body, blocks=blocks, url=url,
+    ))
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url}, blocks, attachments,
     )

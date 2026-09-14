@@ -17,7 +17,9 @@ from services import push_sender
 router = APIRouter(prefix="/api/dms", tags=["dms"])
 
 
-async def _dm_out(pool, dm_id: int, created_at, self_user_id: int, unread_count: int = 0) -> dict:
+async def _dm_out(
+    pool, dm_id: int, created_at, self_user_id: int, unread_count: int = 0, unread_mention_count: int = 0,
+) -> dict:
     all_member_ids = {
         r["user_id"]
         for r in await pool.fetch("SELECT user_id FROM direct_message_members WHERE dm_id = $1", dm_id)
@@ -41,13 +43,22 @@ async def _dm_out(pool, dm_id: int, created_at, self_user_id: int, unread_count:
         "is_self": is_self,
         "created_at": created_at.isoformat(),
         "unread_count": unread_count,
+        # DM自体のメッセージは元々「自分宛て」として常時通知対象のため、本体タイムライン分の
+        # 個別メンション集計は行わない（従来どおり）。ここではスレッド返信限定（2026-09-14、
+        # ユーザーからの明示的な要望「自分の発言に対してスレッドで返信が来た時と、スレッド内で
+        # メンションされたときにも通知が来てほしい」）: 自分が投稿した発言へのスレッド返信、または
+        # スレッド内での個人宛てメンションの件数
+        "unread_mention_count": unread_mention_count,
     }
 
 
 @router.get("")
 async def list_dms(user: CurrentUser = Depends(require_auth)):
     """A-16: 参加中DM一覧。サイドバー表示用に相手（自分以外）の氏名・アイコンを解決済みで返す。
-    unread_countはT-22 read_states（未読バッジ、基本設計書4.2節）を使って算出する。"""
+    unread_countはT-22 read_states（未読バッジ、基本設計書4.2節）を使って算出する。
+    unread_mention_countはA-05（チャンネル）と同じ考え方のスレッド限定版（2026-09-14、ユーザーからの
+    明示的な要望）。DM本体のメッセージは既に常時通知対象のため対象外、スレッド返信に限り
+    「自分が投稿した発言への返信」「スレッド内での個人宛てメンション」を集計する。"""
     pool = get_pool()
     rows = await pool.fetch(
         """SELECT d.id, d.created_at,
@@ -55,7 +66,15 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
                 WHERE msg.dm_id = d.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
                   AND msg.created_at > COALESCE(rs.last_read_at, dmm.joined_at)
-               ) AS unread_count
+               ) AS unread_count,
+               (SELECT count(DISTINCT msg.id) FROM messages msg
+                LEFT JOIN message_blocks mb ON mb.message_id = msg.id AND mb.block_type = 'mention'
+                LEFT JOIN messages thread_root ON thread_root.id = msg.thread_parent_id
+                WHERE msg.dm_id = d.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NOT NULL
+                  AND msg.sender_user_id IS DISTINCT FROM $1
+                  AND msg.created_at > COALESCE(rs.last_read_at, dmm.joined_at)
+                  AND (mb.payload->>'target_user_id' = $1::text OR thread_root.sender_user_id = $1)
+               ) AS unread_mention_count
            FROM direct_messages d
            JOIN direct_message_members dmm ON dmm.dm_id = d.id AND dmm.user_id = $1
            LEFT JOIN read_states rs ON rs.dm_id = d.id AND rs.user_id = $1
@@ -64,7 +83,8 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
     )
     return {
         "items": [
-            await _dm_out(pool, r["id"], r["created_at"], user.id, r["unread_count"]) for r in rows
+            await _dm_out(pool, r["id"], r["created_at"], user.id, r["unread_count"], r["unread_mention_count"])
+            for r in rows
         ]
     }
 

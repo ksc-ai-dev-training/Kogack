@@ -45,7 +45,14 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
     （@channel＝チャンネル全員宛て、参加者なら全員カウント）／payload.user_idsに自分のidを含む
     （@here＝送信時点でアクティブだった参加者宛て、mentions.py参照）のいずれかをJOIN。1発言に
     複数該当しても二重に数えないよう count(DISTINCT msg.id)。AIメンションはmessage_blocksに
-    入らないため対象外＝正しい）。"""
+    入らないため対象外＝正しい）。
+    **2026-09-14、ユーザーからの明示的な要望「自分の発言に対してスレッドで返信が来た時と、
+    スレッド内でメンションされたときにも通知が来てほしい」を受け、スレッド返信（従来
+    thread_parent_id IS NULLで本体タイムラインのみに絞っていた）もこのunread_mention_countに
+    含めるよう拡張した。(1)スレッド内で自分が個人宛てメンションされた場合、(2)自分が投稿した
+    発言に対するスレッド返信（thread_root.sender_user_id = 自分）の場合、のいずれかに該当する
+    スレッド返信もカウントする（@channel/@hereはスレッド返信の候補一覧に出さない設計のため
+    実質発生しないが、条件式自体は本体タイムラインと共通のまま流用し複雑化を避けた）。**"""
     pool = get_pool()
     joined = await pool.fetch(
         """SELECT c.*, cm.notif_mode,
@@ -55,16 +62,17 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
                   AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)
                ) AS unread_count,
                (SELECT count(DISTINCT msg.id) FROM messages msg
-                JOIN message_blocks mb ON mb.message_id = msg.id
-                  AND mb.block_type = 'mention'
+                LEFT JOIN message_blocks mb ON mb.message_id = msg.id AND mb.block_type = 'mention'
+                LEFT JOIN messages thread_root ON thread_root.id = msg.thread_parent_id
+                WHERE msg.channel_id = c.id AND msg.deleted_at IS NULL
+                  AND msg.sender_user_id IS DISTINCT FROM $1
+                  AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)
                   AND (
                     mb.payload->>'target_user_id' = $1::text
                     OR mb.payload->>'kind' = 'channel'
                     OR mb.payload->'user_ids' ? $1::text
+                    OR thread_root.sender_user_id = $1
                   )
-                WHERE msg.channel_id = c.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
-                  AND msg.sender_user_id IS DISTINCT FROM $1
-                  AND msg.created_at > COALESCE(rs.last_read_at, cm.joined_at)
                ) AS unread_mention_count
            FROM channels c
            JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = $1

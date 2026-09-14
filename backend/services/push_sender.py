@@ -6,8 +6,12 @@
 # routers/channels.py（A-11）・routers/dms.py（A-19）の投稿処理から、発言のINSERT・
 # insert_mention_blocks完了後にasyncio.create_task()でfire-and-forget起動する
 # （AIメンション応答・自動応答トリガーと同じ非同期起動パターン。投稿API自体はプッシュ送信の
-# 完了を待たない）。スレッド返信（A-14）は対象外——①がunread_count/unread_mention_countの
-# 増分（thread_parent_id IS NULLのみ集計、A-05参照）を見ているのと同じスコープに揃えている。
+# 完了を待たない）。スレッド返信（A-14）は全参加者への配信（notify_channel_message/
+# notify_dm_message）の対象外のまま——①がunread_count/unread_mention_countの増分
+# （メンション以外はthread_parent_id IS NULLのみ集計、A-05参照）を見ているのと同じスコープに
+# 揃えている。ただし「自分の発言へのスレッド返信」「スレッド内でのメンション」の2つに限っては
+# 個人宛ての通知として意味があるため、notify_thread_reply（2026-09-14、ユーザーからの明示的な
+# 要望）で対象者だけに絞って送る。
 import asyncio
 import json
 import os
@@ -129,4 +133,69 @@ async def notify_dm_message(dm_id: int, sender_id: int, sender_name: str, body: 
     for r in rows:
         if r["notif_mode"] == "off":
             continue
+        await _send_to_subscription(r, payload)
+
+
+async def notify_thread_reply(
+    *, channel_id: int | None, dm_id: int | None, thread_parent_id: int, sender_id: int,
+    sender_name: str, body: str, blocks: list[dict], url: str,
+) -> None:
+    """A-14（スレッド返信）投稿後に呼ぶ。通常のスレッド返信は全参加者への配信対象外のままだが、
+    (1) そのスレッドの元発言を書いた本人への「自分の発言への返信」通知、(2) この返信で個人宛て
+    メンションされた利用者への通知、の2つに限り送る（ユーザーからの明示的な要望「自分の発言に
+    対してスレッドで返信が来た時と、スレッド内でメンションされたときにも通知が来てほしい」、
+    2026-09-14）。@channel/@hereはスレッド返信の候補一覧に出さない設計（ChannelView.tsx）のため
+    mention_summaryのchannel_wideは実質発生しないが、ここでは無視するだけで安全（万一混入しても
+    「全員配信」扱いにはしない）。対象者は元発言の投稿者＋メンションされた利用者のみに絞るため、
+    notify_channel_message/notify_dm_messageのようにchannel_members/direct_message_members全員を
+    起点にせず、先にuser_idの集合を確定させてからその人たちだけをJOINで引く。"""
+    if not is_configured():
+        return
+    pool = get_pool()
+    thread_root = await pool.fetchrow("SELECT sender_user_id FROM messages WHERE id = $1", thread_parent_id)
+    root_author_id = thread_root["sender_user_id"] if thread_root else None
+    _channel_wide, mentioned_ids = mention_summary(blocks)
+    target_ids = {int(uid) for uid in mentioned_ids}
+    if root_author_id is not None:
+        target_ids.add(root_author_id)
+    target_ids.discard(sender_id)
+    if not target_ids:
+        return
+
+    if channel_id is not None:
+        rows = await pool.fetch(
+            """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.id AS user_id, u.notif_mode,
+                   cm.notif_mode AS channel_notif_mode
+               FROM channel_members cm
+               JOIN users u ON u.id = cm.user_id
+               JOIN push_subscriptions ps ON ps.user_id = u.id
+               WHERE cm.channel_id = $1 AND u.id = ANY($2::bigint[])""",
+            channel_id, list(target_ids),
+        )
+    else:
+        rows = await pool.fetch(
+            """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.id AS user_id, u.notif_mode,
+                   NULL::text AS channel_notif_mode
+               FROM direct_message_members dmm
+               JOIN users u ON u.id = dmm.user_id
+               JOIN push_subscriptions ps ON ps.user_id = u.id
+               WHERE dmm.dm_id = $1 AND u.id = ANY($2::bigint[])""",
+            dm_id, list(target_ids),
+        )
+    body_excerpt = _excerpt(body)
+    for r in rows:
+        effective_mode = (
+            r["channel_notif_mode"] if r["channel_notif_mode"] not in (None, "default") else r["notif_mode"]
+        )
+        if effective_mode == "off":
+            continue
+        # ここに来る時点で対象者は「メンションされた」か「自分のスレッドへの返信」のいずれか
+        # （またはその両方）に該当することが確定しているため、'mentions'モードでも通知してよい
+        # （notify_channel_messageと異なり追加のモード判定は不要）
+        is_mentioned = str(r["user_id"]) in mentioned_ids
+        title = "あなたへのメンション" if is_mentioned else "あなたの発言への返信"
+        payload = {
+            "title": title, "body": f"{sender_name}: {body_excerpt}", "url": url,
+            "tag": f"kogack-t-{thread_parent_id}",
+        }
         await _send_to_subscription(r, payload)
