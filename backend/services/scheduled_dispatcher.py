@@ -78,9 +78,24 @@ async def _dispatch_due_messages() -> None:
                 raw_mentions = row["mentions"]
                 mentions_data = json.loads(raw_mentions) if isinstance(raw_mentions, str) else raw_mentions
                 if mentions_data:
+                    # バグ修正（2026-09-14、ユーザーからの報告「自分宛にメンションしたメッセージを
+                    # 予約投稿すると、なぜか時間になっても正常に送られません」）: insert_mention_blocks
+                    # の引数はDM対応（2026-09-07）・@channel/@here対応（2026-09-10/11）を経て
+                    # `(conn, message_id, mentions, *, channel_id=None, dm_id=None, sender_user_id=None)`
+                    # （channel_idはキーワード専用）へ変わっていたが、この呼び出し元は当時の
+                    # `(conn, message_id, channel_id, mentions)`という古い位置引数のまま更新されて
+                    # いなかった。これは実際には呼び出せない（TypeError: takes 3 positional
+                    # arguments but 4 were given）シグネチャの不一致で、mentionsが1件でもある予約
+                    # メッセージは発言化のたびにこの例外でトランザクションごとロールバックされ
+                    # （元のstatus='pending'に戻る）、次の30秒ポーリングでも同じ箇所で必ず再度
+                    # クラッシュするため、永久に送信されないまま無限に再試行し続けていた
+                    # （`_run_loop`のtry/exceptがtick単位の例外を握りつぶすため、ディスパッチャ自体は
+                    # 生き続けるが、この特定の予約メッセージだけが決して発言化されない状態になる）。
+                    # sender_user_idも渡すようにした（@here対応、送信者自身をアクティブ参加者の
+                    # スナップショットから除外するために使う。当時@hereはまだ存在せず未対応だった）
                     await insert_mention_blocks(
-                        conn, message_row["id"], row["channel_id"],
-                        [MentionInput(**m) for m in mentions_data],
+                        conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
+                        channel_id=row["channel_id"], sender_user_id=row["sender_user_id"],
                     )
             if row["thread_parent_id"] is not None:
                 # バグ修正（2026-09-14）: routers/messages.py post_replyと同じ理由。予約投稿が
