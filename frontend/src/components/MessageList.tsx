@@ -815,6 +815,78 @@ export function EmojiGridPopover({
   )
 }
 
+const CONTEXT_MENU_WIDTH = 160
+const CONTEXT_MENU_HEIGHT_ESTIMATE = 170 // 実測前の見積もり（項目数は最大4件、EmojiGridPopoverと同じ考え方）
+
+// 発言の右クリックメニュー（ユーザーからの明示的な要望）。EmojiGridPopoverと同じ
+// 「document.bodyへポータル配置し、position: fixedで座標指定、UI拡大率（lib/uiZoom.ts）の
+// scaleで画面端クランプ・位置計算を補正する」方式を、クリックした要素のgetBoundingClientRectでは
+// なくクリック位置そのもの（clientX/clientY）を基準にした版として流用する
+export function MessageContextMenu({
+  x,
+  y,
+  items,
+  onClose,
+}: {
+  x: number
+  y: number
+  items: { label: string; onClick: () => void; danger?: boolean }[]
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onDocMouseDown = (e: globalThis.MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [onClose])
+
+  const scale = currentUiZoomScale()
+  const edgePaddingPx = 8 * scale
+  const widthPx = CONTEXT_MENU_WIDTH * scale
+  const heightEstimatePx = CONTEXT_MENU_HEIGHT_ESTIMATE * scale
+  const openUpward = y + heightEstimatePx > window.innerHeight
+  const leftOnScreen = Math.min(Math.max(x, edgePaddingPx), window.innerWidth - widthPx - edgePaddingPx)
+  const topOnScreen = openUpward
+    ? Math.max(y - heightEstimatePx, edgePaddingPx)
+    : Math.min(y, window.innerHeight - heightEstimatePx - edgePaddingPx)
+  const style: CSSProperties = { position: 'fixed', left: leftOnScreen / scale, top: topOnScreen / scale }
+
+  return createPortal(
+    <div
+      ref={ref}
+      style={style}
+      className="z-50 w-[160px] overflow-hidden rounded-lg border border-line-strong bg-surface py-1 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
+    >
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          onClick={() => {
+            item.onClick()
+            onClose()
+          }}
+          className={`block w-full px-3 py-1.5 text-left text-[12.5px] hover:bg-surface-muted ${
+            item.danger ? 'text-danger-text' : 'text-ink'
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  )
+}
+
 // 発言本文の下に表示するリアクション一覧（絵文字＋件数のピル）。既に自分が付けている絵文字は
 // アクセントカラーで強調し、クリックで同じ絵文字をもう一度トグル（削除）できる。誰が付けたかは
 // ホバー時のカスタムツールチップ（黒い吹き出し）で見られるようにした（ユーザーからの明示的な
@@ -931,6 +1003,18 @@ export default function MessageList({
   const openProfile = (id: string, e: MouseEvent<HTMLElement>) =>
     setProfileFor({ id, anchor: e.currentTarget.getBoundingClientRect() })
 
+  // 発言の右クリックメニュー（ユーザーからの明示的な要望「発言を右クリックすると、編集する、
+  // 返信する、コピーする、削除するなどの選択肢が出るポップアップが出ると嬉しい」）。既存のホバー時
+  // アクションバー（リアクション・返信・編集・削除ボタン）は置き換えず、右クリックはそれに加えた
+  // もう1つの入口として追加する。ブラウザ既定の右クリックメニューはe.preventDefault()で抑止する。
+  // クリック位置（clientX/clientY、実際の画面座標）をそのまま保持し、メニュー自体は
+  // EmojiGridPopoverと同じdocument.bodyへのポータル配置（画面端クランプ・UI拡大率補正込み）にする
+  const [contextMenuFor, setContextMenuFor] = useState<{ id: string; x: number; y: number } | null>(null)
+  const openContextMenu = (messageId: string, e: MouseEvent<HTMLElement>) => {
+    e.preventDefault()
+    setContextMenuFor({ id: messageId, x: e.clientX, y: e.clientY })
+  }
+
   // S-05検索結果からのハイライトジャンプ（ユーザーからの明示的な要望）。目的の発言がmessagesに
   // 現れた時点（初回は`around=`取得の応答待ちのため即座には無い）で1回だけスクロールする。
   // scrolledForを見て同じhighlightMessageIdに対しては再スクロールしない（3秒ごとのポーリングで
@@ -943,6 +1027,19 @@ export default function MessageList({
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     scrolledFor.current = highlightMessageId
   }, [highlightMessageId, messages])
+
+  // メッセージのコピー（ユーザーからの明示的な要望）。記法（`**太字**`等）を含む本文をそのまま
+  // クリップボードへコピーする（装飾を解いた見た目そのままのテキストへ変換することはせず、
+  // 単純にm.bodyの生テキストを渡す。他画面へ貼り付けたときKogack内で編集し直せば元どおりに
+  // 再解釈できるようにするための判断）
+  const copyMessageText = async (body: string) => {
+    try {
+      await navigator.clipboard.writeText(body)
+      toast('メッセージをコピーしました')
+    } catch {
+      toast('コピーに失敗しました', 'error')
+    }
+  }
 
   const deleteMessage = async (messageId: string) => {
     const ok = await confirm({
@@ -1156,6 +1253,7 @@ export default function MessageList({
             {unreadDividerMessageId === m.id && <UnreadDivider />}
             <div
               id={`message-${m.id}`}
+              onContextMenu={(e) => openContextMenu(m.id, e)}
               className={`group relative flex gap-2.5 px-5 py-[7px] transition-colors duration-700 ${
                 highlightMessageId === m.id
                   ? 'bg-bot-bg'
@@ -1535,6 +1633,21 @@ export default function MessageList({
                   userId={m.sender_user_id}
                   onClose={() => setProfileFor(null)}
                   anchor={profileFor.anchor}
+                />
+              )}
+              {contextMenuFor?.id === m.id && (
+                <MessageContextMenu
+                  x={contextMenuFor.x}
+                  y={contextMenuFor.y}
+                  onClose={() => setContextMenuFor(null)}
+                  items={[
+                    ...(showReplyButton ? [{ label: '返信する', onClick: () => onOpenThread!(m.id) }] : []),
+                    ...(canEdit && !isEditing ? [{ label: '編集する', onClick: () => startEdit(m) }] : []),
+                    { label: 'コピーする', onClick: () => copyMessageText(m.body) },
+                    ...(canDelete
+                      ? [{ label: '削除する', danger: true, onClick: () => deleteMessage(m.id) }]
+                      : []),
+                  ]}
                 />
               )}
             </div>
