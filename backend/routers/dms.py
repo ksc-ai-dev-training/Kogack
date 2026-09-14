@@ -58,7 +58,8 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
     unread_countはT-22 read_states（未読バッジ、基本設計書4.2節）を使って算出する。
     unread_mention_countはA-05（チャンネル）と同じ考え方のスレッド限定版（2026-09-14、ユーザーからの
     明示的な要望）。DM本体のメッセージは既に常時通知対象のため対象外、スレッド返信に限り
-    「自分が投稿した発言への返信」「スレッド内での個人宛てメンション」を集計する。"""
+    「自分が投稿した発言への返信」「スレッド内での個人宛てメンション」「自分が過去に一度でも
+    返信したことのあるスレッドへの新しい返信」（同日、ユーザーからの追加要望）を集計する。"""
     pool = get_pool()
     rows = await pool.fetch(
         """SELECT d.id, d.created_at,
@@ -73,7 +74,15 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
                 WHERE msg.dm_id = d.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NOT NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
                   AND msg.created_at > COALESCE(rs.last_read_at, dmm.joined_at)
-                  AND (mb.payload->>'target_user_id' = $1::text OR thread_root.sender_user_id = $1)
+                  AND (
+                    mb.payload->>'target_user_id' = $1::text
+                    OR thread_root.sender_user_id = $1
+                    OR EXISTS (
+                      SELECT 1 FROM messages self_reply
+                      WHERE self_reply.thread_parent_id = msg.thread_parent_id
+                        AND self_reply.sender_user_id = $1
+                    )
+                  )
                ) AS unread_mention_count
            FROM direct_messages d
            JOIN direct_message_members dmm ON dmm.dm_id = d.id AND dmm.user_id = $1

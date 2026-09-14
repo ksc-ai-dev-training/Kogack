@@ -142,22 +142,30 @@ async def notify_thread_reply(
 ) -> None:
     """A-14（スレッド返信）投稿後に呼ぶ。通常のスレッド返信は全参加者への配信対象外のままだが、
     (1) そのスレッドの元発言を書いた本人への「自分の発言への返信」通知、(2) この返信で個人宛て
-    メンションされた利用者への通知、の2つに限り送る（ユーザーからの明示的な要望「自分の発言に
-    対してスレッドで返信が来た時と、スレッド内でメンションされたときにも通知が来てほしい」、
-    2026-09-14）。@channel/@hereはスレッド返信の候補一覧に出さない設計（ChannelView.tsx）のため
-    mention_summaryのchannel_wideは実質発生しないが、ここでは無視するだけで安全（万一混入しても
-    「全員配信」扱いにはしない）。対象者は元発言の投稿者＋メンションされた利用者のみに絞るため、
-    notify_channel_message/notify_dm_messageのようにchannel_members/direct_message_members全員を
-    起点にせず、先にuser_idの集合を確定させてからその人たちだけをJOINで引く。"""
+    メンションされた利用者への通知、(3) そのスレッドに過去に一度でも返信したことがある利用者への
+    通知、の3つに限り送る（ユーザーからの明示的な要望「自分の発言に対してスレッドで返信が来た時と、
+    スレッド内でメンションされたときにも通知が来てほしい」、2026-09-14。続けて同日「自分が一回でも
+    発言したことのあるスレッドで新しい返信が来たときも通知が来るようにすべき」との追加要望を受け(3)を
+    追加した。Slackの既定の「スレッドをwatchする」挙動と同じ考え方）。@channel/@hereはスレッド返信の
+    候補一覧に出さない設計（ChannelView.tsx）のためmention_summaryのchannel_wideは実質発生しないが、
+    ここでは無視するだけで安全（万一混入しても「全員配信」扱いにはしない）。対象者は元発言の投稿者＋
+    メンションされた利用者＋過去の返信者のみに絞るため、notify_channel_message/notify_dm_messageの
+    ようにchannel_members/direct_message_members全員を起点にせず、先にuser_idの集合を確定させてから
+    その人たちだけをJOINで引く。"""
     if not is_configured():
         return
     pool = get_pool()
     thread_root = await pool.fetchrow("SELECT sender_user_id FROM messages WHERE id = $1", thread_parent_id)
     root_author_id = thread_root["sender_user_id"] if thread_root else None
+    past_repliers = await pool.fetch(
+        "SELECT DISTINCT sender_user_id FROM messages WHERE thread_parent_id = $1 AND sender_user_id IS NOT NULL",
+        thread_parent_id,
+    )
     _channel_wide, mentioned_ids = mention_summary(blocks)
     target_ids = {int(uid) for uid in mentioned_ids}
     if root_author_id is not None:
         target_ids.add(root_author_id)
+    target_ids.update(r["sender_user_id"] for r in past_repliers)
     target_ids.discard(sender_id)
     if not target_ids:
         return
@@ -189,11 +197,16 @@ async def notify_thread_reply(
         )
         if effective_mode == "off":
             continue
-        # ここに来る時点で対象者は「メンションされた」か「自分のスレッドへの返信」のいずれか
-        # （またはその両方）に該当することが確定しているため、'mentions'モードでも通知してよい
-        # （notify_channel_messageと異なり追加のモード判定は不要）
+        # ここに来る時点で対象者は「メンションされた」「自分のスレッドへの返信」「そのスレッドへの
+        # 過去の返信者」のいずれか（複数該当もありうる）に該当することが確定しているため、
+        # 'mentions'モードでも通知してよい（notify_channel_messageと異なり追加のモード判定は不要）
         is_mentioned = str(r["user_id"]) in mentioned_ids
-        title = "あなたへのメンション" if is_mentioned else "あなたの発言への返信"
+        if is_mentioned:
+            title = "あなたへのメンション"
+        elif r["user_id"] == root_author_id:
+            title = "あなたの発言への返信"
+        else:
+            title = "参加中のスレッドに新着"
         payload = {
             "title": title, "body": f"{sender_name}: {body_excerpt}", "url": url,
             "tag": f"kogack-t-{thread_parent_id}",

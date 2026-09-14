@@ -52,7 +52,11 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
     含めるよう拡張した。(1)スレッド内で自分が個人宛てメンションされた場合、(2)自分が投稿した
     発言に対するスレッド返信（thread_root.sender_user_id = 自分）の場合、のいずれかに該当する
     スレッド返信もカウントする（@channel/@hereはスレッド返信の候補一覧に出さない設計のため
-    実質発生しないが、条件式自体は本体タイムラインと共通のまま流用し複雑化を避けた）。**"""
+    実質発生しないが、条件式自体は本体タイムラインと共通のまま流用し複雑化を避けた）。
+    **続けて同日、ユーザーからの明示的な要望「自分が一回でも発言したことのあるスレッドで
+    新しい返信が来たときも通知が来るようにすべき」を受け、(3)自分がそのスレッドに過去に
+    一度でも返信したことがある場合、も条件に追加した（Slackの既定の「スレッドをwatchする」
+    挙動と同じ考え方）。EXISTSで自分の返信の有無だけを見る（何件あっても計算量は変わらない）。**"""
     pool = get_pool()
     joined = await pool.fetch(
         """SELECT c.*, cm.notif_mode,
@@ -72,6 +76,11 @@ async def list_channels(user: CurrentUser = Depends(require_auth)):
                     OR mb.payload->>'kind' = 'channel'
                     OR mb.payload->'user_ids' ? $1::text
                     OR thread_root.sender_user_id = $1
+                    OR (msg.thread_parent_id IS NOT NULL AND EXISTS (
+                      SELECT 1 FROM messages self_reply
+                      WHERE self_reply.thread_parent_id = msg.thread_parent_id
+                        AND self_reply.sender_user_id = $1
+                    ))
                   )
                ) AS unread_mention_count
            FROM channels c
