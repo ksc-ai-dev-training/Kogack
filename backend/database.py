@@ -669,6 +669,14 @@ ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE channel_members ADD COLUMN IF NOT EXISTS notif_mode TEXT NOT NULL DEFAULT 'default'
     CHECK (notif_mode IN ('default', 'all', 'mentions', 'off'));
 
+-- DMごとの通知設定（ユーザーからの明示的な要望「DMの画面のヘッダーにも、チャンネル会話と同じように、
+-- DMごとの通知設定ボタンを付けて」、2026-09-15）。channel_members.notif_modeと全く同じ考え方・
+-- 同じ4値をT-17 direct_message_membersに追加した。DM本体のメッセージは元々「常に自分宛て」という
+-- 設計（routers/dms.py）のため、'all'と'mentions'は実際には同じ動作になる（フロント側のヒント文言で
+-- 明記する）。'default'は全体設定（users.notif_mode）に従う、'off'はこのDMに限り一切通知しない
+ALTER TABLE direct_message_members ADD COLUMN IF NOT EXISTS notif_mode TEXT NOT NULL DEFAULT 'default'
+    CHECK (notif_mode IN ('default', 'all', 'mentions', 'off'));
+
 -- 文字数制限の見直し（2026-09-09、ユーザーからの明示的な要望）にともなう既存データの一括整形。
 -- ユーザー名（21字）・チャンネル名（80字）・チャンネル説明文（500字）の新しい上限を超えている
 -- 既存の行を先頭から切り詰める（LEFTは文字数ベースでマルチバイト文字も正しく扱う）。

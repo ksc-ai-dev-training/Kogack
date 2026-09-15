@@ -10,7 +10,7 @@ import MessageList from '../components/MessageList'
 import Composer, { type MentionCandidate } from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
-import ChannelNotifButton from '../components/ChannelNotifButton'
+import NotifModeButton from '../components/NotifModeButton'
 import SummarizeRangeButton, { type SummaryRange } from '../components/SummarizeRangeButton'
 import HeaderSearchBar from '../components/HeaderSearchBar'
 import { useToast } from '../components/Toast'
@@ -238,7 +238,7 @@ export default function ChannelView() {
               {channel.topic}
             </span>
           )}
-          <HeaderSearchBar currentChannelName={channel?.name} currentChannelId={channelId} />
+          <HeaderSearchBar modifier="in" id={channelId} label={channel?.name} />
           {channel && (
             <button
               type="button"
@@ -256,10 +256,12 @@ export default function ChannelView() {
             />
           )}
           {channel && (
-            <ChannelNotifButton
-              channelId={channelId!}
+            <NotifModeButton
+              endpoint={`/api/channels/${channelId}/notif-mode`}
+              label="このチャンネルの通知"
               mode={channel.notif_mode ?? 'default'}
               onChanged={handleChannelNotifModeChanged}
+              hint="「既定に従う」以外を選ぶと、このチャンネルに限りデスクトップ通知の設定を上書きします。「オフ」はサイドバーの未読バッジも表示しなくなります。"
             />
           )}
           {(channel?.is_channel_admin || me?.role === 'admin') && (

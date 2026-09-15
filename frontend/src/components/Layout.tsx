@@ -335,6 +335,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                 const label = d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、')
                 const firstMember = d.members[0]
                 const hasDraft = draftKeys.has(`d:${d.id}`)
+                // DMごとの通知設定（2026-09-15）で「オフ（ミュート）」を選んだDMは、チャンネルと
+                // 同じ考え方（joined.mapの`muted`参照）で未読バッジ・太字表示も抑える
+                const muted = d.notif_mode === 'off'
+                const unread = muted ? 0 : d.unread_count
                 return (
                   <li key={d.id} className="my-px">
                     <GuardedNavLink to={`/dms/${d.id}`} className={({ isActive }) => navItemClass(isActive)}>
@@ -354,7 +358,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                           {firstMember?.name.slice(0, 1) ?? '?'}
                         </span>
                       )}
-                      <span className={`min-w-0 flex-1 truncate ${d.unread_count > 0 ? 'font-bold text-ink' : ''}`}>
+                      <span className={`min-w-0 flex-1 truncate ${unread > 0 ? 'font-bold text-ink' : ''}`}>
                         {label}
                       </span>
                       {hasDraft && (
@@ -362,9 +366,9 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                           ✏️
                         </span>
                       )}
-                      {d.unread_count > 0 && (
+                      {unread > 0 && (
                         <span className="flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-accent-600 px-1 text-[10px] font-bold text-white">
-                          {d.unread_count > 99 ? '99+' : d.unread_count}
+                          {unread > 99 ? '99+' : unread}
                         </span>
                       )}
                     </GuardedNavLink>

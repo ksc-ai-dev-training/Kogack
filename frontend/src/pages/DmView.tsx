@@ -8,7 +8,9 @@ import { apiFetch } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
-import type { AttachmentPayload, MentionPayload } from '../types'
+import NotifModeButton from '../components/NotifModeButton'
+import HeaderSearchBar from '../components/HeaderSearchBar'
+import type { AttachmentPayload, ChannelNotifMode, MentionPayload } from '../types'
 
 // S-03相当のDM会話＋S-04スレッド表示（ChannelViewのDM版）。ヘッダーはチャンネル名の代わりに相手の氏名を表示する。
 // 参加者は開始時に固定のため、詳細取得API（A-06相当）は無くA-16の一覧から該当DMを引く。
@@ -110,12 +112,42 @@ export default function DmView() {
     })
   }
 
+  // DMごとの通知設定（ユーザーからの明示的な要望「DMの画面のヘッダーにも、チャンネル会話と同じ
+  // ように、DMごとの通知設定ボタンを付けて」、2026-09-15）。ChannelView.tsxの
+  // handleChannelNotifModeChangedと同じ考え方（NotifModeButton自身が保存前に楽観的に呼び、
+  // 保存失敗時は元の値で再度呼んで巻き戻す）だが、DMには単体の詳細取得API（A-06相当）が無いため
+  // A-16（useDms）のitems一覧キャッシュだけを直接更新すればよい
+  const handleDmNotifModeChanged = (mode: ChannelNotifMode) => {
+    if (!dmId) return
+    mutateDms(
+      (prev) => (prev ? { ...prev, items: prev.items.map((d) => (d.id === dmId ? { ...d, notif_mode: mode } : d)) } : prev),
+      { revalidate: false },
+    )
+  }
+
+  // ヘッダー検索欄（ChannelView.tsxと同じHeaderSearchBarを流用、2026-09-15）でwith:をprefillする
+  // 相手。グループDM（3名以上）ではrouters/search.pyのwith:がperson-based（特定の1人が参加している
+  // DMを横断的に探す）な設計のため、代表として先頭の相手（dm.membersはAPI側でORDER BY nameのため
+  // 決定的）を使う。自分専用DM（is_self）は「相手」が存在しないため付けない（自分のidをwith:に
+  // 使うと理論上は自分の入っている全DMがヒットしてしまい、このDM専用の絞り込みにならないため）
+  const searchWithMember = dm && !dm.is_self ? dm.members[0] : undefined
+
   return (
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-[52px] flex-none items-center gap-2 border-b border-line px-5">
           {dm?.is_self && <span className="text-[15px]">📝</span>}
-          <span className="text-[15px] font-bold text-ink">{title}</span>
+          <span className="min-w-0 flex-shrink truncate text-[15px] font-bold text-ink">{title}</span>
+          <HeaderSearchBar modifier="with" id={searchWithMember?.id} label={searchWithMember?.name} />
+          {dm && (
+            <NotifModeButton
+              endpoint={`/api/dms/${dmId}/notif-mode`}
+              label="このDMの通知"
+              mode={dm.notif_mode ?? 'default'}
+              onChanged={handleDmNotifModeChanged}
+              hint="「既定に従う」以外を選ぶと、このDMに限りデスクトップ通知の設定を上書きします。「オフ」はサイドバーの未読バッジも表示しなくなります。DM本体のメッセージは常に自分宛てのため「すべて」と「メンションのみ」は同じ動作になります（スレッド内の返信・メンションには影響しません）。"
+            />
+          )}
         </div>
 
         <div ref={listRef} className="flex-1 overflow-y-auto overflow-x-hidden py-3">

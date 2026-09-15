@@ -118,7 +118,11 @@ export function useDesktopNotifications(
         label: d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、'),
         to: `/dms/${d.id}`,
         isDm: true,
-        effectiveMode: mode,
+        // DMごとの通知設定（2026-09-15、ユーザーからの明示的な要望）。チャンネルと同じ考え方で
+        // 'default'以外なら全体設定（mode）より優先する（push_sender.notify_dm_messageの
+        // 実効設定計算と同じ）。DM本体のcountは下の判定（isDm）で常時notify対象のため、
+        // 'mentions'と'all'の違いはここでは事実上効かない（backendと同じ設計上の割り切り）
+        effectiveMode: d.notif_mode && d.notif_mode !== 'default' ? d.notif_mode : mode,
       })),
     ]
 

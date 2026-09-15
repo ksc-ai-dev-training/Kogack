@@ -228,6 +228,10 @@ export interface Dm {
   /** DM本体は常時通知対象のため対象外、スレッド返信限定（自分の発言への返信／スレッド内での
    * 個人宛てメンション）の件数（2026-09-14、Channelのunread_mention_countのDM版） */
   unread_mention_count: number
+  /** DMごとの通知設定（direct_message_members.notif_mode、2026-09-15）。Channel.notif_modeと同じ
+   * 4値・同じ型（ChannelNotifMode）を流用する。'all'と'mentions'はDM本体では同じ動作になる
+   * （DM本体のメッセージは常に自分宛てのため。詳細はbackend push_sender.notify_dm_messageのdocstring参照） */
+  notif_mode?: ChannelNotifMode
 }
 
 export interface DmsResponse {

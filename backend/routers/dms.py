@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/dms", tags=["dms"])
 
 async def _dm_out(
     pool, dm_id: int, created_at, self_user_id: int, unread_count: int = 0, unread_mention_count: int = 0,
+    notif_mode: str = "default",
 ) -> dict:
     all_member_ids = {
         r["user_id"]
@@ -49,6 +50,9 @@ async def _dm_out(
         # メンションされたときにも通知が来てほしい」）: 自分が投稿した発言へのスレッド返信、または
         # スレッド内での個人宛てメンションの件数
         "unread_mention_count": unread_mention_count,
+        # DMごとの通知設定（ユーザーからの明示的な要望、2026-09-15）。channels.pyのjoined一覧・A-06と
+        # 同じ考え方（'default'は全体設定に従う）。A-17（DM開始）はこの引数を省略するため常に'default'
+        "notif_mode": notif_mode,
     }
 
 
@@ -62,7 +66,7 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
     返信したことのあるスレッドへの新しい返信」（同日、ユーザーからの追加要望）を集計する。"""
     pool = get_pool()
     rows = await pool.fetch(
-        """SELECT d.id, d.created_at,
+        """SELECT d.id, d.created_at, dmm.notif_mode,
                (SELECT count(*) FROM messages msg
                 WHERE msg.dm_id = d.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
@@ -92,7 +96,10 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
     )
     return {
         "items": [
-            await _dm_out(pool, r["id"], r["created_at"], user.id, r["unread_count"], r["unread_mention_count"])
+            await _dm_out(
+                pool, r["id"], r["created_at"], user.id, r["unread_count"], r["unread_mention_count"],
+                r["notif_mode"],
+            )
             for r in rows
         ]
     }
@@ -154,6 +161,24 @@ async def mark_dm_read(dm_id: int, user: CurrentUser = Depends(require_dm_member
         user.id, dm_id,
     )
     return {"dm_id": str(dm_id), "read": True}
+
+
+class UpdateDmNotifModeRequest(BaseModel):
+    notif_mode: str = Field(pattern="^(default|all|mentions|off)$")
+
+
+@router.put("/{dm_id}/notif-mode")
+async def update_dm_notif_mode(
+    dm_id: int, body: UpdateDmNotifModeRequest, user: CurrentUser = Depends(require_dm_member),
+):
+    """DMごとの通知設定（ユーザーからの明示的な要望「DMの画面のヘッダーにも、チャンネル会話と同じように、
+    DMごとの通知設定ボタンを付けて」、2026-09-15）。channels.update_channel_notif_modeと全く同じ考え方で、
+    T-17 direct_message_members.notif_modeを自分の行についてのみ更新する。"""
+    await get_pool().execute(
+        "UPDATE direct_message_members SET notif_mode = $3 WHERE dm_id = $1 AND user_id = $2",
+        dm_id, user.id, body.notif_mode,
+    )
+    return {"dm_id": str(dm_id), "notif_mode": body.notif_mode}
 
 
 def _message_out(
@@ -322,8 +347,13 @@ async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser =
         )
         blocks = await insert_mention_blocks(conn, row["id"], body.mentions, dm_id=dm_id, sender_user_id=user.id)
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
-    # デスクトップ通知②（Web Push、2026-09-11）。投稿完了を待たせないfire-and-forget起動
-    asyncio.create_task(push_sender.notify_dm_message(dm_id, user.id, user.name, body.body, f"/dms/{dm_id}"))
+    # デスクトップ通知②（Web Push、2026-09-11）。投稿完了を待たせないfire-and-forget起動。
+    # blocksは通知の絞り込みには使わない（DM本体は常に自分宛てのため'mentions'/'all'は同じ動作、
+    # 2026-09-15）が、実際に@メンションされていればタイトルを「あなたへのメンション」に変える
+    # （notify_channel_messageと同じ見せ方）ためpush_sender側で参照する
+    asyncio.create_task(
+        push_sender.notify_dm_message(dm_id, user.id, user.name, body.body, blocks, f"/dms/{dm_id}")
+    )
     return _message_out(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
         blocks,

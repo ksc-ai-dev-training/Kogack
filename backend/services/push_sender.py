@@ -112,16 +112,24 @@ async def notify_channel_message(
         await _send_to_subscription(r, payload)
 
 
-async def notify_dm_message(dm_id: int, sender_id: int, sender_name: str, body: str, url: str) -> None:
+async def notify_dm_message(
+    dm_id: int, sender_id: int, sender_name: str, body: str, blocks: list[dict], url: str,
+) -> None:
     """A-19投稿後に呼ぶ。DMは①と同じく'mentions'/'all'の区別なく常に通知対象とする（DM自体が
     既に「自分宛て」であるため。useDesktopNotifications.tsのisDm扱いと同じ）。ただし'off'
     （2026-09-11追加、ユーザーからの要望「通知をオフにするオプション」）のときはDMも含め
-    一切送らない——「オフ」は文字どおり全面的な無効化であるべきという判断（基本設計書6.2節）。"""
+    一切送らない——「オフ」は文字どおり全面的な無効化であるべきという判断（基本設計書6.2節）。
+    DMごとの通知設定（direct_message_members.notif_mode、2026-09-15）が'default'以外の場合は
+    全体設定（users.notif_mode）より優先する——channelの実効設定計算と同じ考え方だが、'mentions'は
+    'all'と同じ扱いのまま（gatingはしない）。blocksは通知の可否には使わず、実際に@メンションされて
+    いればタイトルを変えるためだけに使う"""
     if not is_configured():
         return
     pool = get_pool()
+    _channel_wide, mentioned_ids = mention_summary(blocks)
     rows = await pool.fetch(
-        """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.notif_mode
+        """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.id AS user_id, u.notif_mode,
+               dmm.notif_mode AS dm_notif_mode
            FROM direct_message_members dmm
            JOIN users u ON u.id = dmm.user_id
            JOIN push_subscriptions ps ON ps.user_id = u.id
@@ -129,10 +137,13 @@ async def notify_dm_message(dm_id: int, sender_id: int, sender_name: str, body: 
         dm_id, sender_id,
     )
     body_excerpt = _excerpt(body)
-    payload = {"title": sender_name, "body": body_excerpt, "url": url, "tag": f"kogack-d-{dm_id}"}
     for r in rows:
-        if r["notif_mode"] == "off":
+        effective_mode = r["dm_notif_mode"] if r["dm_notif_mode"] != "default" else r["notif_mode"]
+        if effective_mode == "off":
             continue
+        is_mentioned = str(r["user_id"]) in mentioned_ids
+        title = "あなたへのメンション" if is_mentioned else sender_name
+        payload = {"title": title, "body": body_excerpt, "url": url, "tag": f"kogack-d-{dm_id}"}
         await _send_to_subscription(r, payload)
 
 
@@ -182,8 +193,10 @@ async def notify_thread_reply(
         )
     else:
         rows = await pool.fetch(
+            # 従来はNULL固定（DMには per-DM 上書きが無かった）だったが、DMごとの通知設定
+            # （direct_message_members.notif_mode、2026-09-15）の追加により実値を渡すようにした
             """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.id AS user_id, u.notif_mode,
-                   NULL::text AS channel_notif_mode
+                   dmm.notif_mode AS channel_notif_mode
                FROM direct_message_members dmm
                JOIN users u ON u.id = dmm.user_id
                JOIN push_subscriptions ps ON ps.user_id = u.id

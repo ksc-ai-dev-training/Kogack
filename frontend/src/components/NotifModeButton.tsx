@@ -11,20 +11,29 @@ const LABELS: Record<ChannelNotifMode, string> = {
 }
 
 // チャンネル会話画面ヘッダーの通知設定ボタン（ユーザーからの明示的な要望「チャンネルごとに
-// 通知設定できる機能を付けられる？」、2026-09-11）。サイドバーのNotificationSettingsButton.tsx
-// （全体設定、画面左端固定のためfixed配置）とは異なり、こちらは会話画面ヘッダー（overflow
-// クリップの無いflex-none領域）に出るボタンなので、ボタン基準のabsolute配置で足りる。
-// 4択（既定に従う/すべて/メンションのみ/オフ）のうち「既定に従う」はA-62のusers.notif_mode
-// （全体設定）にそのまま従う。オフ（ミュート）を選んだ場合のみ、サイドバーの未読バッジ・
-// 太字表示も抑える（Layout.tsx側の扱い、ユーザーが選んだ推奨案どおり）。
-export default function ChannelNotifButton({
-  channelId,
+// 通知設定できる機能を付けられる？」、2026-09-11）として実装したものを、DM会話画面ヘッダーでも
+// 同じ形で使えるよう汎用化した（ユーザーからの明示的な要望「DMの画面のヘッダーにも、チャンネル
+// 会話と同じように、DMごとの通知設定ボタンを付けて」、2026-09-15。ファイル名も
+// ChannelNotifButton.tsx→NotifModeButton.tsxへ改名した）。呼び出し元がAPIのパス（endpoint）と
+// ヘッダー文言（label、例:「このチャンネルの通知」/「このDMの通知」）を渡す形にしただけで、
+// 中身のロジック・4択（既定に従う/すべて/メンションのみ/オフ）の構造は変更していない。
+// サイドバーのNotificationSettingsButton.tsx（全体設定、画面左端固定のためfixed配置）とは異なり、
+// こちらは会話画面ヘッダー（overflowクリップの無いflex-none領域）に出るボタンなので、ボタン基準の
+// absolute配置で足りる。「既定に従う」はA-62のusers.notif_mode（全体設定）にそのまま従う。
+// オフ（ミュート）を選んだ場合のみ、サイドバーの未読バッジ・太字表示も抑える（Layout.tsx側の扱い、
+// ユーザーが選んだ推奨案どおり）。
+export default function NotifModeButton({
+  endpoint,
+  label,
   mode,
   onChanged,
+  hint,
 }: {
-  channelId: string
+  endpoint: string
+  label: string
   mode: ChannelNotifMode
   onChanged: (mode: ChannelNotifMode) => void
+  hint?: string
 }) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -52,7 +61,7 @@ export default function ChannelNotifButton({
     onChanged(next) // 楽観的更新（保存を待たずサイドバーのバッジ抑制等に即反映）
     setSaving(true)
     try {
-      await apiFetch(`/api/channels/${channelId}/notif-mode`, {
+      await apiFetch(endpoint, {
         method: 'PUT',
         body: JSON.stringify({ notif_mode: next }),
       })
@@ -70,7 +79,7 @@ export default function ChannelNotifButton({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={`このチャンネルの通知: ${LABELS[mode]}`}
+        title={`${label}: ${LABELS[mode]}`}
         className={`rounded-[7px] border px-2.5 py-1 text-xs font-semibold ${
           muted
             ? 'border-line bg-surface text-ink-subtle opacity-70 hover:bg-surface-subtle'
@@ -82,7 +91,7 @@ export default function ChannelNotifButton({
 
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1.5 w-[220px] rounded-lg border border-line bg-surface p-2 text-[12px] shadow-lg">
-          <div className="mb-1.5 px-1 font-bold text-ink">このチャンネルの通知</div>
+          <div className="mb-1.5 px-1 font-bold text-ink">{label}</div>
           {(['default', 'all', 'mentions', 'off'] as ChannelNotifMode[]).map((v) => (
             <label
               key={v}
@@ -90,7 +99,7 @@ export default function ChannelNotifButton({
             >
               <input
                 type="radio"
-                name={`channel-notif-mode-${channelId}`}
+                name={`notif-mode-${endpoint}`}
                 className="mt-0.5"
                 checked={mode === v}
                 disabled={saving}
@@ -99,10 +108,7 @@ export default function ChannelNotifButton({
               <span className="font-semibold text-ink">{LABELS[v]}</span>
             </label>
           ))}
-          <p className="mt-1.5 px-1 leading-relaxed text-ink-subtle">
-            「既定に従う」以外を選ぶと、このチャンネルに限りデスクトップ通知の設定を上書きします。
-            「オフ」はサイドバーの未読バッジも表示しなくなります。
-          </p>
+          <p className="mt-1.5 px-1 leading-relaxed text-ink-subtle">{hint}</p>
         </div>
       )}
     </div>
