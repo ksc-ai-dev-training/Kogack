@@ -220,7 +220,11 @@ export default function Composer({
   // 入力中のハイライト表示（透明なtextareaの背後に同じ文字列を重ねて描画する、いわゆる
   // オーバーレイ方式）。textarea自体はcolor:transparentで文字を見せず、この要素側の
   // 該当範囲だけ青背景で描画する。パディング・フォント・折り返しをtextareaと完全に一致させないと
-  // ずれるため、ハイライト部分には背景色以外（padding/font-weight等）を一切加えない
+  // ずれるため、ハイライト部分には背景色以外（padding/font-weight等）を一切加えない。
+  // 送信後の表示（MessageList.tsx、bg-accent-200＋px-1＋font-semiboldの「チップ」形状）と背景色を
+  // あえて別（bg-accent-300、index.css参照）にしているのは、入力中はpadding/太字を付けられない分
+  // 体感の濃さが弱く見えるため（ユーザーからの明示的な要望「送った後と同じくらいに濃くしてほしい」、
+  // 2026-09-15）、背景色だけを一段濃くしてチップと同程度の視認性に近づけるため
   const highlightMatches = findMentionHighlights(body, mentions, aiPersonaName)
   const highlightNodes: ReactNode[] = []
   let highlightCursor = 0
@@ -228,7 +232,7 @@ export default function Composer({
     if (m.start < highlightCursor) return
     if (m.start > highlightCursor) highlightNodes.push(body.slice(highlightCursor, m.start))
     highlightNodes.push(
-      <span key={i} className="rounded-[3px] bg-accent-200 text-accent-700">
+      <span key={i} className="rounded-[3px] bg-accent-300 text-accent-700">
         {body.slice(m.start, m.end)}
       </span>,
     )

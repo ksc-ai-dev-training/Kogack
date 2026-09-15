@@ -1886,7 +1886,9 @@ function useMentionAutocomplete(
 
 // findMentionHighlightsが返す文字範囲から、透明textareaの背後に重ねるハイライト表示用の
 // ReactNode配列を組み立てる（Composer.tsxの同名ループをそのまま再現、RecurringPostFormFields・
-// TriggerRuleFormFieldsの両方から共有するため関数化した）
+// TriggerRuleFormFieldsの両方から共有するため関数化した）。背景色がbg-accent-300なのはComposer.tsx
+// と同じ理由（送信後の「チップ」表示に付くpadding/太字を入力中は付けられないため、背景色だけ
+// 一段濃くして体感の視認性を揃える。ユーザーからの明示的な要望、2026-09-15）
 function buildHighlightNodes(text: string, matches: { start: number; end: number }[]): ReactNode[] {
   const nodes: ReactNode[] = []
   let cursor = 0
@@ -1894,7 +1896,7 @@ function buildHighlightNodes(text: string, matches: { start: number; end: number
     if (m.start < cursor) return
     if (m.start > cursor) nodes.push(text.slice(cursor, m.start))
     nodes.push(
-      <span key={i} className="rounded-[3px] bg-accent-200 text-accent-700">
+      <span key={i} className="rounded-[3px] bg-accent-300 text-accent-700">
         {text.slice(m.start, m.end)}
       </span>,
     )
