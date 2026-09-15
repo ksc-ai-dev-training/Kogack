@@ -124,7 +124,11 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 - 過去のやり取りを参照する場合は「参考情報」であることを必ず明示し、断定しない
 - あなたには現時点で座席予約システムを参照する機能が無い。それが必要な依頼を受けたときは、
   正直に「その機能はまだ利用できません」と答え、存在しない空き状況を作り出さないこと
-- 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない"""
+- 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない
+- これまでの会話履歴の各発言には、冒頭に`[YYYY-MM-DD HH:MM]`の形式で投稿日時（日本時間）が
+  付いている。「これは何時の発言？」のように投稿時刻を尋ねられた場合は、この値をそのまま使って
+  答えること。この日時が付いていない発言（要約結果や一部の引用等）については、時刻を推測で
+  答えないこと"""
 
 # チャット上での要約依頼（「要約して」等）への対応。当初（2026-09-14）はチャット上で要約を
 # 頼まれても実行する手段が無く「できません」という趣旨の返答をしてしまい、後に実際に要約ボタンを
@@ -565,20 +569,31 @@ async def _resolve_sender_names(rows) -> dict[int, str]:
     }
 
 
-def _rows_to_chat_messages(rows, names: dict[int, str]) -> list[dict]:
-    """T-05の行をOpenAI Chat Completions形式のmessagesへ変換する（_generate_and_post・要約生成で共有）"""
+def _rows_to_chat_messages(rows, names: dict[int, str], include_timestamps: bool = False) -> list[dict]:
+    """T-05の行をOpenAI Chat Completions形式のmessagesへ変換する（_generate_and_post・要約生成で共有）。
+    include_timestamps（2026-09-15、ユーザーからの明示的な要望「特定の発言の投稿時間や、内容を
+    読み取ってAIが回答することはできますか？」への対応）: Trueのとき各行の先頭に投稿時刻
+    （JST、search_channel_history.searchのツール結果と同じ`[YYYY-MM-DD HH:MM]`書式で揃える）を
+    付ける。従来はsearch_channel_historyツールで見つけた「古い」発言にしか投稿時刻が付かず、
+    毎回のプロンプトに常に含まれる「直近の会話履歴（MAX_HISTORY_MESSAGES件）」には時刻情報が
+    一切無いという非対称な状態だった（直近の発言について「これは何時の発言？」と聞かれても
+    検索ツールを自発的に使わない限り正確に答えられなかった）。_generate_and_post（通常のメンション
+    応答・スレッド内メンション・proactive）でのみTrueを渡し、F-14要約（_generate_summary_and_post）
+    は対象外のまま（要約は個々の発言の時刻より内容の集約が主目的で、既存の動作検証済みの挙動を
+    不用意に変えないため。ユーザーへの回答でも「直近の会話履歴」に限定して提案し合意を得た）"""
     messages: list[dict] = []
     for r in rows:
         if not r["body"]:
             continue
+        prefix = f"[{r['created_at'].astimezone(JST).strftime('%Y-%m-%d %H:%M')}] " if include_timestamps else ""
         if r["sender_type"] == "human":
             name = names.get(r["sender_user_id"], "利用者")
-            messages.append({"role": "user", "content": f"{name}: {r['body']}"})
+            messages.append({"role": "user", "content": f"{prefix}{name}: {r['body']}"})
         elif r["sender_type"] == "ai":
-            messages.append({"role": "assistant", "content": r["body"]})
+            messages.append({"role": "assistant", "content": f"{prefix}{r['body']}"})
         else:
             # BOT発言（定期投稿・トリガー）はAIの自己発言と混同しないよう利用者側の文脈として渡す
-            messages.append({"role": "user", "content": f"{r['bot_display_name'] or 'BOT'}: {r['body']}"})
+            messages.append({"role": "user", "content": f"{prefix}{r['bot_display_name'] or 'BOT'}: {r['body']}"})
     return messages
 
 
@@ -821,7 +836,7 @@ async def _generate_and_post(
                 ),
             }
         ]
-        messages += _rows_to_chat_messages(history_rows, names)
+        messages += _rows_to_chat_messages(history_rows, names, include_timestamps=True)
 
         model = ai_client.get_model()
         reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_doc_tools)
