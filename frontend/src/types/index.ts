@@ -269,7 +269,7 @@ export interface RecurringPost {
   bot_display_name: string
   bot_icon: string | null
   bot_icon_url: string | null
-  frequency: 'once' | 'daily' | 'weekly' | 'monthly'
+  frequency: 'once' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'month_end'
   anchor_at: string
   next_run_at: string
   is_active: boolean

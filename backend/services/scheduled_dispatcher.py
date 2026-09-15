@@ -41,9 +41,20 @@ def _next_run_after(current: datetime, anchor: datetime, frequency: str) -> date
     """'weekly'は初回日時の曜日、'monthly'は初回日時（anchor）の日にちを基準に次回時刻を計算する
     （画面モックアップS-06の説明どおり）。'monthly'で該当日が存在しない月（例: 31日起点の2月）は
     月末に繰り下げる（基本設計書6.2節「設計判断」、T-19 recurring_postsの同種の既存記載と同じ考え方）。
-    時刻（時分秒）はcurrent（＝直前のnext_run_at）のものをそのまま維持する。"""
+    'weekdays'（月〜金、2026-09-15追加）はcurrentの翌日から見て直近の平日（土曜なら+2日、日曜なら
+    +1日でそれぞれ月曜へ、それ以外は+1日）へ進む。初回（anchor_at）自体は他の頻度と同じくどの曜日でも
+    そのまま送信され、2回目以降だけがこの規則に従う（他の頻度にも初回の曜日・日にち自体を検証する
+    仕組みは無く、それと一貫させた）。'month_end'（月末、2026-09-15追加）は'monthly'とほぼ同じだが
+    anchor.dayを見ず常にその月の最終日を使う（'monthly'でanchor.day=31を指定した場合と実質的に
+    同じ計算になるが、利用者が「31日」という具体的な日にちを意識せず「月末」を明示的に選べるようにする
+    ための別頻度として用意した）。時刻（時分秒）はcurrent（＝直前のnext_run_at）のものをそのまま維持する。"""
     if frequency == "daily":
         return current + timedelta(days=1)
+    if frequency == "weekdays":
+        # weekday(): 月=0 ... 金=4, 土=5, 日=6。金曜の次の平日は月曜（+3）、土曜は+2、日曜は+1、
+        # それ以外（月〜木）は+1で常に翌日が平日になる。
+        days_ahead = {4: 3, 5: 2, 6: 1}.get(current.weekday(), 1)
+        return current + timedelta(days=days_ahead)
     if frequency == "weekly":
         return current + timedelta(days=7)
     if frequency == "monthly":
@@ -52,6 +63,11 @@ def _next_run_after(current: datetime, anchor: datetime, frequency: str) -> date
         last_day = calendar.monthrange(year, month)[1]
         day = min(anchor.day, last_day)
         return current.replace(year=year, month=month, day=day)
+    if frequency == "month_end":
+        year = current.year + (current.month // 12)
+        month = current.month % 12 + 1
+        last_day = calendar.monthrange(year, month)[1]
+        return current.replace(year=year, month=month, day=last_day)
     raise ValueError(f"unsupported frequency: {frequency}")
 
 

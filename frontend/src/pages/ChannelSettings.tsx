@@ -1636,7 +1636,9 @@ function formatRecurringSchedule(item: RecurringPost): string {
   const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
   if (item.frequency === 'once') return `1回のみ ${d.toLocaleDateString('ja-JP')} ${time}`
   if (item.frequency === 'daily') return `毎日 ${time}`
+  if (item.frequency === 'weekdays') return `月〜金 ${time}`
   if (item.frequency === 'weekly') return `毎週 ${WEEKDAYS[d.getDay()]}曜 ${time}`
+  if (item.frequency === 'month_end') return `毎月末 ${time}`
   return `毎月 ${d.getDate()}日 ${time}`
 }
 
@@ -1748,8 +1750,8 @@ function RecurringPostFormFields({
   onBodyChange: (v: string) => void
   mentions: MentionPayload[]
   onMentionsChange: (mentions: MentionPayload[]) => void
-  frequency: 'once' | 'daily' | 'weekly' | 'monthly'
-  onFrequencyChange: (v: 'once' | 'daily' | 'weekly' | 'monthly') => void
+  frequency: 'once' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'month_end'
+  onFrequencyChange: (v: 'once' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'month_end') => void
   date: string
   onDateChange: (v: string) => void
   time: string
@@ -1803,8 +1805,10 @@ function RecurringPostFormFields({
           >
             <option value="once">1回のみ</option>
             <option value="daily">毎日</option>
+            <option value="weekdays">月〜金</option>
             <option value="weekly">毎週</option>
             <option value="monthly">毎月</option>
+            <option value="month_end">月末</option>
           </select>
         </div>
         <div className="flex-1">
@@ -1826,7 +1830,7 @@ function RecurringPostFormFields({
         </div>
       </div>
       <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
-        「毎週」は初回日時の曜日、「毎月」は初回日時の日にちで繰り返します（該当日が存在しない月は月末に送信）。「1回のみ」は指定日時に1度だけ投稿し、以降は自動的に一時停止扱いになります。
+        「毎週」は初回日時の曜日、「毎月」は初回日時の日にちで繰り返します（該当日が存在しない月は月末に送信）。「月〜金」は初回日時を起点に土日を飛ばして翌営業日へ繰り返します（初回自体は土日を指定しても構いません）。「月末」は初回日時の日にちに関わらず、以降は毎月最終日に送信します。「1回のみ」は指定日時に1度だけ投稿し、以降は自動的に一時停止扱いになります。
       </div>
     </>
   )
@@ -1844,7 +1848,7 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
   const [displayName, setDisplayName] = useState('')
   const [emoji, setEmoji] = useState('📌')
   const [iconUrl, setIconUrl] = useState<string | null>(null)
-  const [frequency, setFrequency] = useState<'once' | 'daily' | 'weekly' | 'monthly'>('weekly')
+  const [frequency, setFrequency] = useState<'once' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'month_end'>('weekly')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [saving, setSaving] = useState(false)
@@ -2065,7 +2069,7 @@ function RecurringPostEditModal({
   const [displayName, setDisplayName] = useState(item.bot_display_name)
   const [emoji, setEmoji] = useState(item.bot_icon ?? '📌')
   const [iconUrl, setIconUrl] = useState<string | null>(item.bot_icon_url)
-  const [frequency, setFrequency] = useState<'once' | 'daily' | 'weekly' | 'monthly'>(item.frequency)
+  const [frequency, setFrequency] = useState<'once' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'month_end'>(item.frequency)
   const [date, setDate] = useState(`${initialAnchor.getFullYear()}-${pad2(initialAnchor.getMonth() + 1)}-${pad2(initialAnchor.getDate())}`)
   const [time, setTime] = useState(`${pad2(initialAnchor.getHours())}:${pad2(initialAnchor.getMinutes())}`)
   const [saving, setSaving] = useState(false)

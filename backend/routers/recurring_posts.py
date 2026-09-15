@@ -52,7 +52,7 @@ class CreateRecurringPostRequest(BaseModel):
     bot_display_name: str | None = Field(default=None, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
-    frequency: str = Field(pattern="^(once|daily|weekly|monthly)$")
+    frequency: str = Field(pattern="^(once|daily|weekdays|weekly|monthly|month_end)$")
     anchor_at: str
 
 
@@ -91,7 +91,7 @@ class UpdateRecurringPostRequest(BaseModel):
     bot_display_name: str | None = Field(default=None, min_length=1, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
-    frequency: str | None = Field(default=None, pattern="^(once|daily|weekly|monthly)$")
+    frequency: str | None = Field(default=None, pattern="^(once|daily|weekdays|weekly|monthly|month_end)$")
     anchor_at: str | None = None
     is_active: bool | None = None
 

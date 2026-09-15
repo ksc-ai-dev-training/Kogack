@@ -312,7 +312,7 @@ CREATE TABLE IF NOT EXISTS recurring_posts (
     bot_display_name  TEXT NOT NULL,
     bot_icon          TEXT DEFAULT '📌',
     bot_icon_url      TEXT,
-    frequency         TEXT NOT NULL CHECK (frequency IN ('once', 'daily', 'weekly', 'monthly')),
+    frequency         TEXT NOT NULL CHECK (frequency IN ('once', 'daily', 'weekdays', 'weekly', 'monthly', 'month_end')),
     anchor_at         TIMESTAMPTZ NOT NULL,
     next_run_at       TIMESTAMPTZ NOT NULL,
     is_active         BOOLEAN NOT NULL DEFAULT true,
@@ -325,6 +325,11 @@ CREATE INDEX IF NOT EXISTS idx_recurring_posts_dispatch ON recurring_posts (is_a
 ALTER TABLE recurring_posts ENABLE ROW LEVEL SECURITY;
 -- 定期投稿のメンション対応（上記コメント参照）を追加した際のbackfill
 ALTER TABLE recurring_posts ADD COLUMN IF NOT EXISTS mentions JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- 頻度に「月〜金」「月末」を追加した際のbackfill（2026-09-15、ユーザーからの明示的な要望）。
+-- 既存の制約名を明示的にDROPしてから同名でADDし直す（2026-09-09に確立したパターン。旧ADD文は残さない）
+ALTER TABLE recurring_posts DROP CONSTRAINT IF EXISTS recurring_posts_frequency_check;
+ALTER TABLE recurring_posts ADD CONSTRAINT recurring_posts_frequency_check
+    CHECK (frequency IN ('once', 'daily', 'weekdays', 'weekly', 'monthly', 'month_end'));
 
 -- T-21 trigger_rules（自動応答トリガー、F-38。05-1_詳細設計書_DB設計.html 3.16節）。F-35/F-36の
 -- 時刻ベースのディスパッチャとは異なり、A-11（メッセージ投稿）内で同期的に判定するイベント駆動方式
