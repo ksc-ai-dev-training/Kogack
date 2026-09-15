@@ -1088,12 +1088,20 @@ export default function MessageList({
     setEditingId(null)
     setEditEmojiAnchor(null)
   }
+  // バグ修正（ユーザーからの報告「たまにAIが二回応答するときがある」の調査で発見。Composer.tsxの
+  // send()と全く同じ原因・同じ対処。詳細はComposer.tsxのsendingRef直前のコメント参照）: Ctrl+Enter
+  // での保存を押しっぱなしにする（OSのキーリピート）と、この関数が短時間に連続で呼ばれ同じ編集内容が
+  // 重複送信されうる。savingEdit（state）だけでは同一tick内の連続呼び出しを防げないためrefで同期的に
+  // 再入を防ぐ
+  const savingEditRef = useRef(false)
   const saveEdit = async (m: Message) => {
+    if (savingEditRef.current) return
     const trimmed = editBody.trim()
     if (!trimmed) {
       toast('本文を入力してください', 'error')
       return
     }
+    savingEditRef.current = true
     setSavingEdit(true)
     try {
       const keptIds = new Set(editKeptAttachments.map((a) => a.id))
@@ -1111,6 +1119,7 @@ export default function MessageList({
     } catch (e) {
       toast(e instanceof Error ? e.message : '編集に失敗しました', 'error')
     } finally {
+      savingEditRef.current = false
       setSavingEdit(false)
     }
   }
@@ -1371,9 +1380,12 @@ export default function MessageList({
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
                       onKeyDown={(e) => {
-                        // Composer.tsxと同じ規約: Enter=改行、Ctrl+Enter（Macは⌘+Enter）=保存、Escape=取消
+                        // Composer.tsxと同じ規約: Enter=改行、Ctrl+Enter（Macは⌘+Enter）=保存、Escape=取消。
+                        // e.repeatでのキーリピード対策もComposer.tsxと同じ（ユーザーからの報告
+                        // 「たまにAIが二回応答する」の調査で発見した不具合への対処、詳細はsaveEdit直前のコメント参照）
                         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                           e.preventDefault()
+                          if (e.repeat) return
                           saveEdit(m)
                           return
                         }

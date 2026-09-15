@@ -559,9 +559,20 @@ export default function Composer({
     })
   }
 
+  // バグ調査（ユーザーからの報告「たまにAIが二回応答するときがある」）: 本番DBを実際に調査した結果、
+  // AI側の重複ではなく、同一の人間の発言そのものが数百ミリ秒の間に最大6回連続で投稿されており、
+  // それぞれが独立してAI応答を起動していたことが判明した（各AI応答は互いに独立した正常な処理で、
+  // 「原因」の発言が複数あっただけ）。原因はCtrl+Enter送信のkeydownハンドラ（下記handleKeyDown）に
+  // 連打・キーリピートへのガードが無かったこと——送信ボタン側は`disabled={sending}`で二重クリックを
+  // 防いでいたが、キーボード経由の送信にはこの保護が一切掛かっていなかった。sendingRef（useRef）で
+  // 同期的な再入防止を行う（sending stateはReactのバッチ更新の都合上、同一tick内の連続呼び出しでは
+  // 更新前の古い値を見てしまう可能性があるため、refで即座に一貫した値を参照できるようにする）
+  const sendingRef = useRef(false)
   const send = async () => {
+    if (sendingRef.current) return
     const text = body.trim()
     if (!text) return
+    sendingRef.current = true
     setSending(true)
     try {
       await onSend(text, activeMentionsIn(text), attachments)
@@ -571,6 +582,7 @@ export default function Composer({
     } catch (e) {
       toast(e instanceof Error ? e.message : '送信に失敗しました', 'error')
     } finally {
+      sendingRef.current = false
       setSending(false)
     }
   }
@@ -604,8 +616,14 @@ export default function Composer({
     // Enterキー＝改行・Ctrl+Enter（Macは⌘+Enter）＝送信（Slackと同じ挙動。ユーザーからの明示的な
     // 要望による変更、従来はEnter単体で即送信・Shift+Enterで改行だった）。Enter単体はここでは
     // 何もせず（preventDefaultしない）、textarea標準の改行動作にそのまま委ねる。
+    // バグ修正（ユーザーからの報告「たまにAIが二回応答するときがある」、実機データで原因を特定
+    // ——詳細はsend()直前のコメント参照）: e.repeatはOSのキーリピート（キーを押しっぱなしにした
+    // 際に発火し続けるkeydown）のときtrueになる。Ctrl+Enterを押しっぱなしにすると本来の1回の
+    // 送信意図に対してこのハンドラが何度も呼ばれてしまうため、repeat中は無視する（実際の二重送信
+    // 防止自体はsend()内のsendingRefが担うが、そもそも無駄な呼び出し自体を減らす）
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
+      if (e.repeat) return
       send()
       return
     }
