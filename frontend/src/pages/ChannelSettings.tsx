@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
@@ -15,7 +15,7 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { EmojiGridPopover } from '../components/MessageList'
-import { detectMentionQuery, type MentionCandidate } from '../components/Composer'
+import { detectMentionQuery, findMentionHighlights, type MentionCandidate } from '../components/Composer'
 import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
 import type {
   AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, MentionPayload, RecurringPost,
@@ -1873,7 +1873,51 @@ function useMentionAutocomplete(
     return false
   }
 
-  return { pickerOpen, filteredCandidates, activeIndex, handleBodyChange, selectCandidate, insertMentionTrigger, handleKeyDown }
+  // 入力中の本文中で確定済みメンション（人間・@channel・AI）を青くハイライトする（ユーザーからの
+  // 明示的な要望「メンション相手の名前に背景色が同じ感じで出ると嬉しい」）。Composer.tsxの
+  // findMentionHighlightsをそのまま再利用する（本文中の実際の文字位置を返すだけの純粋関数）
+  const highlightMatches = findMentionHighlights(body, mentions, channel?.ai_is_enabled ? channel.ai_persona_name : undefined)
+
+  return {
+    pickerOpen, filteredCandidates, activeIndex, handleBodyChange, selectCandidate, insertMentionTrigger,
+    handleKeyDown, highlightMatches,
+  }
+}
+
+// findMentionHighlightsが返す文字範囲から、透明textareaの背後に重ねるハイライト表示用の
+// ReactNode配列を組み立てる（Composer.tsxの同名ループをそのまま再現、RecurringPostFormFields・
+// TriggerRuleFormFieldsの両方から共有するため関数化した）
+function buildHighlightNodes(text: string, matches: { start: number; end: number }[]): ReactNode[] {
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  matches.forEach((m, i) => {
+    if (m.start < cursor) return
+    if (m.start > cursor) nodes.push(text.slice(cursor, m.start))
+    nodes.push(
+      <span key={i} className="rounded-[3px] bg-accent-200 text-accent-700">
+        {text.slice(m.start, m.end)}
+      </span>,
+    )
+    cursor = m.end
+  })
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
+// ハイライト用オーバーレイのscrollTopをtextareaの実際のscrollTopへ同期する（Composer.tsxが
+// カーソル位置ずれのバグ修正（2026-09-14）で確立した「onScrollイベントだけに頼らず、bodyが
+// 変わるたびにuseLayoutEffectで同期し直す」パターンをそのまま踏襲。定期投稿・トリガーの本文欄は
+// 行数固定（オートリサイズなし）のためComposer.tsxの高さ再計算ロジック自体は不要だが、ブラウザが
+// キー入力のたびにネイティブに行うキャレット追従スクロールがReactの再描画より先に起きる、という
+// 同じ根本原因は行数固定でも変わらず存在するため、同期の仕組み自体は必要）
+function useHighlightOverlaySync(
+  textareaRef: RefObject<HTMLTextAreaElement | null>,
+  overlayRef: RefObject<HTMLDivElement | null>,
+  body: string,
+) {
+  useLayoutEffect(() => {
+    if (overlayRef.current && textareaRef.current) overlayRef.current.scrollTop = textareaRef.current.scrollTop
+  }, [body, textareaRef, overlayRef])
 }
 
 // メンション候補ポップオーバー（Composer.tsxの候補一覧JSXと同じ見た目。@here分岐のみ対象外）
@@ -1962,6 +2006,8 @@ function RecurringPostFormFields({
 }) {
   const fmt = useBodyFormatting(body, onBodyChange)
   const mention = useMentionAutocomplete(channelId, body, onBodyChange, mentions, onMentionsChange, fmt.textareaRef)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  useHighlightOverlaySync(fmt.textareaRef, overlayRef, body)
   return (
     <>
       <div className="mb-3.5">
@@ -1983,23 +2029,41 @@ function RecurringPostFormFields({
             メンションは「下」（ユーザーからの明示的な要望「普通の会話の入力欄と同じ感じにしてほしい」）。
             上段＝本文の見た目を変える書式、下段＝本文に付随させるもの、という役割の違いを配置で示す。
             メンションも本文中に「@」を入力すると候補が開く通常の投稿欄と同じ挙動にした（ユーザーからの
-            明示的な要望「メンションを普通の会話と同じく＠にして。候補にAIと＠channelもいれて」） */}
+            明示的な要望「メンションを普通の会話と同じく＠にして。候補にAIと＠channelもいれて」）。
+            確定済みメンションを背景色でハイライトするのもComposer.tsxと同じ「透明textarea＋
+            背後オーバーレイ」方式（ユーザーからの明示的な要望「メンション相手の名前に背景色が
+            同じ感じで出ると嬉しい」）。オーバーレイの枠線は透明にして幅だけtextareaと揃え、
+            paddingフォントサイズ行間もtextareaと完全一致させる必要がある（1文字でもずれるとハイライト
+            位置が実際の文字位置とずれるため。Composer.tsx確立済みの制約と同じ） */}
         <div className="relative">
           <div className="mb-1.5 flex items-center gap-0.5">
             <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
           </div>
-          <textarea
-            ref={fmt.textareaRef}
-            value={body}
-            onChange={(e) => mention.handleBodyChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-            onKeyDown={(e) => {
-              if (!mention.handleKeyDown(e)) fmt.handleKeyDown(e)
-            }}
-            rows={3}
-            maxLength={4000}
-            placeholder="投稿する内容を入力（本文中に「@」でメンション候補が開きます。「@ペルソナ名」を含めるとチャンネルAIも応答します）"
-            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-          />
+          <div className="relative">
+            <div
+              ref={overlayRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words rounded-lg border border-transparent px-3 py-2 text-[13px] leading-relaxed text-ink [scrollbar-gutter:stable]"
+            >
+              {buildHighlightNodes(body, mention.highlightMatches)}
+              {'​'}
+            </div>
+            <textarea
+              ref={fmt.textareaRef}
+              value={body}
+              onChange={(e) => mention.handleBodyChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+              onKeyDown={(e) => {
+                if (!mention.handleKeyDown(e)) fmt.handleKeyDown(e)
+              }}
+              onScroll={(e) => {
+                if (overlayRef.current) overlayRef.current.scrollTop = e.currentTarget.scrollTop
+              }}
+              rows={3}
+              maxLength={4000}
+              placeholder="投稿する内容を入力（本文中に「@」でメンション候補が開きます。「@ペルソナ名」を含めるとチャンネルAIも応答します）"
+              className="relative w-full resize-none break-words rounded-lg border border-line-strong bg-transparent px-3 py-2 text-[13px] leading-relaxed text-transparent caret-ink outline-none placeholder:text-ink-subtle focus:border-accent-600 focus:ring-4 focus:ring-accent-50 [scrollbar-gutter:stable]"
+            />
+          </div>
           <div className="mt-1.5 flex items-center gap-0.5">
             <button
               type="button"
@@ -2425,6 +2489,8 @@ function TriggerRuleFormFields({
 }) {
   const fmt = useBodyFormatting(actionBody, onActionBodyChange)
   const mention = useMentionAutocomplete(channelId, actionBody, onActionBodyChange, mentions, onMentionsChange, fmt.textareaRef)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  useHighlightOverlaySync(fmt.textareaRef, overlayRef, actionBody)
   return (
     <>
       <div className="mb-3.5 flex gap-3">
@@ -2466,24 +2532,39 @@ function TriggerRuleFormFields({
         {/* Composer.tsx（通常の投稿欄）・RecurringPostFormFieldsと同じ配置: 書式ツールバーは
             入力欄の「上」、絵文字・メンションは「下」（ユーザーからの明示的な要望「普通の会話の
             入力欄と同じ感じにしてほしい」）。メンションも本文中に「@」を入力すると候補が開く
-            通常の投稿欄と同じ挙動にした（ユーザーからの明示的な要望「メンションを普通の会話と
-            同じく＠にして。候補にAIと＠channelもいれて」） */}
+            通常の投稿欄と同じ挙動にし（ユーザーからの明示的な要望「メンションを普通の会話と
+            同じく＠にして。候補にAIと＠channelもいれて」）、確定済みメンションの背景色ハイライトも
+            RecurringPostFormFieldsと同じComposer.tsx方式（透明textarea＋背後オーバーレイ）にした
+            （ユーザーからの明示的な要望「メンション相手の名前に背景色が同じ感じで出ると嬉しい」） */}
         <div className="relative">
           <div className="mb-1.5 flex items-center gap-0.5">
             <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
           </div>
-          <textarea
-            ref={fmt.textareaRef}
-            value={actionBody}
-            onChange={(e) => mention.handleBodyChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-            onKeyDown={(e) => {
-              if (!mention.handleKeyDown(e)) fmt.handleKeyDown(e)
-            }}
-            rows={3}
-            maxLength={4000}
-            placeholder="トリガーに一致したときに投稿する内容を入力（本文中に「@」でメンション候補が開きます。「@ペルソナ名」を含めるとチャンネルAIも応答します）"
-            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-          />
+          <div className="relative">
+            <div
+              ref={overlayRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words rounded-lg border border-transparent px-3 py-2 text-[13px] leading-relaxed text-ink [scrollbar-gutter:stable]"
+            >
+              {buildHighlightNodes(actionBody, mention.highlightMatches)}
+              {'​'}
+            </div>
+            <textarea
+              ref={fmt.textareaRef}
+              value={actionBody}
+              onChange={(e) => mention.handleBodyChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+              onKeyDown={(e) => {
+                if (!mention.handleKeyDown(e)) fmt.handleKeyDown(e)
+              }}
+              onScroll={(e) => {
+                if (overlayRef.current) overlayRef.current.scrollTop = e.currentTarget.scrollTop
+              }}
+              rows={3}
+              maxLength={4000}
+              placeholder="トリガーに一致したときに投稿する内容を入力（本文中に「@」でメンション候補が開きます。「@ペルソナ名」を含めるとチャンネルAIも応答します）"
+              className="relative w-full resize-none break-words rounded-lg border border-line-strong bg-transparent px-3 py-2 text-[13px] leading-relaxed text-transparent caret-ink outline-none placeholder:text-ink-subtle focus:border-accent-600 focus:ring-4 focus:ring-accent-50 [scrollbar-gutter:stable]"
+            />
+          </div>
           <div className="mt-1.5 flex items-center gap-0.5">
             <button
               type="button"

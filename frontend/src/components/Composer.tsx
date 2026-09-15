@@ -80,7 +80,7 @@ export function detectMentionQuery(text: string, cursor: number): { atIndex: num
 // 行わず、選択済みメンション（mentions state）のdisplay_name_snapshotとAIメンション
 // （aiPersonaNameとの文字列一致）をそのまま本文中から検索する。手で削除された分は
 // indexOfが見つからず自然にハイライト対象から外れる（activeMentionsInと同じ考え方）
-function findMentionHighlights(
+export function findMentionHighlights(
   text: string,
   mentions: MentionPayload[],
   aiPersonaName?: string,
