@@ -1,16 +1,24 @@
 # A-63〜A-66（詳細設計書 API設計、基本設計書5.19節 F-38 トリガーによる自動応答）。S-06「自動応答
 # トリガー」タブに対応。実際の判定・発言化はA-11（channels.pyのpost_message）から呼ばれる
 # services/trigger_matcher.pyが同期的に行う。このルーターはtrigger_rulesへのCRUDのみを担当する。
+# @メンションの構造化（T-07 message_blocks）はrecurring_posts.py（A-53/A-54）と同じ考え方で
+# MentionInputを受け取りmentions列（JSONB）へそのまま保持するだけにとどめ、参加者であることの
+# 検証（insert_mention_blocks）は作成時点ではなくトリガー発火のタイミング
+# （services/trigger_matcher.py）で行う（2026-09-15追加）。
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_channel_admin
 from database import get_pool
+from mentions import MentionInput
 
 router = APIRouter(prefix="/api/channels", tags=["trigger-rules"])
 
 
 def _out(row) -> dict:
+    mentions = row["mentions"]
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]),
@@ -18,6 +26,7 @@ def _out(row) -> dict:
         "trigger_value": row["trigger_value"],
         "action_type": row["action_type"],
         "action_body": row["action_body"],
+        "mentions": json.loads(mentions) if isinstance(mentions, str) else mentions,
         "bot_display_name": row["bot_display_name"],
         "bot_icon": row["bot_icon"],
         "bot_icon_url": row["bot_icon_url"],
@@ -39,6 +48,7 @@ class CreateTriggerRuleRequest(BaseModel):
     trigger_type: str = Field(pattern="^(keyword|emoji)$")
     trigger_value: str = Field(min_length=1, max_length=100)
     action_body: str = Field(min_length=1, max_length=4000)
+    mentions: list[MentionInput] = []
     bot_display_name: str | None = Field(default=None, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
@@ -53,12 +63,12 @@ async def create_trigger_rule(
     display_name = body.bot_display_name or "自動応答Bot"
     row = await get_pool().fetchrow(
         """INSERT INTO trigger_rules
-               (channel_id, created_by, trigger_type, trigger_value, action_body,
+               (channel_id, created_by, trigger_type, trigger_value, action_body, mentions,
                 bot_display_name, bot_icon, bot_icon_url)
-           VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '⚡'), $8)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, COALESCE($8, '⚡'), $9)
            RETURNING *""",
         channel_id, user.id, body.trigger_type, body.trigger_value, body.action_body,
-        display_name, body.bot_icon, body.bot_icon_url,
+        json.dumps([m.model_dump() for m in body.mentions]), display_name, body.bot_icon, body.bot_icon_url,
     )
     return _out(row)
 
@@ -67,6 +77,7 @@ class UpdateTriggerRuleRequest(BaseModel):
     trigger_type: str | None = Field(default=None, pattern="^(keyword|emoji)$")
     trigger_value: str | None = Field(default=None, min_length=1, max_length=100)
     action_body: str | None = Field(default=None, min_length=1, max_length=4000)
+    mentions: list[MentionInput] | None = None
     bot_display_name: str | None = Field(default=None, min_length=1, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
@@ -78,20 +89,24 @@ async def update_trigger_rule(
     channel_id: int, rule_id: int, body: UpdateTriggerRuleRequest,
     user: CurrentUser = Depends(require_channel_admin),
 ):
-    """A-65: 自動応答トリガーを更新（部分更新。is_activeのみ送ると一時停止/再開のトグルになる）"""
+    """A-65: 自動応答トリガーを更新（部分更新。is_activeのみ送ると一時停止/再開のトグルになる）。
+    mentionsは未指定なら既存値を維持、明示的に空配列を送ると全て解除する
+    （recurring_posts.py A-55と同じCOALESCE($jsonb, mentions)パターン、body.anchor_at同様の区別）"""
+    mentions_param = json.dumps([m.model_dump() for m in body.mentions]) if body.mentions is not None else None
     row = await get_pool().fetchrow(
         """UPDATE trigger_rules SET
                trigger_type = COALESCE($3, trigger_type),
                trigger_value = COALESCE($4, trigger_value),
                action_body = COALESCE($5, action_body),
-               bot_display_name = COALESCE($6, bot_display_name),
-               bot_icon = COALESCE($7, bot_icon),
-               bot_icon_url = COALESCE($8, bot_icon_url),
-               is_active = COALESCE($9, is_active),
-               updated_by = $10,
+               mentions = COALESCE($6::jsonb, mentions),
+               bot_display_name = COALESCE($7, bot_display_name),
+               bot_icon = COALESCE($8, bot_icon),
+               bot_icon_url = COALESCE($9, bot_icon_url),
+               is_active = COALESCE($10, is_active),
+               updated_by = $11,
                updated_at = now()
            WHERE id = $1 AND channel_id = $2 RETURNING *""",
-        rule_id, channel_id, body.trigger_type, body.trigger_value, body.action_body,
+        rule_id, channel_id, body.trigger_type, body.trigger_value, body.action_body, mentions_param,
         body.bot_display_name, body.bot_icon, body.bot_icon_url, body.is_active, user.id,
     )
     if row is None:

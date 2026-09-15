@@ -342,6 +342,14 @@ CREATE TABLE IF NOT EXISTS trigger_rules (
     trigger_value     TEXT NOT NULL,
     action_type       TEXT NOT NULL DEFAULT 'post_message' CHECK (action_type IN ('post_message')),
     action_body       TEXT NOT NULL,
+    -- mentions列（JSONB、recurring_posts.mentionsと同じMentionInput相当の配列）は2026-09-15、
+    -- ユーザーからの明示的な要望「定期投稿、自動トリガーのメッセージ本文を入力する欄にも...
+    -- メンションボタンなどを付けられますか」を受けて追加した。recurring_posts.mentions
+    -- （2026-09-15、同じくユーザーからの報告を受けて追加）と全く同じ考え方で、参加者であることの
+    -- 検証はここ（作成時点）ではなく発言化のタイミング（services/trigger_matcher.py）で行う
+    -- （F-38はA-11から同期的に発火するため、発言化＝トリガー判定と同時、というだけで考え方自体は
+    -- 予約系のF-35/F-36と同じ）。
+    mentions          JSONB NOT NULL DEFAULT '[]'::jsonb,
     bot_display_name  TEXT NOT NULL,
     bot_icon          TEXT DEFAULT '⚡',
     bot_icon_url      TEXT,
@@ -352,6 +360,8 @@ CREATE TABLE IF NOT EXISTS trigger_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_trigger_rules_channel_active ON trigger_rules (channel_id, is_active);
 ALTER TABLE trigger_rules ENABLE ROW LEVEL SECURITY;
+-- 自動応答トリガーのメンション対応（上記コメント参照）を追加した際のbackfill
+ALTER TABLE trigger_rules ADD COLUMN IF NOT EXISTS mentions JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- messages.recurring_post_id/trigger_rule_idは、参照先（T-19/T-21）が無い時期にF-43実装時点で
 -- 先に列だけ用意していたため、FK無しの列だった。既存テーブルへのFK追加はCREATE TABLE

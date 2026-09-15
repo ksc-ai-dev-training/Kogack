@@ -14,6 +14,8 @@ import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
+import { EmojiGridPopover } from '../components/MessageList'
+import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
 import type {
   AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, MentionPayload, RecurringPost,
   Skill, TriggerRule,
@@ -1663,7 +1665,100 @@ function defaultAnchor(): { date: string; time: string } {
 // リアルタイムのハイライト表示（透明textarea＋オーバーレイ方式）までは持たない簡易版（毎キー入力の
 // 「@」検出ではなく、ボタン押下で開く一覧から選ぶだけの方式。定期投稿の作成・編集は頻度の低い設定
 // 操作であり、Composer相当の入力体験を作り込むコストに見合わないと判断した）
-function RecurringMentionPicker({
+// 定期投稿・自動応答トリガーの本文入力欄に、通常のメッセージ入力欄（Composer.tsx）・発言編集
+// （MessageList.tsxのインライン編集）と同じ書式ボタン（太字・斜体・下線・取り消し線・コード・
+// 箇条書き）・絵文字ボタンを付ける（ユーザーからの明示的な要望「定期投稿、自動トリガーのメッセージ
+// 本文を入力する欄にも...記法のボタンや、絵文字ボタン、メンションボタンなどを付けられますか」、
+// 2026-09-15）。テキスト操作アルゴリズム自体はlib/textFormatting.ts（Composer.tsx・MessageList.tsxの
+// 発言編集で既に共有済み）をそのまま再利用し、ここで3つ目の呼び出し元として使う
+function useBodyFormatting(body: string, onBodyChange: (v: string) => void) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [emojiAnchor, setEmojiAnchor] = useState<DOMRect | null>(null)
+
+  const applySelectionEdit = (edit: (start: number, end: number) => ReturnType<typeof wrapSelectionText>) => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? body.length
+    const end = el.selectionEnd ?? body.length
+    const r = edit(start, end)
+    onBodyChange(r.body)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(r.selStart, r.selEnd)
+    })
+  }
+  const applyWrap = (prefix: string, suffix: string) =>
+    applySelectionEdit((start, end) => wrapSelectionText(body, start, end, prefix, suffix))
+  const applyCode = () => applySelectionEdit((start, end) => wrapCodeText(body, start, end))
+  const applyBulletList = () => applySelectionEdit((start, end) => insertBulletListText(body, start, end))
+  const insertEmoji = (emoji: string) => {
+    const el = textareaRef.current
+    const cursor = el?.selectionStart ?? body.length
+    onBodyChange(body.slice(0, cursor) + emoji + body.slice(cursor))
+    setEmojiAnchor(null)
+    requestAnimationFrame(() => {
+      const pos = cursor + emoji.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+  const toggleEmojiPicker = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // MessageList.tsxの発言編集と同じ理由でsetState updaterの外でrectを確定させる
+    // （e.currentTargetはイベント終了後にnullへ戻ることがあるため）
+    const rect = e.currentTarget.getBoundingClientRect()
+    setEmojiAnchor((v) => (v ? null : rect))
+  }
+  // 箇条書きの行でEnterを押すと次の行にも自動で「- 」を続ける（Composer.tsx・発言編集と同じ）
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
+      const r = continueBulletOnEnter(body, e.currentTarget.selectionStart)
+      if (r) {
+        e.preventDefault()
+        const el = e.currentTarget
+        onBodyChange(r.body)
+        requestAnimationFrame(() => {
+          el.focus()
+          el.setSelectionRange(r.selStart, r.selEnd)
+        })
+      }
+    }
+  }
+
+  return {
+    textareaRef, applyWrap, applyCode, applyBulletList, insertEmoji,
+    emojiAnchor, toggleEmojiPicker, closeEmojiPicker: () => setEmojiAnchor(null), handleKeyDown,
+  }
+}
+
+function FormatToolbarButtons({
+  onWrap, onCode, onBulletList,
+}: {
+  onWrap: (prefix: string, suffix: string) => void
+  onCode: () => void
+  onBulletList: () => void
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <button type="button" title="太字（**で囲みます）" onClick={() => onWrap('**', '**')} className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted">B</button>
+      <button type="button" title="斜体（_で囲みます）" onClick={() => onWrap('_', '_')} className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic text-ink-subtle hover:bg-surface-muted">I</button>
+      <button type="button" title="下線（++で囲みます）" onClick={() => onWrap('++', '++')} className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle underline hover:bg-surface-muted">U</button>
+      <button type="button" title="取り消し線（~~で囲みます）" onClick={() => onWrap('~~', '~~')} className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted">S</button>
+      <button type="button" title="コード（複数行を選択するとコードブロックになります）" onClick={onCode} className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted">{'</>'}</button>
+      <button type="button" title="箇条書き（行頭に「- 」を付けます）" onClick={onBulletList} className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted">
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <circle cx="4" cy="6" r="1.3" fill="currentColor" />
+          <circle cx="4" cy="10" r="1.3" fill="currentColor" />
+          <circle cx="4" cy="14" r="1.3" fill="currentColor" />
+          <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+// 定期投稿・自動応答トリガーの本文へ人間宛て@メンションを追加するボタン（両タブで共有。旧称
+// RecurringMentionPickerを2026-09-15にトリガー側でも使うよう一般化して改称した）
+function ChannelMentionPicker({
   channelId, mentions, onMentionsChange, onInsertText,
 }: {
   channelId: string
@@ -1757,6 +1852,7 @@ function RecurringPostFormFields({
   time: string
   onTimeChange: (v: string) => void
 }) {
+  const fmt = useBodyFormatting(body, onBodyChange)
   return (
     <>
       <div className="mb-3.5">
@@ -1773,9 +1869,20 @@ function RecurringPostFormFields({
       <IconInput emoji={emoji} onEmojiChange={onEmojiChange} iconUrl={iconUrl} onIconUrlChange={onIconUrlChange} />
 
       <div className="mb-3.5">
-        <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
-          <RecurringMentionPicker
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
+        <div className="mb-1.5 flex items-center gap-2">
+          <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
+          <div className="h-4 w-px bg-line" />
+          <button
+            type="button"
+            title="絵文字を挿入"
+            onClick={fmt.toggleEmojiPicker}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          >
+            😀
+          </button>
+          <div className="h-4 w-px bg-line" />
+          <ChannelMentionPicker
             channelId={channelId}
             mentions={mentions}
             onMentionsChange={onMentionsChange}
@@ -1786,13 +1893,18 @@ function RecurringPostFormFields({
           />
         </div>
         <textarea
+          ref={fmt.textareaRef}
           value={body}
           onChange={(e) => onBodyChange(e.target.value)}
+          onKeyDown={fmt.handleKeyDown}
           rows={3}
           maxLength={4000}
           placeholder="投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じメンションになります。ただしAIへの応答は発生しません）"
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
+        {fmt.emojiAnchor && (
+          <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
+        )}
       </div>
 
       <div className="mb-1 flex gap-3">
@@ -2159,19 +2271,24 @@ const TRIGGER_TYPE_LABEL: Record<TriggerRule['trigger_type'], string> = { keywor
 
 // 自動応答トリガーの入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目）
 function TriggerRuleFormFields({
+  channelId,
   triggerType, onTriggerTypeChange,
   triggerValue, onTriggerValueChange,
   actionBody, onActionBodyChange,
+  mentions, onMentionsChange,
   displayName, onDisplayNameChange,
   emoji, onEmojiChange,
   iconUrl, onIconUrlChange,
 }: {
+  channelId: string
   triggerType: 'keyword' | 'emoji'
   onTriggerTypeChange: (v: 'keyword' | 'emoji') => void
   triggerValue: string
   onTriggerValueChange: (v: string) => void
   actionBody: string
   onActionBodyChange: (v: string) => void
+  mentions: MentionPayload[]
+  onMentionsChange: (mentions: MentionPayload[]) => void
   displayName: string
   onDisplayNameChange: (v: string) => void
   emoji: string
@@ -2179,6 +2296,7 @@ function TriggerRuleFormFields({
   iconUrl: string | null
   onIconUrlChange: (v: string | null) => void
 }) {
+  const fmt = useBodyFormatting(actionBody, onActionBodyChange)
   return (
     <>
       <div className="mb-3.5 flex gap-3">
@@ -2217,14 +2335,41 @@ function TriggerRuleFormFields({
 
       <div className="mb-3.5">
         <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">投稿する本文</label>
+        <div className="mb-1.5 flex items-center gap-2">
+          <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
+          <div className="h-4 w-px bg-line" />
+          <button
+            type="button"
+            title="絵文字を挿入"
+            onClick={fmt.toggleEmojiPicker}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          >
+            😀
+          </button>
+          <div className="h-4 w-px bg-line" />
+          <ChannelMentionPicker
+            channelId={channelId}
+            mentions={mentions}
+            onMentionsChange={onMentionsChange}
+            onInsertText={(text) => {
+              const needsSpace = actionBody.length > 0 && !/\s$/.test(actionBody)
+              onActionBodyChange(actionBody + (needsSpace ? ' ' : '') + text)
+            }}
+          />
+        </div>
         <textarea
+          ref={fmt.textareaRef}
           value={actionBody}
           onChange={(e) => onActionBodyChange(e.target.value)}
+          onKeyDown={fmt.handleKeyDown}
           rows={3}
           maxLength={4000}
-          placeholder="トリガーに一致したときに投稿する内容を入力"
+          placeholder="トリガーに一致したときに投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じメンションになります。ただしAIへの応答は発生しません）"
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
+        {fmt.emojiAnchor && (
+          <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
+        )}
       </div>
 
       <div className="mb-3.5">
@@ -2241,7 +2386,7 @@ function TriggerRuleFormFields({
       <IconInput emoji={emoji} onEmojiChange={onEmojiChange} iconUrl={iconUrl} onIconUrlChange={onIconUrlChange} />
 
       <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
-        人間の発言のみが判定対象で、BOT自身の投稿が別のトリガーを呼び出すことはありません。チャンネル本体の投稿のみが対象です（スレッド内の発言は対象外）。
+        人間の発言のみが判定対象で、BOT自身の投稿が別のトリガーを呼び出すことはありません。チャンネル本体の投稿のみが対象です（スレッド内の発言は対象外）。メンションを含めるとその相手への通知は届きますが、チャンネルAIへの応答は発生しません。
       </div>
     </>
   )
@@ -2257,6 +2402,7 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
   const [triggerType, setTriggerType] = useState<'keyword' | 'emoji'>('keyword')
   const [triggerValue, setTriggerValue] = useState('')
   const [actionBody, setActionBody] = useState('')
+  const [mentions, setMentions] = useState<MentionPayload[]>([])
   const [displayName, setDisplayName] = useState('')
   const [emoji, setEmoji] = useState('⚡')
   const [iconUrl, setIconUrl] = useState<string | null>(null)
@@ -2266,6 +2412,7 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
     setTriggerType('keyword')
     setTriggerValue('')
     setActionBody('')
+    setMentions([])
     setDisplayName('')
     setEmoji('⚡')
     setIconUrl(null)
@@ -2287,12 +2434,16 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
     }
     setSaving(true)
     try {
+      const text = actionBody.trim()
       await apiFetch(`/api/channels/${channelId}/trigger-rules`, {
         method: 'POST',
         body: JSON.stringify({
           trigger_type: triggerType,
           trigger_value: triggerValue.trim(),
-          action_body: actionBody.trim(),
+          action_body: text,
+          // 本文から手動で消されたメンションは除外する（recurring_posts.tsxのRecurringPostsTab.submit
+          // と同じ整合性チェック）
+          mentions: mentions.filter((m) => text.includes(`@${m.display_name_snapshot}`)),
           bot_display_name: displayName.trim() || null,
           bot_icon: iconUrl ? null : emoji.trim() || null,
           bot_icon_url: iconUrl,
@@ -2405,12 +2556,15 @@ function TriggerRulesTab({ channelId }: { channelId: string }) {
         <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しいトリガーを追加</div>
 
         <TriggerRuleFormFields
+          channelId={channelId}
           triggerType={triggerType}
           onTriggerTypeChange={setTriggerType}
           triggerValue={triggerValue}
           onTriggerValueChange={setTriggerValue}
           actionBody={actionBody}
           onActionBodyChange={setActionBody}
+          mentions={mentions}
+          onMentionsChange={setMentions}
           displayName={displayName}
           onDisplayNameChange={setDisplayName}
           emoji={emoji}
@@ -2458,6 +2612,7 @@ function TriggerRuleEditModal({
   const [triggerType, setTriggerType] = useState(item.trigger_type)
   const [triggerValue, setTriggerValue] = useState(item.trigger_value)
   const [actionBody, setActionBody] = useState(item.action_body)
+  const [mentions, setMentions] = useState<MentionPayload[]>(item.mentions)
   const [displayName, setDisplayName] = useState(item.bot_display_name)
   const [emoji, setEmoji] = useState(item.bot_icon ?? '⚡')
   const [iconUrl, setIconUrl] = useState<string | null>(item.bot_icon_url)
@@ -2474,12 +2629,14 @@ function TriggerRuleEditModal({
     }
     setSaving(true)
     try {
+      const text = actionBody.trim()
       await apiFetch(`/api/channels/${channelId}/trigger-rules/${item.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           trigger_type: triggerType,
           trigger_value: triggerValue.trim(),
-          action_body: actionBody.trim(),
+          action_body: text,
+          mentions: mentions.filter((m) => text.includes(`@${m.display_name_snapshot}`)),
           bot_display_name: displayName.trim() || null,
           bot_icon: iconUrl ? null : emoji.trim() || null,
           bot_icon_url: iconUrl,
@@ -2507,12 +2664,15 @@ function TriggerRuleEditModal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-[22px] pb-1 pt-4.5">
           <TriggerRuleFormFields
+            channelId={channelId}
             triggerType={triggerType}
             onTriggerTypeChange={setTriggerType}
             triggerValue={triggerValue}
             onTriggerValueChange={setTriggerValue}
             actionBody={actionBody}
             onActionBodyChange={setActionBody}
+            mentions={mentions}
+            onMentionsChange={setMentions}
             displayName={displayName}
             onDisplayNameChange={setDisplayName}
             emoji={emoji}

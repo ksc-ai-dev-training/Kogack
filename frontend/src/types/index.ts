@@ -289,6 +289,10 @@ export interface TriggerRule {
   trigger_value: string
   action_type: 'post_message'
   action_body: string
+  /** @メンションの構造化（F-41と同じMentionPayload）。2026-09-15追加、ユーザーからの明示的な要望
+   * 「定期投稿、自動トリガーのメッセージ本文を入力する欄にも...メンションボタンなどを付けられますか」
+   * を受けてrecurring_posts.mentionsと同じ考え方で追加した */
+  mentions: MentionPayload[]
   bot_display_name: string
   bot_icon: string | null
   bot_icon_url: string | null
