@@ -1899,7 +1899,7 @@ function RecurringPostFormFields({
           onKeyDown={fmt.handleKeyDown}
           rows={3}
           maxLength={4000}
-          placeholder="投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じメンションになります。ただしAIへの応答は発生しません）"
+          placeholder="投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
         {fmt.emojiAnchor && (
@@ -2364,7 +2364,7 @@ function TriggerRuleFormFields({
           onKeyDown={fmt.handleKeyDown}
           rows={3}
           maxLength={4000}
-          placeholder="トリガーに一致したときに投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じメンションになります。ただしAIへの応答は発生しません）"
+          placeholder="トリガーに一致したときに投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
         {fmt.emojiAnchor && (
@@ -2386,7 +2386,7 @@ function TriggerRuleFormFields({
       <IconInput emoji={emoji} onEmojiChange={onEmojiChange} iconUrl={iconUrl} onIconUrlChange={onIconUrlChange} />
 
       <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
-        人間の発言のみが判定対象で、BOT自身の投稿が別のトリガーを呼び出すことはありません。チャンネル本体の投稿のみが対象です（スレッド内の発言は対象外）。メンションを含めるとその相手への通知は届きますが、チャンネルAIへの応答は発生しません。
+        人間の発言のみが判定対象で、BOT自身の投稿が別のトリガーを呼び出すことはありません。チャンネル本体の投稿のみが対象です（スレッド内の発言は対象外）。メンションを含めるとその相手への通知が届き、本文に「@{'{'}ペルソナ名{'}'}」を含めるとチャンネルAIも通常のメンションと同じように応答します。
       </div>
     </>
   )

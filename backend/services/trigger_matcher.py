@@ -10,13 +10,18 @@
 # trigger_rules.mentionsをinsert_mention_blocksへ渡し、実際に発言化するこのタイミングで
 # 参加者チェック込みでT-07へ反映する（routers/trigger_rules.pyのコメント参照）。BOT発言
 # （F-36/F-38/F-43共通の枠組み）はsender_type='human'の投稿のみをAIエージェント起動の対象とする
-# 一貫原則にそのまま従うため、ai_agent.maybe_triggerはここでは呼ばない（F-36と異なり、ユーザーから
-# 「トリガーのBOT発言にAIを反応させたい」という要望は無く、今回追加したのは人間宛てメンション
-# 通知のみ）。
+# 一貫原則を踏まえ、**チャンネルAIへの@メンション応答（ai_agent.maybe_trigger）のみ、
+# 2026-09-15にユーザーからの明示的な要望「トリガーにも反応するようにしてください」を受けて
+# F-36と同じ例外にした**（force_mention=Trueで呼ぶ。詳細はai_agent.maybe_triggerのdocstring参照。
+# トリガーの書き込み経路はS-06管理画面のみで、AIの応答自体が新たなトリガー発火を生むことは
+# 無いため、この例外が連鎖起動を生む経路にはならない）。F-38自動応答トリガー自体（このファイル、
+# キーワード/絵文字の部分一致判定）は引き続きsender_type='human'の投稿のみを対象とし、BOT発言が
+# 別のトリガーを呼び出すことは無い（無限ループ防止、変更なし）。
 import json
 
 from database import get_pool
 from mentions import MentionInput, insert_mention_blocks
+from services import ai_agent
 
 
 def _matches(rule_row, body: str) -> bool:
@@ -53,3 +58,7 @@ async def maybe_trigger(channel_id: int, body: str) -> None:
                     conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
                     channel_id=channel_id,
                 )
+        # トランザクションのコミット後に呼ぶ（_dispatch_recurring_postsと同じ順序。ai_agent側は
+        # 自身のasyncio.create_taskでAI応答生成を非同期起動するfire-and-forgetのため、この呼び出し
+        # 自体はすぐ返り判定ループをブロックしない）
+        await ai_agent.maybe_trigger(channel_id, rule["action_body"], rule["created_by"], force_mention=True)
