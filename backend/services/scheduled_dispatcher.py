@@ -16,9 +16,12 @@
 # 直ちに送信する（欠落回をスキップしない。F-35と同じ考え方、基本設計書5.16節）。@メンションの構造化
 # （T-07）はF-35と同じ考え方でrecurring_posts.mentionsをinsert_mention_blocksへ渡し、発言化する
 # このタイミングで参加者チェック込みでT-07へ反映する（2026-09-15追加。routers/recurring_posts.pyの
-# コメント参照）。BOT発言（F-36/F-38/F-43共通の枠組み）はsender_type='human'の投稿のみをAI
-# エージェント起動の対象とする一貫原則（連鎖起動防止）にそのまま従うため、@メンションを含んでいても
-# AIエージェント・自動応答トリガー（F-38）は起動しない（人間宛てのメンション通知のみが対象）。
+# コメント参照）。BOT発言（F-36/F-38/F-43共通の枠組み）はsender_type='human'の投稿のみを自動応答
+# トリガー（F-38）起動の対象とする一貫原則（連鎖起動防止）にそのまま従うため、trigger_matcherは
+# 定期投稿からは呼ばない。**ただしチャンネルAIへの@メンション応答（ai_agent.maybe_trigger）のみ、
+# 2026-09-15にユーザーからの明示的な要望を受けて例外にした**（force_mention=Trueで呼ぶ。詳細は
+# ai_agent.maybe_triggerのdocstring参照。定期投稿の書き込み経路はS-06管理画面のみで、AIの応答自体が
+# 新たな定期投稿を生成することは無いため、この例外が連鎖起動を生む経路にはならない）。
 import asyncio
 import calendar
 import json
@@ -135,7 +138,7 @@ async def _dispatch_due_messages() -> None:
 async def _dispatch_recurring_posts() -> None:
     pool = get_pool()
     rows = await pool.fetch(
-        """SELECT id, channel_id, body, mentions, bot_display_name, bot_icon, bot_icon_url,
+        """SELECT id, channel_id, created_by, body, mentions, bot_display_name, bot_icon, bot_icon_url,
                   frequency, anchor_at, next_run_at
            FROM recurring_posts WHERE is_active = true AND next_run_at <= now()"""
     )
@@ -194,6 +197,16 @@ async def _dispatch_recurring_posts() -> None:
                     conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
                     channel_id=row["channel_id"],
                 )
+        # 追加（2026-09-15、ユーザーからの明示的な要望「定期投稿でAIをメンションしても
+        # AIがいつも通り反応するようにしてほしい」）: 定期投稿の本文がチャンネルAIへの
+        # @メンションを含む場合のみ、ai_agent.maybe_triggerをforce_mention=Trueで呼ぶ
+        # （このファイル冒頭コメント参照。「BOT投稿はAIエージェントを起動しない」という
+        # 一貫原則の中で、この1点だけを例外にした設計判断とその理由は ai_agent.maybe_trigger
+        # のdocstringに集約している）。trigger_matcher（F-38自動応答トリガー）は今回の
+        # 要望の対象外のため引き続き呼ばない。
+        await ai_agent.maybe_trigger(
+            row["channel_id"], row["body"], row["created_by"], force_mention=True
+        )
 
 
 async def _run_loop() -> None:

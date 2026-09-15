@@ -570,27 +570,44 @@ def _rows_to_chat_messages(rows, names: dict[int, str]) -> list[dict]:
     return messages
 
 
-async def maybe_trigger(channel_id: int, body: str, requested_by: int, thread_id: int | None = None) -> None:
-    """A-11・A-14（thread_id指定時）から呼ばれる。条件を満たせば非同期タスクとしてAI応答生成を
-    起動する（fire-and-forget、REQ-N-05）。OPENAI_API_KEY未設定・AI無効のいずれかであれば何もしない。
+async def maybe_trigger(
+    channel_id: int, body: str, requested_by: int, thread_id: int | None = None, force_mention: bool = False,
+) -> None:
+    """A-11・A-14（thread_id指定時）・services/scheduled_dispatcher.py（定期投稿、force_mention=True）
+    から呼ばれる。条件を満たせば非同期タスクとしてAI応答生成を起動する（fire-and-forget、
+    REQ-N-05）。OPENAI_API_KEY未設定・AI無効のいずれかであれば何もしない。
     reaction_mode='mention_only'（既定）ではメンション無しの場合も何もしない。'proactive'（F-15）では
     メンション判定自体をスキップし、人間の発言であれば常に起動する（04_基本設計書.html 8.1節の
     設計判断どおり、追加のLLM呼び出しによる関連性判定は行わない）。
-    thread_id指定時（スレッド返信、ユーザーからの明示的な要望で対応）はreaction_modeに関わらず
-    常に明示的なメンションを要求する（proactiveをスレッド内の人間同士のやり取りにまで広げると、
-    毎回AIが割り込んでくる形になり要望の範囲を超えるため。「呼びかけたら答える」という
-    最小限の対応にとどめた。基本設計書8.1節に設計判断として追記）。
+    thread_id指定時（スレッド返信、ユーザーからの明示的な要望で対応）・force_mention=True指定時
+    （定期投稿、2026-09-15にユーザーからの明示的な要望で対応。理由は下記docstring末尾参照）は
+    reaction_modeに関わらず常に明示的なメンションを要求する（proactiveをスレッド内の人間同士の
+    やり取りにまで広げると、毎回AIが割り込んでくる形になり要望の範囲を超えるため。「呼びかけたら
+    答える」という最小限の対応にとどめた。基本設計書8.1節に設計判断として追記）。
     メンションされた本文が要約依頼に見える場合（_looks_like_summarize_request）は通常の応答生成
     ではなく要約ボタン（A-15）と同じ処理を起動する（2026-09-14、ユーザーからの明示的な要望）。
     さらに本文に「今月分」「直近10日間分」等の対象期間指定があれば絞り込む
-    （_parse_summary_range_from_text、2026-09-14、ユーザーからの明示的な要望）。"""
+    （_parse_summary_range_from_text、2026-09-14、ユーザーからの明示的な要望）。
+    **force_mention（2026-09-15追加）**: 定期投稿（F-36、sender_type='bot'）は「BOT投稿は
+    @メンションでAIエージェントを起動しない」という既存の一貫原則（自動応答トリガーF-38との
+    連鎖起動を防ぐための原則、モジュール冒頭コメント参照）の対象だったが、ユーザーから
+    「定期投稿でAIをメンションしてもAIがいつも通り反応するようにしてほしい」との明示的な要望を
+    受け、この1点（AIエージェント応答のみ）に限って例外にした。定期投稿の本文は管理者が事前に
+    書いた固定文であり、AI自身の応答やF-38の自動応答トリガーが新たな定期投稿を作り出すことは
+    無い（recurring_postsへの書き込み経路はS-06の管理画面のみ）ため、この例外自体が連鎖起動を
+    生む経路にはならない。F-38自動応答トリガー（trigger_matcher）は今回のユーザーからの要望の
+    対象外のため、定期投稿からは引き続き呼ばない（キーワードの偶然一致で予期しないBOT発言が
+    繰り返し発生するリスクを避けるため、連鎖起動防止の原則をそちらでは維持する）。reaction_mode
+    に関わらずforce_mention=Trueで常にメンション必須にしているのも、proactive設定のチャンネルで
+    定期投稿のたびに（本来意図していない）AI応答が毎回付いてしまう驚きを避けるため（スレッド返信の
+    設計判断と同じ考え方）。"""
     if not ai_client.is_configured():
         return
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         return
     persona_name = settings["persona_name"] or "Kogack AI"
-    requires_mention = thread_id is not None or settings["reaction_mode"] != "proactive"
+    requires_mention = thread_id is not None or force_mention or settings["reaction_mode"] != "proactive"
     if requires_mention and not detect_mention(body, persona_name):
         return
     if _looks_like_summarize_request(body, persona_name):
