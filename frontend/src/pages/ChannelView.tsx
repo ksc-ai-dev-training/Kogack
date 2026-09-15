@@ -12,6 +12,7 @@ import ThreadPanel from '../components/ThreadPanel'
 import MembersModal from '../components/MembersModal'
 import ChannelNotifButton from '../components/ChannelNotifButton'
 import SummarizeRangeButton, { type SummaryRange } from '../components/SummarizeRangeButton'
+import HeaderSearchBar from '../components/HeaderSearchBar'
 import { useToast } from '../components/Toast'
 import type { AttachmentPayload, ChannelNotifMode, MentionPayload } from '../types'
 
@@ -237,6 +238,7 @@ export default function ChannelView() {
               {channel.topic}
             </span>
           )}
+          <HeaderSearchBar currentChannelName={channel?.name} currentChannelId={channelId} />
           {channel && (
             <button
               type="button"
