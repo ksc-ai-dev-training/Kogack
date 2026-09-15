@@ -1870,9 +1870,23 @@ function RecurringPostFormFields({
 
       <div className="mb-3.5">
         <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
-        <div className="mb-1.5 flex items-center gap-2">
+        {/* Composer.tsx（通常の投稿欄）と同じ配置: 書式ツールバーは入力欄の「上」、絵文字・
+            メンションは「下」（ユーザーからの明示的な要望「普通の会話の入力欄と同じ感じにしてほしい」）。
+            上段＝本文の見た目を変える書式、下段＝本文に付随させるもの、という役割の違いを配置で示す */}
+        <div className="mb-1.5 flex items-center gap-0.5">
           <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
-          <div className="h-4 w-px bg-line" />
+        </div>
+        <textarea
+          ref={fmt.textareaRef}
+          value={body}
+          onChange={(e) => onBodyChange(e.target.value)}
+          onKeyDown={fmt.handleKeyDown}
+          rows={3}
+          maxLength={4000}
+          placeholder="投稿する内容を入力（下の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+        <div className="mt-1.5 flex items-center gap-0.5">
           <button
             type="button"
             title="絵文字を挿入"
@@ -1881,7 +1895,6 @@ function RecurringPostFormFields({
           >
             😀
           </button>
-          <div className="h-4 w-px bg-line" />
           <ChannelMentionPicker
             channelId={channelId}
             mentions={mentions}
@@ -1892,16 +1905,6 @@ function RecurringPostFormFields({
             }}
           />
         </div>
-        <textarea
-          ref={fmt.textareaRef}
-          value={body}
-          onChange={(e) => onBodyChange(e.target.value)}
-          onKeyDown={fmt.handleKeyDown}
-          rows={3}
-          maxLength={4000}
-          placeholder="投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
         {fmt.emojiAnchor && (
           <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
         )}
@@ -2335,9 +2338,23 @@ function TriggerRuleFormFields({
 
       <div className="mb-3.5">
         <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">投稿する本文</label>
-        <div className="mb-1.5 flex items-center gap-2">
+        {/* Composer.tsx（通常の投稿欄）・RecurringPostFormFieldsと同じ配置: 書式ツールバーは
+            入力欄の「上」、絵文字・メンションは「下」（ユーザーからの明示的な要望「普通の会話の
+            入力欄と同じ感じにしてほしい」） */}
+        <div className="mb-1.5 flex items-center gap-0.5">
           <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
-          <div className="h-4 w-px bg-line" />
+        </div>
+        <textarea
+          ref={fmt.textareaRef}
+          value={actionBody}
+          onChange={(e) => onActionBodyChange(e.target.value)}
+          onKeyDown={fmt.handleKeyDown}
+          rows={3}
+          maxLength={4000}
+          placeholder="トリガーに一致したときに投稿する内容を入力（下の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
+          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+        <div className="mt-1.5 flex items-center gap-0.5">
           <button
             type="button"
             title="絵文字を挿入"
@@ -2346,7 +2363,6 @@ function TriggerRuleFormFields({
           >
             😀
           </button>
-          <div className="h-4 w-px bg-line" />
           <ChannelMentionPicker
             channelId={channelId}
             mentions={mentions}
@@ -2357,16 +2373,6 @@ function TriggerRuleFormFields({
             }}
           />
         </div>
-        <textarea
-          ref={fmt.textareaRef}
-          value={actionBody}
-          onChange={(e) => onActionBodyChange(e.target.value)}
-          onKeyDown={fmt.handleKeyDown}
-          rows={3}
-          maxLength={4000}
-          placeholder="トリガーに一致したときに投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
         {fmt.emojiAnchor && (
           <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
         )}
