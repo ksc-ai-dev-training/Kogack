@@ -83,6 +83,12 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   // 自動対応範囲・定期投稿・自動応答トリガー）を実装済み
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
+  // サイドバー常時検索欄（ユーザーからの明示的な要望「Slackのように、画面上部に常に検索欄があり、
+  // 開いているチャンネルの名前がin:チャンネル名のところにデフォルト入力されてると嬉しい」）。
+  // useMatchは既定で完全一致のため、settingsMatch（/channels/:channelId/settings）には
+  // 一致せずチャンネル会話画面（/channels/:channelId）のときだけ一致する
+  const channelMatch = useMatch('/channels/:channelId')
+  const currentChannel = joined.find((c) => c.id === channelMatch?.params.channelId)
   const [searchParams] = useSearchParams()
   const settingsTab = searchParams.get('tab') ?? 'admin'
   const adminTab = searchParams.get('tab') ?? 'users'
@@ -135,14 +141,9 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               setMode={setNotifMode}
             />
           )}
-          <GuardedNavLink
-            to="/search"
-            title="横断検索"
-            className="rounded p-1.5 text-ink-subtle hover:bg-surface-muted hover:text-ink-muted"
-          >
-            🔍
-          </GuardedNavLink>
         </div>
+
+        <SearchBar currentChannelName={currentChannel?.name} currentChannelId={currentChannel?.id} />
 
         {settingsMatch ? (
           <div className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3.5">
@@ -464,6 +465,60 @@ export default function Layout({ me, children }: { me: Me; children: React.React
       {dmModalOpen && <DmPickerModal onClose={() => setDmModalOpen(false)} />}
       {profileModalOpen && <ProfileEditModal me={me} onClose={() => setProfileModalOpen(false)} />}
       {scheduledModalOpen && <ScheduledMessagesModal onClose={() => setScheduledModalOpen(false)} />}
+    </div>
+  )
+}
+
+// サイドバー上部の常時検索欄（Slackの常設検索バーと同じ考え方、ユーザーからの明示的な要望）。
+// 従来はクリックで/searchへ遷移するだけの🔍アイコンだったが、これを常時表示の入力欄に変えた
+// （着手前にユーザーへ「サイドバーのアイコンを入力欄にする」「画面全体の最上部にSlack風の
+// 幅一杯のバーを新設する」の2案を提示し、既存レイアウトへの影響が小さい前者を選択）。
+// フォーカスした瞬間に実際の検索ページ（S-05 SearchView.tsx）へ遷移する（このサイドバー内に
+// 検索結果表示・複雑なモディファイア解析ロジックを複製しない、既存の/searchページをそのまま
+// 使い回す設計）。チャンネル会話画面を開いた状態でフォーカスした場合は、そのチャンネルを
+// in:チャンネル名として遷移先URLへ含める（ユーザーからの明示的な要望「開いているチャンネルの
+// 名前がin:チャンネル名のところにデフォルト入力されてると嬉しい」）。SearchView.tsx側は
+// 既存のcomposeInputText/composeResolved（in・in_labelクエリパラメータからの状態復元、
+// 2026-08-31 F-42実装）がそのままこの遷移元のURLも解釈してくれるため、SearchView.tsx自体の
+// 変更は不要だった。実際の入力欄はSearchView.tsx側のもの（autoFocus付き）に任せるため、
+// このサイドバーの欄はフォーカスされた時点で即座にblurし、二重に文字入力できる状態を作らない
+function SearchBar({
+  currentChannelName, currentChannelId,
+}: {
+  currentChannelName?: string
+  currentChannelId?: string
+}) {
+  const navigate = useNavigate()
+  const guardNavigation = useUnsavedChangesGuard()
+
+  const openSearch = async (e: React.FocusEvent<HTMLInputElement> | React.MouseEvent<HTMLInputElement>) => {
+    e.currentTarget.blur()
+    if (!(await guardNavigation())) return
+    const params = new URLSearchParams()
+    if (currentChannelId && currentChannelName) {
+      params.set('in', currentChannelId)
+      params.set('in_label', currentChannelName)
+    }
+    const qs = params.toString()
+    navigate(qs ? `/search?${qs}` : '/search')
+  }
+
+  return (
+    <div className="flex-none border-b border-line bg-surface px-3 py-2">
+      <div className="relative">
+        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[13px] text-ink-subtle">
+          🔍
+        </span>
+        <input
+          type="text"
+          readOnly
+          onFocus={openSearch}
+          onClick={openSearch}
+          placeholder={currentChannelName ? `#${currentChannelName} を検索` : '検索'}
+          title="横断検索"
+          className="w-full cursor-pointer rounded-md border border-line-strong bg-surface-subtle py-1.5 pl-7 pr-2.5 text-[12.5px] text-ink-muted outline-none placeholder:text-ink-subtle hover:border-accent-600 focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        />
+      </div>
     </div>
   )
 }
