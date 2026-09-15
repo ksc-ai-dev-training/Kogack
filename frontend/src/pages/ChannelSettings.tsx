@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
@@ -15,6 +15,7 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { EmojiGridPopover } from '../components/MessageList'
+import { detectMentionQuery, type MentionCandidate } from '../components/Composer'
 import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
 import type {
   AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, MentionPayload, RecurringPost,
@@ -1758,67 +1759,174 @@ function FormatToolbarButtons({
 
 // 定期投稿・自動応答トリガーの本文へ人間宛て@メンションを追加するボタン（両タブで共有。旧称
 // RecurringMentionPickerを2026-09-15にトリガー側でも使うよう一般化して改称した）
-function ChannelMentionPicker({
-  channelId, mentions, onMentionsChange, onInsertText,
-}: {
-  channelId: string
-  mentions: MentionPayload[]
-  onMentionsChange: (mentions: MentionPayload[]) => void
-  onInsertText: (text: string) => void
-}) {
+// 定期投稿・自動応答トリガーの本文入力欄でも、通常の投稿欄（Composer.tsx）と同じ「@」入力で
+// 開くメンション候補オートコンプリートを使えるようにする（ユーザーからの明示的な要望「メンションを
+// 普通の会話と同じく＠にして。候補にAIと＠channelもいれて」。従来はボタンを押すと参加者だけの
+// 簡易ドロップダウンが開く独自UIだった）。detectMentionQuery・MentionCandidate型はComposer.tsxから
+// そのまま再利用し（重複実装を避ける）、候補データの組み立てはChannelView.tsxのmentionCandidatesWithAi
+// と同じ考え方（@channel→チャンネルAI→参加者の順）で行う。**@here（送信時点でアクティブな参加者への
+// 通知）は今回のユーザーからの要望に含まれていないため対象外のまま**（定期投稿・トリガーはあとで/
+// 自動で発火するBOT発言であり、「送信時点で今アクティブな人」という@hereの前提とそもそも相性が
+// 良くないという判断もある）。
+function useMentionAutocomplete(
+  channelId: string,
+  body: string,
+  onBodyChange: (v: string) => void,
+  mentions: MentionPayload[],
+  onMentionsChange: (mentions: MentionPayload[]) => void,
+  textareaRef: RefObject<HTMLTextAreaElement | null>,
+) {
   const { members } = useChannelMembers(channelId)
-  const activeMembers = members.filter((m) => m.is_active)
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const { channel } = useChannel(channelId)
+  const [pickerQuery, setPickerQuery] = useState<string | null>(null)
+  const [activeIndex, setActiveIndex] = useState(0)
 
-  useEffect(() => {
-    if (!open) return
-    const onDocMouseDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocMouseDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onDocMouseDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
+  const candidates: MentionCandidate[] = [
+    { id: 'channel', name: 'channel', isChannel: true },
+    ...(channel?.ai_is_enabled
+      ? [
+          {
+            id: 'ai', name: channel.ai_persona_name, isAi: true, picture_url: channel.ai_persona_icon_url,
+          } as MentionCandidate,
+        ]
+      : []),
+    ...members.filter((m) => m.is_active),
+  ]
+  const filteredCandidates = candidates.filter((c) => c.name.toLowerCase().includes((pickerQuery ?? '').toLowerCase()))
+  const pickerOpen = pickerQuery !== null && filteredCandidates.length > 0
 
-  const select = (m: (typeof activeMembers)[number]) => {
-    onMentionsChange([...mentions, { target_user_id: m.id, display_name_snapshot: m.name }])
-    onInsertText(`@${m.name} `)
-    setOpen(false)
+  const handleBodyChange = (text: string, cursor: number) => {
+    onBodyChange(text)
+    const match = detectMentionQuery(text, cursor)
+    setPickerQuery(match?.query ?? null)
+    setActiveIndex(0)
   }
 
+  const selectCandidate = (candidate: MentionCandidate) => {
+    const el = textareaRef.current
+    const cursor = el?.selectionStart ?? body.length
+    const match = detectMentionQuery(body, cursor)
+    if (!match) return
+    const before = body.slice(0, match.atIndex)
+    const after = body.slice(cursor)
+    const insertText = `@${candidate.name} `
+    onBodyChange(before + insertText + after)
+    if (candidate.isChannel) {
+      // @channel はkind='channel'として送る（Composer.selectCandidateと同じ、重複選択も1件だけ）
+      onMentionsChange(
+        mentions.some((m) => m.kind === 'channel')
+          ? mentions
+          : [...mentions, { target_user_id: 'channel', display_name_snapshot: candidate.name, kind: 'channel' }],
+      )
+    } else if (!candidate.isAi) {
+      onMentionsChange([...mentions, { target_user_id: candidate.id, display_name_snapshot: candidate.name }])
+    }
+    setPickerQuery(null)
+    requestAnimationFrame(() => {
+      const pos = before.length + insertText.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+
+  // 入力欄下の@ボタン（Composer.tsxのinsertMentionTriggerと同じ）。カーソル位置に「@」を挿入し
+  // ピッカーを開く
+  const insertMentionTrigger = () => {
+    const el = textareaRef.current
+    const cursor = el?.selectionStart ?? body.length
+    const before = body[cursor - 1]
+    const insertText = cursor === 0 || before === undefined || /\s/.test(before) ? '@' : ' @'
+    onBodyChange(body.slice(0, cursor) + insertText + body.slice(cursor))
+    setPickerQuery('')
+    setActiveIndex(0)
+    requestAnimationFrame(() => {
+      const pos = cursor + insertText.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+
+  // ピッカーが開いているときのキー操作を処理し、処理した場合はtrueを返す（呼び出し側は戻り値が
+  // falseのときだけuseBodyFormatting.handleKeyDown＝箇条書きのEnter継続にフォールバックする。
+  // Composer.tsxのhandleKeyDownと同じ優先順位）
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!pickerOpen) return false
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActiveIndex((i) => (i + 1) % filteredCandidates.length)
+      return true
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIndex((i) => (i - 1 + filteredCandidates.length) % filteredCandidates.length)
+      return true
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      selectCandidate(filteredCandidates[activeIndex])
+      return true
+    }
+    if (e.key === 'Escape') {
+      setPickerQuery(null)
+      return true
+    }
+    return false
+  }
+
+  return { pickerOpen, filteredCandidates, activeIndex, handleBodyChange, selectCandidate, insertMentionTrigger, handleKeyDown }
+}
+
+// メンション候補ポップオーバー（Composer.tsxの候補一覧JSXと同じ見た目。@here分岐のみ対象外）
+function MentionPickerPopover({
+  candidates, activeIndex, onSelect,
+}: {
+  candidates: MentionCandidate[]
+  activeIndex: number
+  onSelect: (c: MentionCandidate) => void
+}) {
   return (
-    <div ref={ref} className="relative inline-block">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="rounded-md border border-line-strong px-2 py-1 text-[11.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
-      >
-        ＠ メンションを追加
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 max-h-[220px] w-[220px] overflow-y-auto rounded-lg border border-line-strong bg-surface p-1 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
-          {activeMembers.length === 0 && (
-            <p className="px-2 py-1.5 text-[11.5px] text-ink-subtle">参加者がいません</p>
-          )}
-          {activeMembers.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => select(m)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface-subtle"
+    <div className="absolute bottom-full left-0 z-40 mb-2 max-h-[260px] w-[300px] overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+      {candidates.map((c, i) => (
+        <button
+          key={c.id}
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            onSelect(c)
+          }}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
+            i === activeIndex ? 'bg-accent-200' : 'hover:bg-surface-subtle'
+          }`}
+        >
+          {c.picture_url ? (
+            <img
+              src={c.picture_url}
+              alt=""
+              referrerPolicy="no-referrer"
+              className={`h-7 w-7 flex-none object-cover ${c.isAi ? 'rounded-[8px]' : 'rounded-full'}`}
+            />
+          ) : c.isAi ? (
+            <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] bg-gradient-to-br from-accent-600 to-accent-700 text-[10px] font-bold text-white">
+              AI
+            </span>
+          ) : c.isChannel ? (
+            <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] bg-danger-text text-[13px] font-bold text-white">
+              @
+            </span>
+          ) : (
+            <span
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-bold text-white"
+              style={{ background: avatarColorFor(c.id) }}
             >
-              <span className="truncate text-[12px] text-ink">{m.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
+              {c.name.slice(0, 1)}
+            </span>
+          )}
+          <span className="truncate text-[12.5px] font-bold text-ink">{c.name}</span>
+          {c.isChannel && (
+            <span className="ml-auto flex-none text-[11px] text-ink-subtle">チャンネル全員に通知</span>
+          )}
+        </button>
+      ))}
     </div>
   )
 }
@@ -1853,6 +1961,7 @@ function RecurringPostFormFields({
   onTimeChange: (v: string) => void
 }) {
   const fmt = useBodyFormatting(body, onBodyChange)
+  const mention = useMentionAutocomplete(channelId, body, onBodyChange, mentions, onMentionsChange, fmt.textareaRef)
   return (
     <>
       <div className="mb-3.5">
@@ -1872,42 +1981,57 @@ function RecurringPostFormFields({
         <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
         {/* Composer.tsx（通常の投稿欄）と同じ配置: 書式ツールバーは入力欄の「上」、絵文字・
             メンションは「下」（ユーザーからの明示的な要望「普通の会話の入力欄と同じ感じにしてほしい」）。
-            上段＝本文の見た目を変える書式、下段＝本文に付随させるもの、という役割の違いを配置で示す */}
-        <div className="mb-1.5 flex items-center gap-0.5">
-          <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
-        </div>
-        <textarea
-          ref={fmt.textareaRef}
-          value={body}
-          onChange={(e) => onBodyChange(e.target.value)}
-          onKeyDown={fmt.handleKeyDown}
-          rows={3}
-          maxLength={4000}
-          placeholder="投稿する内容を入力（下の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
-        <div className="mt-1.5 flex items-center gap-0.5">
-          <button
-            type="button"
-            title="絵文字を挿入"
-            onClick={fmt.toggleEmojiPicker}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-          >
-            😀
-          </button>
-          <ChannelMentionPicker
-            channelId={channelId}
-            mentions={mentions}
-            onMentionsChange={onMentionsChange}
-            onInsertText={(text) => {
-              const needsSpace = body.length > 0 && !/\s$/.test(body)
-              onBodyChange(body + (needsSpace ? ' ' : '') + text)
+            上段＝本文の見た目を変える書式、下段＝本文に付随させるもの、という役割の違いを配置で示す。
+            メンションも本文中に「@」を入力すると候補が開く通常の投稿欄と同じ挙動にした（ユーザーからの
+            明示的な要望「メンションを普通の会話と同じく＠にして。候補にAIと＠channelもいれて」） */}
+        <div className="relative">
+          <div className="mb-1.5 flex items-center gap-0.5">
+            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
+          </div>
+          <textarea
+            ref={fmt.textareaRef}
+            value={body}
+            onChange={(e) => mention.handleBodyChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+            onKeyDown={(e) => {
+              if (!mention.handleKeyDown(e)) fmt.handleKeyDown(e)
             }}
+            rows={3}
+            maxLength={4000}
+            placeholder="投稿する内容を入力（本文中に「@」でメンション候補が開きます。「@ペルソナ名」を含めるとチャンネルAIも応答します）"
+            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
           />
+          <div className="mt-1.5 flex items-center gap-0.5">
+            <button
+              type="button"
+              title="絵文字を挿入"
+              onClick={fmt.toggleEmojiPicker}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+            >
+              😀
+            </button>
+            <button
+              type="button"
+              title="メンション候補を表示"
+              onClick={mention.insertMentionTrigger}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+            >
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <circle cx="10" cy="10" r="7.2" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 10a3 3 0 1 1-1-2.2M13 10v1.3a1.7 1.7 0 0 0 3.4 0V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+          {fmt.emojiAnchor && (
+            <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
+          )}
+          {mention.pickerOpen && (
+            <MentionPickerPopover
+              candidates={mention.filteredCandidates}
+              activeIndex={mention.activeIndex}
+              onSelect={mention.selectCandidate}
+            />
+          )}
         </div>
-        {fmt.emojiAnchor && (
-          <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
-        )}
       </div>
 
       <div className="mb-1 flex gap-3">
@@ -2300,6 +2424,7 @@ function TriggerRuleFormFields({
   onIconUrlChange: (v: string | null) => void
 }) {
   const fmt = useBodyFormatting(actionBody, onActionBodyChange)
+  const mention = useMentionAutocomplete(channelId, actionBody, onActionBodyChange, mentions, onMentionsChange, fmt.textareaRef)
   return (
     <>
       <div className="mb-3.5 flex gap-3">
@@ -2340,42 +2465,57 @@ function TriggerRuleFormFields({
         <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">投稿する本文</label>
         {/* Composer.tsx（通常の投稿欄）・RecurringPostFormFieldsと同じ配置: 書式ツールバーは
             入力欄の「上」、絵文字・メンションは「下」（ユーザーからの明示的な要望「普通の会話の
-            入力欄と同じ感じにしてほしい」） */}
-        <div className="mb-1.5 flex items-center gap-0.5">
-          <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
-        </div>
-        <textarea
-          ref={fmt.textareaRef}
-          value={actionBody}
-          onChange={(e) => onActionBodyChange(e.target.value)}
-          onKeyDown={fmt.handleKeyDown}
-          rows={3}
-          maxLength={4000}
-          placeholder="トリガーに一致したときに投稿する内容を入力（下の「メンションを追加」から選ぶと通常投稿と同じ人間宛てメンションになります。本文に「@ペルソナ名」を含めるとチャンネルAIも応答します）"
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
-        <div className="mt-1.5 flex items-center gap-0.5">
-          <button
-            type="button"
-            title="絵文字を挿入"
-            onClick={fmt.toggleEmojiPicker}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-          >
-            😀
-          </button>
-          <ChannelMentionPicker
-            channelId={channelId}
-            mentions={mentions}
-            onMentionsChange={onMentionsChange}
-            onInsertText={(text) => {
-              const needsSpace = actionBody.length > 0 && !/\s$/.test(actionBody)
-              onActionBodyChange(actionBody + (needsSpace ? ' ' : '') + text)
+            入力欄と同じ感じにしてほしい」）。メンションも本文中に「@」を入力すると候補が開く
+            通常の投稿欄と同じ挙動にした（ユーザーからの明示的な要望「メンションを普通の会話と
+            同じく＠にして。候補にAIと＠channelもいれて」） */}
+        <div className="relative">
+          <div className="mb-1.5 flex items-center gap-0.5">
+            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
+          </div>
+          <textarea
+            ref={fmt.textareaRef}
+            value={actionBody}
+            onChange={(e) => mention.handleBodyChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+            onKeyDown={(e) => {
+              if (!mention.handleKeyDown(e)) fmt.handleKeyDown(e)
             }}
+            rows={3}
+            maxLength={4000}
+            placeholder="トリガーに一致したときに投稿する内容を入力（本文中に「@」でメンション候補が開きます。「@ペルソナ名」を含めるとチャンネルAIも応答します）"
+            className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
           />
+          <div className="mt-1.5 flex items-center gap-0.5">
+            <button
+              type="button"
+              title="絵文字を挿入"
+              onClick={fmt.toggleEmojiPicker}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+            >
+              😀
+            </button>
+            <button
+              type="button"
+              title="メンション候補を表示"
+              onClick={mention.insertMentionTrigger}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+            >
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <circle cx="10" cy="10" r="7.2" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 10a3 3 0 1 1-1-2.2M13 10v1.3a1.7 1.7 0 0 0 3.4 0V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+          {fmt.emojiAnchor && (
+            <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
+          )}
+          {mention.pickerOpen && (
+            <MentionPickerPopover
+              candidates={mention.filteredCandidates}
+              activeIndex={mention.activeIndex}
+              onSelect={mention.selectCandidate}
+            />
+          )}
         </div>
-        {fmt.emojiAnchor && (
-          <EmojiGridPopover anchor={fmt.emojiAnchor} onSelect={fmt.insertEmoji} onClose={fmt.closeEmojiPicker} />
-        )}
       </div>
 
       <div className="mb-3.5">
