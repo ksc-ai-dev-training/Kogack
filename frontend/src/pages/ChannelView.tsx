@@ -243,7 +243,7 @@ export default function ChannelView() {
             <button
               type="button"
               onClick={() => setMembersModalTab('members')}
-              className="ml-auto flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
+              className="flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
             >
               👥 所属メンバー：{channel.member_count}人
             </button>
