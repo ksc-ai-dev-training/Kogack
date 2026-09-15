@@ -15,7 +15,8 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import type {
-  AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, RecurringPost, Skill, TriggerRule,
+  AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, MentionPayload, RecurringPost,
+  Skill, TriggerRule,
 } from '../types'
 
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
@@ -1653,15 +1654,90 @@ function defaultAnchor(): { date: string; time: string } {
 }
 
 // 定期投稿の入力欄（新規作成パネル・編集モーダルの両方から使う共通の見た目）
+// メンション候補一覧（F-41、Composer.tsxのMentionCandidate相当）の元データを取得し、
+// 「@ メンションを追加」ボタン押下で開くドロップダウンから選んだ相手を本文へ「@氏名 」として
+// 追記しつつ、送信時にT-07 message_blocksへ構造化して渡すためのmentions配列（MentionPayload）へも
+// 同時に追加する。Composer.tsxの「@」入力トリガー＋候補ポップオーバーと異なり、この設定フォームは
+// リアルタイムのハイライト表示（透明textarea＋オーバーレイ方式）までは持たない簡易版（毎キー入力の
+// 「@」検出ではなく、ボタン押下で開く一覧から選ぶだけの方式。定期投稿の作成・編集は頻度の低い設定
+// 操作であり、Composer相当の入力体験を作り込むコストに見合わないと判断した）
+function RecurringMentionPicker({
+  channelId, mentions, onMentionsChange, onInsertText,
+}: {
+  channelId: string
+  mentions: MentionPayload[]
+  onMentionsChange: (mentions: MentionPayload[]) => void
+  onInsertText: (text: string) => void
+}) {
+  const { members } = useChannelMembers(channelId)
+  const activeMembers = members.filter((m) => m.is_active)
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  const select = (m: (typeof activeMembers)[number]) => {
+    onMentionsChange([...mentions, { target_user_id: m.id, display_name_snapshot: m.name }])
+    onInsertText(`@${m.name} `)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-md border border-line-strong px-2 py-1 text-[11.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+      >
+        ＠ メンションを追加
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 max-h-[220px] w-[220px] overflow-y-auto rounded-lg border border-line-strong bg-surface p-1 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+          {activeMembers.length === 0 && (
+            <p className="px-2 py-1.5 text-[11.5px] text-ink-subtle">参加者がいません</p>
+          )}
+          {activeMembers.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => select(m)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface-subtle"
+            >
+              <span className="truncate text-[12px] text-ink">{m.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RecurringPostFormFields({
+  channelId,
   displayName, onDisplayNameChange,
   emoji, onEmojiChange,
   iconUrl, onIconUrlChange,
   body, onBodyChange,
+  mentions, onMentionsChange,
   frequency, onFrequencyChange,
   date, onDateChange,
   time, onTimeChange,
 }: {
+  channelId: string
   displayName: string
   onDisplayNameChange: (v: string) => void
   emoji: string
@@ -1670,6 +1746,8 @@ function RecurringPostFormFields({
   onIconUrlChange: (v: string | null) => void
   body: string
   onBodyChange: (v: string) => void
+  mentions: MentionPayload[]
+  onMentionsChange: (mentions: MentionPayload[]) => void
   frequency: 'once' | 'daily' | 'weekly' | 'monthly'
   onFrequencyChange: (v: 'once' | 'daily' | 'weekly' | 'monthly') => void
   date: string
@@ -1693,13 +1771,24 @@ function RecurringPostFormFields({
       <IconInput emoji={emoji} onEmojiChange={onEmojiChange} iconUrl={iconUrl} onIconUrlChange={onIconUrlChange} />
 
       <div className="mb-3.5">
-        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className="text-[12.5px] font-bold text-ink-muted">メッセージ本文</label>
+          <RecurringMentionPicker
+            channelId={channelId}
+            mentions={mentions}
+            onMentionsChange={onMentionsChange}
+            onInsertText={(text) => {
+              const needsSpace = body.length > 0 && !/\s$/.test(body)
+              onBodyChange(body + (needsSpace ? ' ' : '') + text)
+            }}
+          />
+        </div>
         <textarea
           value={body}
           onChange={(e) => onBodyChange(e.target.value)}
           rows={3}
           maxLength={4000}
-          placeholder="投稿する内容を入力（@でメンション可。ただしAIへの応答は発生しません）"
+          placeholder="投稿する内容を入力（上の「メンションを追加」から選ぶと通常投稿と同じメンションになります。ただしAIへの応答は発生しません）"
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
       </div>
@@ -1751,6 +1840,7 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
   const { items, mutate } = useRecurringPosts(channelId)
   const [editingItem, setEditingItem] = useState<RecurringPost | null>(null)
   const [body, setBody] = useState('')
+  const [mentions, setMentions] = useState<MentionPayload[]>([])
   const [displayName, setDisplayName] = useState('')
   const [emoji, setEmoji] = useState('📌')
   const [iconUrl, setIconUrl] = useState<string | null>(null)
@@ -1761,6 +1851,7 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
 
   const resetForm = () => {
     setBody('')
+    setMentions([])
     setDisplayName('')
     setEmoji('📌')
     setIconUrl(null)
@@ -1791,10 +1882,15 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
     }
     setSaving(true)
     try {
+      const text = body.trim()
       await apiFetch(`/api/channels/${channelId}/recurring-posts`, {
         method: 'POST',
         body: JSON.stringify({
-          body: body.trim(),
+          body: text,
+          // 本文から手動で消されたメンションは除外する（Composer.tsxのactiveMentionsInと同じ
+          // 整合性チェック。選択後に「@氏名」の文字列を手で削除した場合に、実体の無いメンションが
+          // 送られてしまわないようにする）
+          mentions: mentions.filter((m) => text.includes(`@${m.display_name_snapshot}`)),
           bot_display_name: displayName.trim() || null,
           bot_icon: iconUrl ? null : emoji.trim() || null,
           bot_icon_url: iconUrl,
@@ -1907,6 +2003,7 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
         <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しい定期投稿を追加</div>
 
         <RecurringPostFormFields
+          channelId={channelId}
           displayName={displayName}
           onDisplayNameChange={setDisplayName}
           emoji={emoji}
@@ -1915,6 +2012,8 @@ function RecurringPostsTab({ channelId }: { channelId: string }) {
           onIconUrlChange={setIconUrl}
           body={body}
           onBodyChange={setBody}
+          mentions={mentions}
+          onMentionsChange={setMentions}
           frequency={frequency}
           onFrequencyChange={setFrequency}
           date={date}
@@ -1962,6 +2061,7 @@ function RecurringPostEditModal({
   const toast = useToast()
   const initialAnchor = new Date(item.anchor_at)
   const [body, setBody] = useState(item.body)
+  const [mentions, setMentions] = useState<MentionPayload[]>(item.mentions)
   const [displayName, setDisplayName] = useState(item.bot_display_name)
   const [emoji, setEmoji] = useState(item.bot_icon ?? '📌')
   const [iconUrl, setIconUrl] = useState<string | null>(item.bot_icon_url)
@@ -1986,10 +2086,12 @@ function RecurringPostEditModal({
     }
     setSaving(true)
     try {
+      const text = body.trim()
       await apiFetch(`/api/channels/${channelId}/recurring-posts/${item.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          body: body.trim(),
+          body: text,
+          mentions: mentions.filter((m) => text.includes(`@${m.display_name_snapshot}`)),
           bot_display_name: displayName.trim() || null,
           bot_icon: iconUrl ? null : emoji.trim() || null,
           bot_icon_url: iconUrl,
@@ -2019,6 +2121,7 @@ function RecurringPostEditModal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-[22px] pb-1 pt-4.5">
           <RecurringPostFormFields
+            channelId={channelId}
             displayName={displayName}
             onDisplayNameChange={setDisplayName}
             emoji={emoji}
@@ -2027,6 +2130,8 @@ function RecurringPostEditModal({
             onIconUrlChange={setIconUrl}
             body={body}
             onBodyChange={setBody}
+            mentions={mentions}
+            onMentionsChange={setMentions}
             frequency={frequency}
             onFrequencyChange={setFrequency}
             date={date}

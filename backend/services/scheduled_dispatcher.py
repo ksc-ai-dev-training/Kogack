@@ -13,7 +13,12 @@
 # [F-36] is_active=true かつ next_run_at<=now() の定期投稿ルールを検出すると、sender_type='bot'の
 # 発言を作成し、頻度に応じてnext_run_atを次回時刻へ進める（'once'はis_active=falseに変更して
 # 終了する）。アプリの停止等でnext_run_atを過ぎても検出できなかった場合、次回起動時のポーリングで
-# 直ちに送信する（欠落回をスキップしない。F-35と同じ考え方、基本設計書5.16節）。
+# 直ちに送信する（欠落回をスキップしない。F-35と同じ考え方、基本設計書5.16節）。@メンションの構造化
+# （T-07）はF-35と同じ考え方でrecurring_posts.mentionsをinsert_mention_blocksへ渡し、発言化する
+# このタイミングで参加者チェック込みでT-07へ反映する（2026-09-15追加。routers/recurring_posts.pyの
+# コメント参照）。BOT発言（F-36/F-38/F-43共通の枠組み）はsender_type='human'の投稿のみをAI
+# エージェント起動の対象とする一貫原則（連鎖起動防止）にそのまま従うため、@メンションを含んでいても
+# AIエージェント・自動応答トリガー（F-38）は起動しない（人間宛てのメンション通知のみが対象）。
 import asyncio
 import calendar
 import json
@@ -130,7 +135,7 @@ async def _dispatch_due_messages() -> None:
 async def _dispatch_recurring_posts() -> None:
     pool = get_pool()
     rows = await pool.fetch(
-        """SELECT id, channel_id, body, bot_display_name, bot_icon, bot_icon_url,
+        """SELECT id, channel_id, body, mentions, bot_display_name, bot_icon, bot_icon_url,
                   frequency, anchor_at, next_run_at
            FROM recurring_posts WHERE is_active = true AND next_run_at <= now()"""
     )
@@ -165,14 +170,30 @@ async def _dispatch_recurring_posts() -> None:
             # 不具合が実際に報告された。updated_atは意図的にDEFAULT now()のまま変更しない
             # （sinceポーリングの差分検知はupdated_at基準のため、ここを過去の時刻にすると
             # 逆にこの発言がポーリングで検知されなくなってしまう）
-            await conn.execute(
+            message_row = await conn.fetchrow(
                 """INSERT INTO messages
                        (channel_id, sender_type, body, bot_display_name, bot_icon, bot_icon_url,
                         recurring_post_id, created_at)
-                   VALUES ($1, 'bot', $2, $3, $4, $5, $6, $7)""",
+                   VALUES ($1, 'bot', $2, $3, $4, $5, $6, $7) RETURNING id""",
                 row["channel_id"], row["body"], row["bot_display_name"], row["bot_icon"],
                 row["bot_icon_url"], row["id"], row["next_run_at"],
             )
+            # バグ修正（2026-09-15、ユーザーからの報告「定期投稿で＠メンションをしても通常の
+            # メンションと同じ挙動にならない」）: 従来は本文へ「@氏名」と手入力できてもT-07への
+            # 反映が一切無く、会話ログでのハイライト・サイドバー未読バッジ・デスクトップ通知の
+            # いずれも発生しない「ただの文字列」だった。_dispatch_due_messages（F-35予約投稿）と
+            # 同じ考え方で、参加者チェックはここ（実際に発言化するタイミング）で行う（recurring_posts
+            # は何度も繰り返し発火するため、対象者がその時点でチャンネルを抜けている可能性は
+            # 一回きりの予約投稿よりさらに高い）。sender_user_id（@here用の送信者除外）はbot発言の
+            # ためNone（定期投稿には「送信者」という概念が無く、@here自体もこのスライスのUI（S-06
+            # 定期投稿タブ）からは選択できないため、実質的にはuser_mentionsのみが使われる）
+            raw_mentions = row["mentions"]
+            mentions_data = json.loads(raw_mentions) if isinstance(raw_mentions, str) else raw_mentions
+            if mentions_data:
+                await insert_mention_blocks(
+                    conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
+                    channel_id=row["channel_id"],
+                )
 
 
 async def _run_loop() -> None:

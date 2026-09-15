@@ -1,6 +1,11 @@
 # A-53〜A-56（詳細設計書 API設計、基本設計書5.16節 F-36 定期投稿）。S-06「定期投稿」タブに対応。
 # 実際の発言化はservices/scheduled_dispatcher.pyがF-35と同じ30秒間隔ポーリングで行う。このルーターは
-# recurring_postsへのCRUDのみを担当する。
+# recurring_postsへのCRUDのみを担当する。@メンションの構造化（T-07 message_blocks）は
+# scheduled_messages.py（A-50）と同じMentionInputを受け取り、mentions列（JSONB）へそのまま保持する
+# だけにとどめ、参加者であることの検証（insert_mention_blocks）は作成時点ではなく発言化のタイミング
+# （services/scheduled_dispatcher.py）で行う（2026-09-15追加。予約から実際の送信までの間に対象者が
+# チャンネルを抜ける可能性があり、送信時点の参加者を基準にするA-50と同じ考え方）。
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,15 +13,18 @@ from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_channel_admin
 from database import get_pool
+from mentions import MentionInput
 
 router = APIRouter(prefix="/api/channels", tags=["recurring-posts"])
 
 
 def _out(row) -> dict:
+    mentions = row["mentions"]
     return {
         "id": str(row["id"]),
         "channel_id": str(row["channel_id"]),
         "body": row["body"],
+        "mentions": json.loads(mentions) if isinstance(mentions, str) else mentions,
         "bot_display_name": row["bot_display_name"],
         "bot_icon": row["bot_icon"],
         "bot_icon_url": row["bot_icon_url"],
@@ -40,6 +48,7 @@ async def list_recurring_posts(channel_id: int, user: CurrentUser = Depends(requ
 
 class CreateRecurringPostRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
+    mentions: list[MentionInput] = []
     bot_display_name: str | None = Field(default=None, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
@@ -66,18 +75,19 @@ async def create_recurring_post(
     # （画面設計11.6節 Avatarコンポーネント定義と同じ「画像優先→絵文字フォールバック」の考え方）
     row = await get_pool().fetchrow(
         """INSERT INTO recurring_posts
-               (channel_id, created_by, body, bot_display_name, bot_icon, bot_icon_url,
+               (channel_id, created_by, body, mentions, bot_display_name, bot_icon, bot_icon_url,
                 frequency, anchor_at, next_run_at)
-           VALUES ($1, $2, $3, $4, COALESCE($5, '📌'), $6, $7, $8, $8)
+           VALUES ($1, $2, $3, $4::jsonb, $5, COALESCE($6, '📌'), $7, $8, $9, $9)
            RETURNING *""",
-        channel_id, user.id, body.body, display_name, body.bot_icon, body.bot_icon_url,
-        body.frequency, anchor_at,
+        channel_id, user.id, body.body, json.dumps([m.model_dump() for m in body.mentions]),
+        display_name, body.bot_icon, body.bot_icon_url, body.frequency, anchor_at,
     )
     return _out(row)
 
 
 class UpdateRecurringPostRequest(BaseModel):
     body: str | None = Field(default=None, min_length=1, max_length=4000)
+    mentions: list[MentionInput] | None = None
     bot_display_name: str | None = Field(default=None, min_length=1, max_length=50)
     bot_icon: str | None = Field(default=None, max_length=8)
     bot_icon_url: str | None = None
@@ -116,21 +126,27 @@ async def update_recurring_post(
             raise HTTPException(400, detail="未来の日時を指定してください")
         next_run_at = anchor_at
 
+    # mentionsはNone（未指定）なら既存値を維持、[]（本文からメンションが全て消えた等）でも
+    # 明示的に空へ更新する。COALESCE($jsonb, mentions)はNULLのときだけ既存値を残す仕様のため、
+    # 未指定時はNULLをそのまま渡す（json.dumps([])だと空配列で上書きされてしまい区別できない）
+    mentions_param = json.dumps([m.model_dump() for m in body.mentions]) if body.mentions is not None else None
+
     row = await get_pool().fetchrow(
         """UPDATE recurring_posts SET
                body = COALESCE($3, body),
-               bot_display_name = COALESCE($4, bot_display_name),
-               bot_icon = COALESCE($5, bot_icon),
-               bot_icon_url = COALESCE($6, bot_icon_url),
-               frequency = COALESCE($7, frequency),
-               anchor_at = $8,
-               next_run_at = $9,
-               is_active = COALESCE($10, is_active),
-               updated_by = $11,
+               mentions = COALESCE($4::jsonb, mentions),
+               bot_display_name = COALESCE($5, bot_display_name),
+               bot_icon = COALESCE($6, bot_icon),
+               bot_icon_url = COALESCE($7, bot_icon_url),
+               frequency = COALESCE($8, frequency),
+               anchor_at = $9,
+               next_run_at = $10,
+               is_active = COALESCE($11, is_active),
+               updated_by = $12,
                updated_at = now()
            WHERE id = $1 AND channel_id = $2 RETURNING *""",
-        rule_id, channel_id, body.body, body.bot_display_name, body.bot_icon, body.bot_icon_url,
-        body.frequency, anchor_at, next_run_at, body.is_active, user.id,
+        rule_id, channel_id, body.body, mentions_param, body.bot_display_name, body.bot_icon,
+        body.bot_icon_url, body.frequency, anchor_at, next_run_at, body.is_active, user.id,
     )
     return _out(row)
 

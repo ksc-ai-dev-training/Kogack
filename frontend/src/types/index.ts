@@ -263,6 +263,9 @@ export interface RecurringPost {
   id: string
   channel_id: string
   body: string
+  /** @メンションの構造化（F-41と同じMentionPayload）。2026-09-15追加、ユーザーからの報告
+   * 「定期投稿で＠メンションをしても通常のメンションと同じ挙動にならない」への対応 */
+  mentions: MentionPayload[]
   bot_display_name: string
   bot_icon: string | null
   bot_icon_url: string | null

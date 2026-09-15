@@ -297,11 +297,18 @@ ALTER TABLE ai_usage_limits ENABLE ROW LEVEL SECURITY;
 -- T-05へsender_type='bot'の発言を1件作成する（F-35と同じディスパッチャ、専用ジョブキューは導入しない）。
 -- 送信後、頻度に応じてnext_run_atを更新する（'once'はis_active=falseにする）。個人宛て複数可への
 -- 対応は一度実装したが方針転換で対象外に戻した（要件定義書3.2節「対象外機能」、T-20が欠番の理由）。
+-- mentions列（JSONB、MentionInput相当の配列）はscheduled_messages.mentionsと同じ考え方（F-35対応、
+-- 2026-08-28）を定期投稿にも適用したもの（2026-09-15、ユーザーからの報告「定期投稿で＠メンションを
+-- しても通常のメンションと同じ挙動にならない」を受けて追加。従来は本文へ「@氏名」と手入力できても
+-- T-07 message_blocksへの反映処理が一度も実装されておらず、ハイライト表示・サイドバー未読バッジ・
+-- デスクトップ通知のいずれも発生しない「ただの文字列」だった）。参加者であることの検証は予約投稿と
+-- 同じ理由で作成時点ではなく発言化のタイミング（services/scheduled_dispatcher.py）で行う。
 CREATE TABLE IF NOT EXISTS recurring_posts (
     id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     channel_id        BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     created_by        BIGINT NOT NULL REFERENCES users(id),
     body              TEXT NOT NULL,
+    mentions          JSONB NOT NULL DEFAULT '[]'::jsonb,
     bot_display_name  TEXT NOT NULL,
     bot_icon          TEXT DEFAULT '📌',
     bot_icon_url      TEXT,
@@ -316,6 +323,8 @@ CREATE TABLE IF NOT EXISTS recurring_posts (
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_posts_dispatch ON recurring_posts (is_active, next_run_at);
 ALTER TABLE recurring_posts ENABLE ROW LEVEL SECURITY;
+-- 定期投稿のメンション対応（上記コメント参照）を追加した際のbackfill
+ALTER TABLE recurring_posts ADD COLUMN IF NOT EXISTS mentions JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- T-21 trigger_rules（自動応答トリガー、F-38。05-1_詳細設計書_DB設計.html 3.16節）。F-35/F-36の
 -- 時刻ベースのディスパッチャとは異なり、A-11（メッセージ投稿）内で同期的に判定するイベント駆動方式
