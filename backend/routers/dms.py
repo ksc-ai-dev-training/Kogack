@@ -258,13 +258,14 @@ async def _around_rows(pool, dm_id: int, around_message_id: int):
 @router.get("/{dm_id}/messages")
 async def list_messages(
     dm_id: int, since: str | None = None, limit: int = 50, around: int | None = None,
-    user: CurrentUser = Depends(require_dm_member),
+    before: str | None = None, user: CurrentUser = Depends(require_dm_member),
 ):
     """A-18: 履歴取得。channels.list_messagesと同じsince差分ポーリング方式（基本設計書9.1節）。
     aroundはchannels.list_messagesと同じくハイライトジャンプ用（ユーザーからの明示的な要望）。
     sinceの判定はcreated_atではなくupdated_atで行う（channels.list_messagesと同じ理由・
     2026-09-04のバグ修正。DM発言は現状AI応答が無いため実害は起きていなかったが、他2ルーターと
-    挙動を揃えておく）"""
+    挙動を揃えておく）。beforeはchannels.list_messagesと同じ「もっと古いメッセージを読み込む」用
+    （ユーザーからの明示的な要望、2026-09-15）"""
     pool = get_pool()
     if since:
         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -304,6 +305,28 @@ async def list_messages(
                 for r in rows
             ],
             "has_more": False,
+        }
+    if before:
+        before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        rows = list(reversed(await pool.fetch(
+            f"""{_MESSAGES_SELECT}
+               WHERE m.dm_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
+                 AND m.created_at < $2
+               ORDER BY m.created_at DESC LIMIT $3""",
+            dm_id, before_dt, limit,
+        )))
+        blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
+        attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
+        reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
+        return {
+            "items": [
+                _message_out(
+                    r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
+                    reactions_by_message.get(r["id"]),
+                )
+                for r in rows
+            ],
+            "has_more": len(rows) == limit,
         }
     rows = await pool.fetch(
         f"""{_MESSAGES_SELECT}

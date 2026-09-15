@@ -622,12 +622,19 @@ async def _around_rows(pool, select: str, scope_column: str, scope_id: int, arou
 @router.get("/{channel_id}/messages")
 async def list_messages(
     channel_id: int, since: str | None = None, limit: int = 50, around: int | None = None,
-    user: CurrentUser = Depends(require_channel_member),
+    before: str | None = None, user: CurrentUser = Depends(require_channel_member),
 ):
     """A-10: 履歴取得。sinceは3秒間隔ポーリングの差分取得に使う（基本設計書9.1節）。
     thread_reply_countはS-04スレッド表示への導線（「N件の返信」）に使う（詳細設計書 API設計4.3節）。
     aroundは検索結果からのハイライトジャンプ用（指定した発言を中心に前後AROUND_WINDOW件、
     ユーザーからの明示的な要望。sinceと同時指定時はsinceを優先する）。
+
+    beforeは通常の会話画面で過去へさかのぼって読み込む「もっと古いメッセージを読み込む」用
+    （ユーザーからの明示的な要望「検索から飛ぶと古いやり取りは確認できそうですが、通常の会話画面
+    でさかのぼっても見れると嬉しい」、2026-09-15）。_around_rowsの導入コメントに記していたとおり
+    従来はこの機能自体が無い既知の制約だった（直近50件の外は検索結果からのジャンプでしか見られ
+    なかった）。指定した時刻より前のcreated_atを持つ発言を新しい順にlimit件取得し、時系列順に
+    並べ替えて返す（sinceと同時指定時はsinceを優先、aroundとの同時指定は無意味なため考慮しない）。
 
     バグ修正（2026-09-04）: sinceの判定はcreated_atではなくupdated_atで行う。AI応答は
     generation_status='generating'のプレースホルダとして作成され、本文確定時はUPDATEのみで
@@ -651,6 +658,15 @@ async def list_messages(
         rows = await _around_rows(pool, _MESSAGES_SELECT, "channel_id", channel_id, around)
         if rows is None:
             raise HTTPException(404, detail="発言が見つかりません")
+    elif before:
+        before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        rows = list(reversed(await pool.fetch(
+            f"""{_MESSAGES_SELECT}
+               WHERE m.channel_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
+                 AND m.created_at < $2
+               ORDER BY m.created_at DESC LIMIT $3""",
+            channel_id, before_dt, limit,
+        )))
     else:
         rows = list(reversed(await pool.fetch(
             f"""{_MESSAGES_SELECT}

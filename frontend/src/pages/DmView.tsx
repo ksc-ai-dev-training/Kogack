@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useDms } from '../hooks/useDms'
 import { useMessages } from '../hooks/useMessages'
@@ -33,7 +33,7 @@ export default function DmView() {
   const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-    updateMessageReactions, updateMessage,
+    updateMessageReactions, updateMessage, hasOlder, loadingOlder, loadOlder,
   } = useMessages(dmId ? `/api/dms/${dmId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(dmId, dm?.unread_count, messages, me?.id)
   const listRef = useRef<HTMLDivElement>(null)
@@ -44,8 +44,27 @@ export default function DmView() {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
     // バグ修正（2026-09-11）: ChannelView.tsxと同じ不具合・同じ対処
     // （AI応答本文が「生成中…」から実際の長い回答へ更新される際、messages.lengthが変化しないため
-    // 従来はスクロール位置が据え置かれ、長い回答の1行目しか見えなかった）
-  }, [messages.length, messages[messages.length - 1]?.updated_at, highlightId, threadId])
+    // 従来はスクロール位置が据え置かれ、長い回答の1行目しか見えなかった）。
+    // バグ修正（2026-09-15、ChannelView.tsxと同じ不具合・同じ対処）: 「もっと古いメッセージを
+    // 読み込む」（loadOlder）を追加したため依存配列からmessages.lengthを外した（理由は
+    // ChannelView.tsxの同じコメント参照。古い発言を先頭に追加してもmessages.lengthは変わるが
+    // 最後のメッセージのupdated_atは変わらないため、lengthを残しているとさかのぼるたびに
+    // 末尾へ引き戻されてしまう）
+  }, [messages[messages.length - 1]?.updated_at, highlightId, threadId])
+
+  // 「もっと古いメッセージを読み込む」（ユーザーからの明示的な要望、2026-09-15）。
+  // ChannelView.tsxと全く同じ考え方・同じスクロール位置保持の仕組み（詳細はそちらのコメント参照）
+  const pendingScrollAdjustRef = useRef<number | null>(null)
+  const handleLoadOlder = async () => {
+    if (listRef.current) pendingScrollAdjustRef.current = listRef.current.scrollHeight
+    await loadOlder()
+  }
+  useLayoutEffect(() => {
+    if (pendingScrollAdjustRef.current === null || !listRef.current) return
+    const prevScrollHeight = pendingScrollAdjustRef.current
+    pendingScrollAdjustRef.current = null
+    listRef.current.scrollTop += listRef.current.scrollHeight - prevScrollHeight
+  }, [messages])
 
   useEffect(() => {
     // ChannelViewと同じ、ハイライト表示の一時的な?highlight=クリア
@@ -151,6 +170,18 @@ export default function DmView() {
         </div>
 
         <div ref={listRef} className="flex-1 overflow-y-auto overflow-x-hidden py-3">
+          {hasOlder && (
+            <div className="mb-2 flex justify-center">
+              <button
+                type="button"
+                onClick={handleLoadOlder}
+                disabled={loadingOlder}
+                className="rounded-md border border-line px-2.5 py-1 text-[12px] font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle disabled:opacity-50"
+              >
+                {loadingOlder ? '読み込み中...' : '▲ 古いメッセージを読み込む'}
+              </button>
+            </div>
+          )}
           <MessageList
             messages={messages}
             emptyMessage="まだ発言がありません。最初のメッセージを送ってみましょう。"

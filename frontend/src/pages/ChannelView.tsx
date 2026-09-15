@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
@@ -59,7 +59,7 @@ export default function ChannelView() {
   const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-    updateMessageReactions, updateMessage,
+    updateMessageReactions, updateMessage, hasOlder, loadingOlder, loadOlder,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(
     channelId,
@@ -87,7 +87,37 @@ export default function ChannelView() {
     // が必要という不具合が発生していた（ユーザーからの報告）。最後のメッセージのupdated_at
     // （本文確定・生成完了時に必ず更新される、2026-09-04の同様の修正で確立済みの列）も依存配列に
     // 加え、本文が更新されたときにも再度末尾へスクロールするようにした。
-  }, [messages.length, messages[messages.length - 1]?.updated_at, highlightId, threadId])
+    //
+    // バグ修正（2026-09-15、「もっと古いメッセージを読み込む」loadOlder追加時）: 依存配列から
+    // messages.lengthを外した。loadOlderで過去の発言を先頭に追加すると末尾のメッセージ自体は
+    // 変わらない（=最後のメッセージのupdated_atは変化しない）が、messages.lengthは増えるため、
+    // これが依存配列に残っていると「古いメッセージを読み込む」たびに末尾へ強制的に引き戻されて
+    // しまう（ユーザーがさかのぼって読んでいる最中に毎回下まで飛ばされる不具合になる）。
+    // 最後のメッセージのupdated_at（新規追加・本文更新のいずれでも必ず変わる）だけで新着・更新の
+    // 検知は十分なため、lengthを外しても初回読み込み時（undefined→実際の値）や新規投稿時の
+    // 自動スクロールは変わらず機能する
+  }, [messages[messages.length - 1]?.updated_at, highlightId, threadId])
+
+  // 「もっと古いメッセージを読み込む」（ユーザーからの明示的な要望「検索から飛ぶと古いやり取りは
+  // 確認できそうですが、通常の会話画面でさかのぼっても見れると嬉しい」、2026-09-15）。従来は
+  // 直近50件の外は検索結果からのハイライトジャンプでしか見られなかった既知の制約を解消する。
+  // 古い発言を先頭に追加すると、そのままではスクロール位置（scrollTop）が数値としては同じでも
+  // 実際に見えている内容が下へずれてしまう（ブラウザは要素が上に追加されてもscrollTopを自動調整
+  // しない）ため、追加前後のscrollHeightの差分だけscrollTopを進めて、ユーザーが読んでいた位置を
+  // 視覚的に保つ（無限スクロールの定番パターン）。DOM更新が実際にコミットされた後に補正する必要が
+  // あるため、pendingScrollAdjustRefに「追加前のscrollHeight」を記録しておき、useLayoutEffectで
+  // messages変化のたびにチェックする（loadOlder以外での変化ではrefがnullのため何もしない）
+  const pendingScrollAdjustRef = useRef<number | null>(null)
+  const handleLoadOlder = async () => {
+    if (listRef.current) pendingScrollAdjustRef.current = listRef.current.scrollHeight
+    await loadOlder()
+  }
+  useLayoutEffect(() => {
+    if (pendingScrollAdjustRef.current === null || !listRef.current) return
+    const prevScrollHeight = pendingScrollAdjustRef.current
+    pendingScrollAdjustRef.current = null
+    listRef.current.scrollTop += listRef.current.scrollHeight - prevScrollHeight
+  }, [messages])
 
   useEffect(() => {
     // ハイライト表示は一時的なもの。数秒経ったら?highlight=をURLから外し、通常の
@@ -275,6 +305,18 @@ export default function ChannelView() {
         </div>
 
         <div ref={listRef} className="flex-1 overflow-y-auto overflow-x-hidden py-3">
+          {hasOlder && (
+            <div className="mb-2 flex justify-center">
+              <button
+                type="button"
+                onClick={handleLoadOlder}
+                disabled={loadingOlder}
+                className="rounded-md border border-line px-2.5 py-1 text-[12px] font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle disabled:opacity-50"
+              >
+                {loadingOlder ? '読み込み中...' : '▲ 古いメッセージを読み込む'}
+              </button>
+            </div>
+          )}
           <MessageList
             messages={messages}
             emptyMessage="まだ発言がありません。最初のメッセージを送ってみましょう。"

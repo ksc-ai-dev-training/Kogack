@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import { usePolling } from './usePolling'
 import type { Message, MessagesResponse } from '../types'
@@ -20,6 +20,14 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
     since: string | null
     messages: Message[]
   } | null>(null)
+  // 「もっと古いメッセージを読み込む」（ユーザーからの明示的な要望「検索から飛ぶと古いやり取りは
+  // 確認できそうですが、通常の会話画面でさかのぼっても見れると嬉しい」、2026-09-15）。従来は
+  // 初回の直近50件のみで、それより古い発言は検索結果からのハイライトジャンプ（?around=）でしか
+  // 見られなかった既知の制約（routers/channels.pyの_around_rowsのdocstring参照）を解消する。
+  // hasOlder/loadingOlderはSWRのdataではなく独立したReact stateで持つ（会話一覧そのものの
+  // 差分ポーリングとは別軸の情報で、fetcher内から直接更新したいため）
+  const [hasOlder, setHasOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
   // fetcherはSWRから渡されるkeyの文字列自体は使わない（下のusePollingのkeyはanchor変化時に
   // 即時再取得させるためのSWRキャッシュ識別子であり、実際にfetchするURLとは別物にしている。
@@ -32,14 +40,24 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
       (!!anchorMessageId && anchorMessageId !== state.current.anchor)
     if (needsReset) {
       state.current = { basePath: basePath!, anchor: anchorMessageId ?? null, since: null, messages: [] }
+      // 会話の切り替え時は「もっと古いメッセージを読み込む」ボタンの状態も作り直す（前の会話の
+      // hasOlderが一瞬だけ残って見えるのを防ぐ）。実際の値は直後のfetchでres.has_moreから
+      // 正しく設定し直される
+      setHasOlder(false)
     }
     const s = state.current!
+    // 「もっと古いメッセージを読み込む」（loadOlder）用のhas_more取得は、通常の直近N件の
+    // 初回読み込み（since・anchorいずれも未設定）のときだけ行う。since継続ポーリング中や
+    // around（検索結果ハイライトジャンプ）中は対象外——それぞれ別の意味のhas_more（常にfalse）
+    // を返すため、この分岐をres取得前に確定させておく
+    const isPlainInitialLoad = !s.since && !s.anchor
     const url = s.since
       ? `${basePath}/messages?since=${encodeURIComponent(s.since)}`
       : s.anchor
         ? `${basePath}/messages?around=${encodeURIComponent(s.anchor)}`
         : `${basePath}/messages`
     const res = await apiFetch<MessagesResponse>(url)
+    if (isPlainInitialLoad) setHasOlder(res.has_more)
     if (res.items.length > 0) {
       if (s.since) {
         // バグ修正（2026-09-04）: sinceでの差分取得は「新規行」だけでなく「既存行の更新」
@@ -148,8 +166,36 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
     mutate(state.current.messages, { revalidate: false })
   }
 
+  // 「もっと古いメッセージを読み込む」（ユーザーからの明示的な要望、2026-09-15）。現在読み込み済みの
+  // 一番古い発言のcreated_atを基準に、それより前の発言をlimit件取得してその手前へ追加する
+  // （A-10/A-18のbeforeパラメータ）。sinceによる新着ポーリングとは独立した末端（古い方）の操作
+  // なので、s.sinceは一切変更しない。既に読み込み済みの発言と重複することは無い（厳密に
+  // created_at < beforeで絞り込むため）が、念のためid重複はMapでまとめて排除する
+  const loadOlder = async () => {
+    const s = state.current
+    if (!s || !hasOlder || loadingOlder) return
+    const oldest = s.messages[0]?.created_at
+    if (!oldest) return
+    setLoadingOlder(true)
+    try {
+      const res = await apiFetch<MessagesResponse>(`${s.basePath}/messages?before=${encodeURIComponent(oldest)}`)
+      if (res.items.length > 0) {
+        const byId = new Map(res.items.map((m) => [m.id, m] as const))
+        for (const m of s.messages) byId.set(m.id, m)
+        s.messages = [...byId.values()].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
+        mutate(s.messages, { revalidate: false })
+      }
+      setHasOlder(res.has_more)
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+
   return {
     messages: data ?? [], error, isLoading, mutate,
     bumpThreadReplyCount, removeMessage, decrementThreadReplyCount, updateMessageReactions, updateMessage,
+    hasOlder, loadingOlder, loadOlder,
   }
 }
