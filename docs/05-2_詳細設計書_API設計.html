@@ -63,6 +63,7 @@
       <tr class="diff-new"><td>1.32</td><td>2026-09-04</td><td>検索結果クリックでその発言までスクロールし薄いオレンジでハイライトする機能を追加した（ユーザーからの明示的な要望）。A-10/A-18に新規パラメータ<code>around</code>（発言idを中心に前後25件ずつ取得。直近50件の外にある古い検索結果にもジャンプできるようにするため）を追加し、A-20のmessage/file結果に<code>thread_parent_id</code>（file結果には<code>message_id</code>も）を追加した。新規エンドポインは追加していない（既存のA-10/A-18/A-20をそのまま拡張）。基本設計書（6.2節、v1.37）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
       <tr class="diff-new"><td>1.33</td><td>2026-09-04</td><td>新規A-74（POST /api/messages/{id}/cancel-generation）を追加した。ユーザーからの報告「AIの生成が数十分も生成中のまま」を受けた調査で、非同期タスク方式にはプロセス再起動から復旧する手段が無い設計上の欠落が判明したため対応した。チャンネル参加者なら誰でも実行できる（A-12削除と異なり投稿者本人・admin限定にしない）。あわせてアプリ起動時に生成中のまま残っている行を自動復旧する処理も追加した（新規APIではなく内部の起動処理）。基本設計書（8.7節、v1.40）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
       <tr class="diff-new"><td>1.34</td><td>2026-09-07</td><td>F-41 @メンションをDMへも拡張した（ユーザーからの明示的な要望）。A-14の説明（4.3節）を「元発言がDMの場合は候補元が無いためmentionsを送っても無視される」から「元発言がチャンネル・DMいずれの場合もT-07へ保存する」に更新し、対象がそのDMの参加者であることを検証する点を明記した。A-19（4.4節）はmentionsフィールドを受け付けるようになったが、A-16・A-17と同じ形式でリクエスト/レスポンス例は既存のA-11の例と共通のため新規の例は追加していない。基本設計書（5.22節、v1.41）を一貫して更新した。</td></tr>
+      <tr class="diff-new"><td>1.35</td><td>2026-09-17</td><td>チャンネルごとのAIモデル選択機能（ユーザーからの明示的な要望）に伴い、A-24のリクエストへ任意項目<code>ai_model</code>（null/空文字は既定値を使う、指定時は<code>services/ai_client.MODEL_COSTS</code>のキー集合以外422）を追加し、A-23・A-24のレスポンス（T-08該当カラム）へ<code>ai_model</code>・<code>default_model</code>（AI_MODEL環境変数の現在値）・<code>available_models</code>（選択肢一覧）を追加した。基本設計書（8.1節、v1.43）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
     </tbody>
   </table>
 
@@ -309,15 +310,16 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <pre><code>// response 200
 { "channel_id": "42", "is_ai_enabled": true, "persona_name": "Kogack AI", "persona_icon_url": null,
   "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only",
-  "out_of_scope_policy": "strict", "folder_ids": ["3", "5"],
+  "out_of_scope_policy": "strict", <span class="diff-new">"ai_model": null, "default_model": "gpt-4.1-nano",
+  "available_models": ["gpt-4o-mini", "gpt-5-nano", "gpt-4.1-nano"],</span> "folder_ids": ["3", "5"],
   "skills": [ { "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し..." } ],
   "fallback_handoff_user_id": "15" }</code></pre>
-  <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。skills（T-11由来）・fallback_handoff_user_idはF-12実装（1.23版）に伴い追加した。skillsは登録が無ければ空配列、fallback_handoff_user_idは未設定ならnull（既定のチャンネル管理者へ引き継ぐ）。</span></p>
+  <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。skills（T-11由来）・fallback_handoff_user_idはF-12実装（1.23版）に伴い追加した。skillsは登録が無ければ空配列、fallback_handoff_user_idは未設定ならnull（既定のチャンネル管理者へ引き継ぐ）。<span class="diff-new">ai_model・default_model・available_modelsは2026-09-17のチャンネルごとのAIモデル選択機能（1.35版）に伴い追加した。</span></span></p>
 
   <p><strong>A-24 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/general</strong></p>
-  <pre><code>{ "is_ai_enabled": false, "reaction_mode": "mention_only" }
-// response 200: 更新後のT-08該当カラムを返す（A-23と同じ形）</code></pre>
-  <p class="muted"><code>reaction_mode</code>は<span class="diff-new">F-15実装（1.24版）に伴い必須項目としてこのAPIに追加した</span>。<code>'mention_only'</code>/<code>'proactive'</code>以外は422。基本設定タブ（is_ai_enabledを変更）・反応モードタブ（reaction_modeを変更）はいずれもこのAPIを共用し、自分が変更しない側のフィールドも現在値のまま一緒に送る（A-27参照ドキュメント範囲がfolder_ids・out_of_scope_policyを束ねて送るのと同じ考え方）。<code>'proactive'</code>時の起動条件（人間の投稿には関連性判定を挟まず常に応答する）は基本設計書8.1節の設計判断を参照。</p>
+  <pre><code>{ "is_ai_enabled": false, "reaction_mode": "mention_only", <span class="diff-new">"ai_model": "gpt-4o-mini"</span> }
+// response 200: 更新後のT-08該当カラム（<span class="diff-new">ai_model・default_model・available_modelsを含む</span>）を返す（A-23と同じ形）</code></pre>
+  <p class="muted"><code>reaction_mode</code>は<span class="diff-new">F-15実装（1.24版）に伴い必須項目としてこのAPIに追加した</span>。<code>'mention_only'</code>/<code>'proactive'</code>以外は422。<span class="diff-new"><code>ai_model</code>（1.35版で追加、任意項目・省略時null）はチャンネルごとのAIモデル上書き。null/空文字は「AI_MODEL環境変数の既定値（レスポンスの<code>default_model</code>）を使う」ことを意味する。<code>services/ai_client.py</code>の単価表<code>MODEL_COSTS</code>のキー集合（レスポンスの<code>available_models</code>と同じ）以外は422。</span>基本設定タブ（is_ai_enabled・ai_modelを変更）・反応モードタブ（reaction_modeを変更）はいずれもこのAPIを共用し、自分が変更しない側のフィールドも現在値のまま一緒に送る（A-27参照ドキュメント範囲がfolder_ids・out_of_scope_policyを束ねて送るのと同じ考え方）。<code>'proactive'</code>時の起動条件（人間の投稿には関連性判定を挟まず常に応答する）は基本設計書8.1節の設計判断を参照。</p>
 
   <p><strong>A-25 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/character</strong></p>
   <pre><code>{ "persona_name": "総務サポーター", "persona_icon_url": "https://.../icons/ab12cd34.png",

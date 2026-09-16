@@ -17,7 +17,7 @@
     <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
     <div class="meta">
       <span>作成日: 2026-08-19</span>
-      <span>版数: 1.30</span>
+      <span>版数: 1.43</span>
       <span>作成: コガソフトウェア株式会社</span>
     </div>
     <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
@@ -71,6 +71,7 @@
       <tr class="diff-new"><td>1.40</td><td>2026-09-04</td><td>AIの生成を強制的に中断できる機能（A-74）と、バックエンドプロセス再起動時に「生成中」のまま取り残された発言を自動復旧する仕組みを追加した（ユーザーからの報告「AIが数十分も生成中のまま」を受けた調査・対応）。8.7節に、非同期タスク（asyncio.create_task）方式には生成中のプロセス再起動から復旧する手段が元々無かったという設計上の欠落と、その対策（手動中断はチャンネル参加者なら誰でも可、自動復旧はアプリ起動時に一括処理）を設計判断として追記した。詳細設計書API設計（A-74、v1.33）を一貫して更新した。要件定義書上のF-xxに対応付けられた変更ではないため（F-31の生成中表示に対する運用上の補完）、要件定義書・画面モックアップの改訂は無い。</td></tr>
       <tr class="diff-new"><td>1.41</td><td>2026-09-07</td><td>F-41「@メンションの候補選択・ID参照化」をDMへも拡張した（ユーザーからの明示的な要望「DMでもメンションできるようにしたい」）。従来はメンション候補元（A-46）がチャンネル専用のためDM発言のmentionsは常に無視していたが、target_user_idの検証先をmessages.channel_id/dm_idに応じてchannel_membersまたはdirect_message_membersへ切り替える形に一般化し、DM本体・DMのスレッド返信のどちらでもメンションできるようにした。5.22節に設計判断を追記した。要件定義書v1.26・詳細設計書API設計（v1.34）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.42</td><td>2026-09-07</td><td>層2ドキュメントQ&Aに向けたGoogle Drive連携の最初のスライスに着手した。以前6.2節のcalloutで挙げていた3つの前提のうち、GCP側のDrive API有効化とOAuthスコープの全社展開について千田氏の許可を得られたため、残る「利用者ごとのDriveアクセストークンをサーバー側に保存・更新する基盤」を新規T-23 google_drive_tokensとして実装した（詳細設計書DB設計3.18節、v1.14）。google_auth.pyのスコープにdrive.readonlyを恒久的に追加し、access_type=offline・prompt=consentでrefresh_tokenを確実に取得するようにした。索引作成・埋め込みベクトル化・検索本体（search_documentsツール）は次のスライス。6.2節の該当calloutに追記した。要件定義書・画面モックアップは変更なし。</td></tr>
+      <tr class="diff-new"><td>1.43</td><td>2026-09-17</td><td>チャンネルごとのAIモデル選択機能を追加した（ユーザーからの明示的な要望「アプリ上でAIモデルを選択できるようにする機能が欲しい」）。従来「使用モデルは環境変数AI_MODELのみで指定し、画面上でのモデル切替機能は設けない」としていた方針（2.2節）を反転し、S-06「基本設定」タブでチャンネル管理者がチャンネルごとに上書きできるようにした。設定範囲を姉妹プロジェクトKeirekiと同じアプリ全体1設定にするか、チャンネルごとにするかをユーザーに確認し、既存のチャンネルAI設定（persona_name等）と一貫させるためチャンネルごと（T-08 channel_ai_settingsへai_model列を追加）を選んだ経緯を8.1節に設計判断として追記した。2.2節のAI行を更新した。詳細設計書API設計（A-24、v1.35）を一貫して更新した。要件定義書上のF-xxに対応付けられた変更ではないため要件定義書・画面モックアップの改訂は無い。</td></tr>
     </tbody>
   </table>
 
@@ -231,7 +232,7 @@
       <tr><td>Backend</td><td>FastAPI (Python) + Uvicorn + asyncpg</td></tr>
       <tr><td>Database</td><td>PostgreSQL (Supabase)、全テーブルRLS有効</td></tr>
       <tr><td>認証</td><td>Google OAuth 2.0 + セッションJWT（HttpOnly Cookie）、<code>ALLOWED_DOMAINS</code> による制限（既定: kogasoftware.com）</td></tr>
-      <tr><td>AI（本書で確定）</td><td>OpenAI API（Chat Completions + Function Calling）。使用モデルは環境変数 <code>AI_MODEL</code> で指定し、画面上でのモデル切替機能は設けない（要件定義書に定めがないため）</td></tr>
+      <tr><td>AI（本書で確定）</td><td>OpenAI API（Chat Completions + Function Calling）。使用モデルは環境変数 <code>AI_MODEL</code> で既定値を指定し、<span class="diff-new">S-06「基本設定」タブでチャンネルごとに上書きできる（2026-09-17、6.2節「設計判断」参照）</span></td></tr>
       <tr><td>ドキュメント連携</td><td>Google Drive API（文書の参照・権限確認。8.2節）</td></tr>
       <tr><td>リアルタイム配信（本書で確定）</td><td>WebSocket等は用いず、フロントエンドが3秒間隔でポーリングする方式とする。要件定義書7章の目標値（5秒以内反映）に対して余裕を持たせた間隔とし、将来的にWebSocket/SSEへ移行する余地は残す</td></tr>
       <tr><td>ファイルストレージ（本書で確定）</td><td>Supabase Storage。DBと同一ベンダーとし、認証・アクセス制御の仕組みを流用して運用を簡素化する</td></tr>
@@ -1098,6 +1099,10 @@
   <div class="callout diff-new">
     <strong>設計判断（自動対応範囲「人が対応」の判定方式、およびrequest_categoryを自由編集にした理由）:</strong> 本節の元の記述（下記手順3）は「「人が対応」に区分される場合はAI呼び出しを行わず、引き継ぎメッセージを直接投稿する」としていたが、依頼文をどのカテゴリ（T-12 request_category）に分類するかのアルゴリズム自体は規定していなかった。厳密に実装するには、投稿ごとに「どの区分に該当するか」を判定する軽量な事前分類LLM呼び出しを追加する必要があり、反応モード（上記callout）と同じ「追加LLM呼び出し＝コスト増」のトレードオフが生じる。ユーザーと協議のうえ、F-12スキルの「対応できない依頼は自分で引き継ぐ」という既存の仕組みと揃え、専用の分類呼び出しは追加せず、区分一覧をシステムプロンプトの一部としてAI自身に渡し、通常の応答生成（1回のLLM呼び出し）の中でAIが「人が対応」該当を自己判断し、回答本文で引き継ぎ案内をする方式を採用した（<code>services/ai_agent.py</code> <code>_build_auto_response_section</code>）。したがって下記手順3・4は「AI呼び出しを行わない」ハードな事前遮断ではなく、AIが1回の応答の中で判断する仕組みである点に注意（<code>services/trigger_matcher.py</code>のような同期・LLM不要の判定とは異なる）。また「確認のうえ対応」（confirm）は実行前確認（F-25・pending_actions）が書き込み系ツール自体の未実装により到達しないため、現状は「自動対応可」と同じ扱いで区別しない。<br><br>
     request_category（依頼内容カテゴリ）は、画面モックアップが6件の例を示しているため固定候補のようにも見えるが、要件定義書REQ-F-15が「チャンネルの担当部署が、何をAIに任せるかを自ら決められること」と明記しているため、チャンネル管理者が自由に追加・削除できる仕様とした（A-31、T-12.request_categoryはUNIQUE(channel_id, request_category)のみで、固定の列挙値ではない）。画面モックアップの6例は記入例であり、実装のUIも「＋追加」で任意の名称を登録できる。
+  </div>
+
+  <div class="callout diff-new">
+    <strong>設計判断（チャンネルごとのAIモデル選択を追加した理由）:</strong> 使用モデルは当初、環境変数<code>AI_MODEL</code>のみで一律指定し、姉妹プロジェクトKeirekiのような画面上でのモデル切替機能は設けない方針だった（要件定義書に定めがなく、コスト・速度の異なる複数モデルを実運用で使い分ける具体的な要望も無かったため）。2026-09-17にユーザーから「アプリ上でAIモデルを選択できるようにしたい」との明示的な要望を受け、この方針を反転した。設定範囲は、Keirekiのようなアプリ全体1設定（システム管理者がS-08で一括設定）ではなく、既存のT-08 channel_ai_settingsへ<code>ai_model</code>列を追加する形の<strong>チャンネルごと</strong>の設定を選んだ（ユーザーに両案を提示し選択）。理由は、persona_name・reaction_mode・out_of_scope_policy等、既存のチャンネルAI設定がいずれもチャンネル単位で管理されており、モデル選択だけをグローバル1設定にすると既存の設計パターンから外れること、またチャンネルごとに用途（高速・低コストで済む雑談チャンネル／高品質さが必要な業務チャンネル）が異なるため、チャンネル単位で選べる方が実運用に合うためである。<code>ai_model</code>はNULL可のTEXT列とし、DBのCHECK制約では選択肢を縛らない（<code>services/ai_client.py</code>の単価表<code>MODEL_COSTS</code>のキー集合をAPI層（<code>routers/ai_settings.py</code>）が検証する。単価表に新しいモデルの行を追加するだけで、DBスキーマ変更無しに選択肢が増える設計）。NULL（既定）のチャンネルは従来どおり<code>AI_MODEL</code>環境変数の値を使う。S-06「基本設定」タブに配置した（「AIの有効/無効」と同じ「AIの動作そのものに関する基本的な設定」という位置づけ）。
   </div>
 
   <ol>

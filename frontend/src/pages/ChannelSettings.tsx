@@ -392,7 +392,9 @@ function AdminTab({ channelId }: { channelId: string }) {
 }
 
 // 基本設定タブ（A-24、F-08）。reaction_modeは反応モードタブ（ReactionTab）が担当するため、
-// ここでは現在値をそのまま一緒に送るだけで変更しない（A-27参照ドキュメント範囲と同じ考え方）
+// ここでは現在値をそのまま一緒に送るだけで変更しない（A-27参照ドキュメント範囲と同じ考え方）。
+// AIモデル選択（2026-09-17、ユーザーからの明示的な要望）もこのタブに同居させる
+// （「有効/無効」と同じ「AIの動作そのものに関する基本的な設定」という位置づけ）
 function GeneralTab({
   channelId,
   channelName,
@@ -412,10 +414,36 @@ function GeneralTab({
     try {
       await apiFetch(`/api/channels/${channelId}/ai-settings/general`, {
         method: 'PUT',
-        body: JSON.stringify({ is_ai_enabled: !settings.is_ai_enabled, reaction_mode: settings.reaction_mode }),
+        body: JSON.stringify({
+          is_ai_enabled: !settings.is_ai_enabled,
+          reaction_mode: settings.reaction_mode,
+          ai_model: settings.ai_model,
+        }),
       })
       await mutate()
       toast(settings.is_ai_enabled ? 'AIを無効にしました' : 'AIを有効にしました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '変更に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const changeModel = async (value: string) => {
+    const nextModel = value || null
+    if (nextModel === settings.ai_model || saving) return
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/general`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          is_ai_enabled: settings.is_ai_enabled,
+          reaction_mode: settings.reaction_mode,
+          ai_model: nextModel,
+        }),
+      })
+      await mutate()
+      toast('AIモデルを更新しました')
     } catch (e) {
       toast(e instanceof Error ? e.message : '変更に失敗しました', 'error')
     } finally {
@@ -454,6 +482,26 @@ function GeneralTab({
           </div>
         </span>
       </label>
+
+      <div className="mt-5 rounded-[10px] border border-line bg-surface-subtle px-3.5 py-3">
+        <label className="field-label mb-1.5 block text-[13px] font-bold text-ink">AIモデル</label>
+        <select
+          value={settings.ai_model ?? ''}
+          onChange={(e) => changeModel(e.target.value)}
+          disabled={saving}
+          className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-ink"
+        >
+          <option value="">既定（{settings.default_model}）を使う</option>
+          {settings.available_models.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <div className="mt-1.5 text-[11.5px] text-ink-subtle">
+          応答生成に使うOpenAIのモデルを個別に指定できます。指定しない場合はサーバー側の既定値（AI_MODEL環境変数）を使います。モデルによって応答速度・品質・コストが異なります。
+        </div>
+      </div>
     </div>
   )
 }
@@ -1007,7 +1055,11 @@ function ReactionTab({
     try {
       await apiFetch(`/api/channels/${channelId}/ai-settings/general`, {
         method: 'PUT',
-        body: JSON.stringify({ is_ai_enabled: settings.is_ai_enabled, reaction_mode: mode }),
+        body: JSON.stringify({
+          is_ai_enabled: settings.is_ai_enabled,
+          reaction_mode: mode,
+          ai_model: settings.ai_model,
+        }),
       })
       await mutate()
       toast('反応モードを更新しました')

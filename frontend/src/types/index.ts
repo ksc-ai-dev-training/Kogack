@@ -73,6 +73,10 @@ export interface AiSettings {
   behavior_prompt: string | null
   reaction_mode: 'mention_only' | 'proactive'
   out_of_scope_policy: 'strict' | 'general'
+  /** チャンネルごとのAIモデル選択（2026-09-17）。nullは既定値（default_model）を使う */
+  ai_model: string | null
+  default_model: string
+  available_models: string[]
   folder_ids: string[]
   skills: Skill[]
   auto_response_rules: AutoResponseRule[]

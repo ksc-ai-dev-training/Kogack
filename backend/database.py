@@ -245,11 +245,18 @@ CREATE TABLE IF NOT EXISTS channel_ai_settings (
     reaction_mode             TEXT NOT NULL DEFAULT 'mention_only' CHECK (reaction_mode IN ('mention_only', 'proactive')),
     out_of_scope_policy       TEXT NOT NULL DEFAULT 'strict' CHECK (out_of_scope_policy IN ('strict', 'general')),
     fallback_handoff_user_id  BIGINT REFERENCES users(id),
+    ai_model                  TEXT,
     updated_by                BIGINT REFERENCES users(id),
     created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE channel_ai_settings ENABLE ROW LEVEL SECURITY;
+-- ai_model（チャンネルごとのAIモデル選択、2026-09-17）。既存DBのテーブルには
+-- CREATE TABLE IF NOT EXISTSが効かないためbackfillする。NULL＝AI_MODEL環境変数の既定値を
+-- 使う（services/ai_client.py resolve_model参照）。選べる値そのものはDBのCHECK制約では縛らず
+-- services/ai_client.MODEL_COSTSのキー集合をAPI層（routers/ai_settings.py）で検証する
+-- （モデルを追加・削除するたびにDBスキーマ変更が要らないようにするため）。
+ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS ai_model TEXT;
 -- persona_nameの既定値を「AI」から「Kogack AI」へ変更した際のbackfill（CREATE TABLE IF NOT EXISTSは
 -- 既存DBのテーブルには効かないため、既存DBの以後のINSERT分にも新しい既定値を反映させる。
 -- 既にAI発言済みの行のpersona_name自体の書き換えは対象外＝一度きりの手動UPDATEで対応する）

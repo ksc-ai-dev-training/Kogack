@@ -1010,7 +1010,7 @@ async def _generate_and_post(
         ]
         messages += _rows_to_chat_messages(history_rows, names, include_timestamps=True)
 
-        model = ai_client.get_model()
+        model = ai_client.resolve_model(settings.get("ai_model"))
         reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_doc_tools)
         reply = _strip_leaked_timestamp_prefix(reply)
 
@@ -1213,7 +1213,7 @@ async def _generate_summary_and_post(
         messages.append({"role": "user", "content": SUMMARY_INSTRUCTION})
 
         client = ai_client.get_client()
-        model = ai_client.get_model()
+        model = ai_client.resolve_model(settings.get("ai_model"))
         res = await client.chat.completions.create(
             model=model, messages=messages,
             max_completion_tokens=MAX_OUTPUT_TOKENS,

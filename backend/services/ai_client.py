@@ -1,7 +1,11 @@
 # OpenAI APIクライアント・コスト計算（詳細設計書AIサポート10.5〜10.6節）。姉妹プロジェクトKeireki
-# のai_client.pyと責務は同じだが、使用モデルは環境変数AI_MODELのみで決定し、管理画面からの
-# モデル切替機能は設けない（10.6節「Keirekiのような画面上でのモデル切替機能は設けない」。
-# 意図的な相違点、CLAUDE.md参照）。単価は円/1000トークン（10.5節の単価表をそのまま採用）。
+# のai_client.pyと責務は同じだが、単価は円/1000トークン（10.5節の単価表をそのまま採用）。
+# **2026-09-17にユーザーからの明示的な要望でチャンネルごとのモデル選択機能を追加した**（従来は
+# AI_MODEL環境変数のみで一律決定し、Keirekiのような画面上でのモデル切替機能は設けない、という
+# 意図的な相違点だったが、この方針を反転した。詳細は10.6節・CLAUDE.md参照）。ただしKeirekiの
+# app_settingsのようなグローバル1設定ではなく、既存のchannel_ai_settings（T-08）へ
+# ai_model列を追加する形の**チャンネルごと**の設定にした（persona_name等の既存の
+# チャンネル単位AI設定と一貫させるため）。resolve_model()参照。
 import os
 
 from openai import AsyncOpenAI
@@ -38,6 +42,19 @@ def is_configured() -> bool:
 
 def get_model() -> str:
     return _env("AI_MODEL", DEFAULT_MODEL)
+
+
+def resolve_model(channel_model: str | None) -> str:
+    """チャンネルのai_model（channel_ai_settings.ai_model）が指定されていればそれを、
+    未指定（NULL・空文字）ならAI_MODEL環境変数の既定値を使う。services/ai_agent.pyの
+    実際にAPIを呼ぶ2箇所（_generate_and_post・_generate_summary_and_post）で使う"""
+    return channel_model or get_model()
+
+
+def selectable_models() -> list[str]:
+    """S-06基本設定タブのモデル選択肢。MODEL_COSTSのキー集合をそのまま返す（新しいモデルの
+    単価行を追加すれば自動的に選択肢にも現れる、DBのCHECK制約では縛らない設計と対）"""
+    return list(MODEL_COSTS.keys())
 
 
 # reasoning系モデル（gpt-5-nano等）はChat Completions APIで`reasoning_effort`を指定しないと、
