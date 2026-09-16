@@ -11,7 +11,7 @@ from routers import (
     admin, ai_settings, attachments, auth, channels, dms, icons, messages, push, recurring_posts,
     scheduled_messages, search, trigger_rules, users,
 )
-from services import ai_agent, scheduled_dispatcher
+from services import ai_agent, app_help_indexer, scheduled_dispatcher
 
 
 @asynccontextmanager
@@ -21,6 +21,10 @@ async def lifespan(app: FastAPI):
     # 自動復旧。ユーザーからの報告で発覚した「デプロイ・再起動のタイミングと重なると『生成中』の
     # まま固まり続ける」障害への対応。services/ai_agent.py参照）
     await ai_agent.recover_orphaned_generations()
+    # 操作マニュアルの索引化（ユーザーからの明示的な要望、2026-09-16）。内容のハッシュが
+    # 前回と同じなら何もしない冪等な処理のため、毎起動awaitして問題ない（services/
+    # app_help_indexer.py参照。AUTO_MIGRATEと同じ「無条件に毎回流しても安全」という前提）
+    await app_help_indexer.ensure_indexed()
     scheduled_dispatcher.start()  # F-35 送信予約の30秒間隔ディスパッチャ（基本設計書5.15節）
     yield
     await scheduled_dispatcher.stop()

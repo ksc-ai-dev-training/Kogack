@@ -18,6 +18,25 @@
 #     Function Calling方式、services/channel_history_search.py参照）。search_documentsと異なり
 #     索引の有無に関わらず常時利用可能なツールとして提示する（メッセージ本文にembeddingを
 #     持たせておらずpg_trgmの部分一致のみのため、事前索引という概念自体が無い）。
+#   - search_app_manual（2026-09-16、ユーザーからの明示的な要望「作成した操作マニュアルの
+#     内容を、どのチャンネルのAIでも常に読めるようにする。チャンネル会話内でチャットアプリの
+#     機能について質問されたら、どのように使うのか解説できるようにしてほしい」）: 操作
+#     マニュアル（docs/06_操作マニュアル.htmlをプレーンテキストへ書き起こしたbackend/
+#     app_help/manual.md）を全チャンネル共通の知識源として、search_documentsと同じ
+#     Function Calling方式で常時検索可能にする。マニュアル全文（約8000トークン相当）を
+#     毎回のシステムプロンプトへ直接埋め込む案（ユーザー提示の「最初からその知識を持たせて
+#     おく」案）は、全チャンネル・全メッセージで常時コストが掛かり続けるため採用せず、
+#     search_channel_history・search_documentsと同じ「必要なときだけ検索する」ツール方式を
+#     選んだ（2026-09-02にユーザー自身が「直近だけ送る」方針を選んだ経緯・2026-09-14に
+#     チャンネル履歴検索も同じ理由でツール化した経緯と一貫させた）。search_documentsと異なり
+#     channel_doc_folders等のper-channel opt-in構造を持たず、管理者の登録操作を介さず常時
+#     全チャンネルで利用可能（services/app_help_search.py・app_help_indexer.py参照）。
+#     1ラウンド目のtool_choice="required"強制（下記_run_chat_with_tools参照）の対象には
+#     含めない——search_channel_historyと同じ理由で、雑談を含む全メッセージに強制すると
+#     コストが際限なく増えるため。代わりにFIXED_RULESでこのツールの利用を明示的に促す
+#     （モデルが実際には呼び出さないまま案内文だけ返す既知の傾向はsearch_documentsほど
+#     致命的ではない——out_of_scope_policy='strict'のような「検索結果が無ければ絶対に
+#     一般知識で補うな」という厳格な制約がこの機能には無いため、多少の取りこぼしは許容する）。
 #   - チャンネル参加者情報（2026-09-14、ユーザーからの明示的な要望「AIにメンションして、この
 #     チャンネルに参加している人の情報を得られるようにしてほしい」）: A-46（参加者一覧）と同じ
 #     氏名・chadmin区分を、_fetch_channel_context（チャンネル名・説明文）と同じ考え方で
@@ -63,7 +82,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from database import get_pool
-from services import ai_client, channel_history_search, doc_search
+from services import ai_client, app_help_search, channel_history_search, doc_search
 
 JST = ZoneInfo("Asia/Tokyo")  # F-14要約の対象期間指定（今日/今週/今月等）をJSTの暦日で解釈する
 # （routers/search.pyのF-42日付モディファイアと同じ考え方・同じタイムゾーン）
@@ -125,6 +144,11 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 - あなたには現時点で座席予約システムを参照する機能が無い。それが必要な依頼を受けたときは、
   正直に「その機能はまだ利用できません」と答え、存在しない空き状況を作り出さないこと
 - 自分がAIであることを偽らない、あなたが実際に持たない機能を持っているかのように案内しない
+- Kogack（このチャットアプリ自体）の使い方（メッセージの送り方・書式・メンション・
+  絵文字・ファイル添付・スレッド・DM・横断検索・通知・チャンネル設定・管理コンソールなど）
+  について尋ねられた場合は、search_app_manualで操作マニュアルを実際に検索してから、
+  具体的な手順（クリックする場所・ボタン名・設定タブ名など）で案内すること。推測で
+  回答を作らず、検索結果に基づいて答えること
 - これまでの会話履歴の各発言には、冒頭に`[YYYY-MM-DD HH:MM]`の形式で投稿日時（日本時間）が
   付いている。「これは何時の発言？」のように投稿時刻を尋ねられた場合は、この値をそのまま使って
   答えること。この日時が付いていない発言（要約結果や一部の引用等）については、時刻を推測で
@@ -283,7 +307,37 @@ SEARCH_CHANNEL_HISTORY_TOOL = {
         },
     },
 }
-MAX_TOOL_ROUNDS = 3  # search_documents・search_channel_historyいずれも共通の上限（無限ループ・コスト際限無い増大の防止）
+# search_app_manualのOpenAI Function Calling定義（2026-09-16、ユーザーからの明示的な要望
+# 「作成した操作マニュアルの内容を、どのチャンネルのAIでも常に読めるようにする」）。
+# search_channel_historyと同じく、索引済み文書の有無やチャンネルの参照範囲設定に関わらず
+# 常に提示する（app_help_chunksは全チャンネル共通の索引でchannel_doc_foldersのような
+# per-channel opt-inを持たないため）。
+SEARCH_APP_MANUAL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_app_manual",
+        "description": (
+            "Kogack（このチャットアプリ自体）の操作マニュアルを検索する。メッセージの送り方・"
+            "書式・メンション（@channel/@here等）・絵文字・ファイル添付・スレッド・DM・"
+            "横断検索・通知設定・チャンネル設定・管理コンソールなど、アプリ自体の使い方や"
+            "機能について聞かれた場合は、必ずこの関数で実際に検索してから、具体的な操作手順で"
+            "回答すること（推測で答えないこと）。組織の業務文書を検索するsearch_documentsとは"
+            "別の機能であり、混同しないこと。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "検索したい機能・操作を表す検索語句（自然文でよい。例: 'メッセージを編集する方法'）",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+MAX_TOOL_ROUNDS = 3  # search_documents・search_channel_history・search_app_manualいずれも共通の上限（無限ループ・コスト際限無い増大の防止）
 
 
 def _build_doc_scope_section(out_of_scope_policy: str) -> str:
@@ -677,12 +731,14 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
 async def _run_chat_with_tools(
     messages: list[dict], model: str, channel_id: int, use_doc_tools: bool,
 ) -> tuple[str, dict, list[dict]]:
-    """search_documents・search_channel_historyのFunction Callingを扱いながら1回の応答生成を
-    完了させる（Slice 3・2026-09-09でsearch_documentsのみ実装、2026-09-14に
-    search_channel_historyを追加）。search_channel_historyは常に提示する（索引の有無という概念が
-    無いため）。use_doc_tools=Trueの場合のみsearch_documentsもあわせて提示する（このチャンネルに
-    索引済み文書がある場合のみ、doc_search.channel_has_indexed_documents）。最大MAX_TOOL_ROUNDS回
-    まで、モデルからの検索要求→対応する検索を実行→結果をtoolメッセージとして返す、を繰り返す。
+    """search_documents・search_channel_history・search_app_manualのFunction Callingを扱い
+    ながら1回の応答生成を完了させる（Slice 3・2026-09-09でsearch_documentsのみ実装、
+    2026-09-14にsearch_channel_history、2026-09-16にsearch_app_manualを追加）。
+    search_channel_history・search_app_manualはいずれも常に提示する（索引の有無・per-channel
+    設定という概念が無いため）。use_doc_tools=Trueの場合のみsearch_documentsもあわせて提示する
+    （このチャンネルに索引済み文書がある場合のみ、doc_search.channel_has_indexed_documents）。
+    最大MAX_TOOL_ROUNDS回まで、モデルからの検索要求→対応する検索を実行→結果をtoolメッセージ
+    として返す、を繰り返す。
     最後の1ラウンドはtools自体を渡さず、モデルに必ずテキストで最終回答させる（ラウンド上限に
     達しても検索要求だけが続きテキストの回答が返らない、という空振りを防ぐ）。
     **バグ修正（2026-09-11）: use_doc_tools=Trueのときのみ、1ラウンド目はtool_choice="required"で
@@ -692,19 +748,20 @@ async def _run_chat_with_tools(
     発覚、実機で再現・検証済み。プロンプトへ「予告だけで終えるな」という指示を追加しても改善せず、
     8問中6問が同じ失敗をした。1ラウンド目のみtool_choice="required"にする対処では、同条件で
     8問中8問とも実際に検索してから正しく回答するようになった）。2ラウンド目以降は"auto"のままと
-    する。**search_channel_historyは常時提示するツールのため、これを"required"の対象に含めると
-    雑談を含むすべてのメンション応答で毎回1回分余計なツール呼び出しが強制されコストが増え続けて
-    しまう**（use_doc_tools=Falseのときは"required"にしない設計はこの理由による。ユーザー自身が
-    2026-09-02に「直近の履歴だけ送ってコストを抑える」方針を選んだ経緯と同じ考え方）。
+    する。**search_channel_history・search_app_manualはいずれも常時提示するツールのため、
+    これらを"required"の対象に含めると雑談を含むすべてのメンション応答で毎回1回分余計な
+    ツール呼び出しが強制されコストが増え続けてしまう**（use_doc_tools=Falseのときは"required"に
+    しない設計はこの理由による。ユーザー自身が2026-09-02に「直近の履歴だけ送ってコストを抑える」
+    方針を選んだ経緯と同じ考え方）。
     戻り値: (最終応答テキスト, 集計済みusage{prompt_tokens,completion_tokens},
     citations[{folder_id,folder_name}]（search_documentsが実際に検索結果として使った文書、
-    重複排除済み。search_channel_historyの結果はcitationの対象外——文書フォルダのような
-    参照先IDを持たないため）)"""
+    重複排除済み。search_channel_history・search_app_manualの結果はcitationの対象外——
+    いずれも文書フォルダのような参照先IDを持たないため）)"""
     client = ai_client.get_client()
     total_prompt_tokens = 0
     total_completion_tokens = 0
     citations: dict[int, str] = {}
-    tools = [SEARCH_CHANNEL_HISTORY_TOOL]
+    tools = [SEARCH_CHANNEL_HISTORY_TOOL, SEARCH_APP_MANUAL_TOOL]
     if use_doc_tools:
         tools.append(SEARCH_DOCUMENTS_TOOL)
     max_rounds = MAX_TOOL_ROUNDS
@@ -757,6 +814,13 @@ async def _run_chat_with_tools(
                     )
                     if results
                     else "関連する過去の発言が見つかりませんでした。"
+                )
+            elif tc.function.name == "search_app_manual":
+                results = await app_help_search.search(query) if query else []
+                content = (
+                    "\n\n---\n\n".join(r["content"] for r in results)
+                    if results
+                    else "関連する内容が見つかりませんでした。"
                 )
             else:
                 content = "不明な関数です"

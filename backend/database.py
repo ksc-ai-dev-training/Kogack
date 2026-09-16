@@ -544,6 +544,33 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
 CREATE INDEX IF NOT EXISTS idx_doc_chunks_folder_id ON doc_chunks (folder_id);
 ALTER TABLE doc_chunks ENABLE ROW LEVEL SECURITY;
 
+-- app_help_chunks: 操作マニュアル（backend/app_help/manual.md）をチャンネルAIが常に検索
+-- できるようにする索引（要件定義書上のF-xxに対応付けられない新規機能、ユーザーからの
+-- 明示的な要望「作成したマニュアルの内容をどのチャンネルのAIでも常に読めるようにする」、
+-- 2026-09-16）。doc_chunksと同じ1536次元embeddingだが、doc_folders/channel_doc_foldersの
+-- ようなper-channelのACL・opt-in構造は持たない（組織の業務文書と異なり、アプリ自体の
+-- 使い方という全チャンネル共通の知識であり、管理者の登録操作を介さず常時全チャンネルで
+-- 検索可能にすべきため。services/app_help_search.py参照）。
+CREATE TABLE IF NOT EXISTS app_help_chunks (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    chunk_index INT NOT NULL UNIQUE,
+    content     TEXT NOT NULL,
+    embedding   vector(1536) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE app_help_chunks ENABLE ROW LEVEL SECURITY;
+
+-- app_help/manual.mdの内容が変わったときだけ再索引するための、単一行のハッシュ記録
+-- （services/app_help_indexer.py がアプリ起動のたびに現在のファイル内容のハッシュと比較し、
+-- 異なる場合のみOpenAI Embeddings APIを呼んで全チャンクを作り直す。AUTO_MIGRATEの冪等
+-- パターンと同じ考え方で、無条件に毎起動再索引すると起動時間・APIコストが無駄に嵩むため）。
+CREATE TABLE IF NOT EXISTS app_help_index_state (
+    id          SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    source_hash TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE app_help_index_state ENABLE ROW LEVEL SECURITY;
+
 -- T-16 audit_logs（監査ログ、S-08「監査ログ」タブ。05-1_詳細設計書_DB設計.html 3.12節）。
 -- 「いつ・誰が・どの項目を」変更したかのみを記録し、変更内容そのもの（過去バージョン・差分）は
 -- 保持しない（summaryは種類の説明のみで実際の入力値は含めない）。event_type='login'はA-02
