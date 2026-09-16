@@ -45,7 +45,7 @@ _pool: asyncpg.Pool | None = None
 # T-01 usersに加え、S-02/S-03スライスでT-02/T-03/T-05を追加（詳細設計書 DB設計3.1・3.2・3.3・3.5節）。
 # T-05はAI/BOT関連カラムも定義どおりの形で先に作っておく（未使用でもNULL許容のため実害はなく、
 # CREATE TABLE IF NOT EXISTS は既存テーブルへの列追加を retrofit しないため、後からのALTER TABLEを避ける）。
-SCHEMA = """
+SCHEMA = r"""
 -- T-01 users
 CREATE TABLE IF NOT EXISTS users (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -714,6 +714,18 @@ UPDATE users SET name = LEFT(name, 21), updated_at = now() WHERE char_length(nam
 UPDATE channels SET name = LEFT(name, 80), updated_at = now() WHERE char_length(name) > 80;
 UPDATE channels SET topic = LEFT(topic, 500), updated_at = now()
     WHERE topic IS NOT NULL AND char_length(topic) > 500;
+
+-- バグ修正（2026-09-17、ユーザーからの報告）にともなう既存データの一括整形。AI応答生成に
+-- 投稿日時を渡す機能（2026-09-15、include_timestamps）が、AI自身の過去の発言にも
+-- `[YYYY-MM-DD HH:MM] `を前置きしていたため、モデルがこの書式を自分の新しい出力に模倣して
+-- しまい、実際の発言本文（messages.body）にこの文字列が紛れ込んだまま保存されてしまう不具合が
+-- あった（services/ai_agent.py参照）。原因（assistant役へのtimestamp付与）は別途修正済みだが、
+-- 修正前に既に本文へ紛れ込んでしまった既存のAI発言はこのUPDATEでは直らないため、ここで
+-- 先頭のパターンを機械的に取り除く。二重に紛れ込んだケース（`+`で繰り返しを許容）も一度で
+-- 取り切れる。既に綺麗な行はWHERE句にマッチしなくなるため、AUTO_MIGRATE=1で毎起動実行しても
+-- 安全・冪等（2026-09-09の文字数切り詰めbackfillと同じ考え方）。
+UPDATE messages SET body = regexp_replace(body, '^(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+', ''), updated_at = now()
+    WHERE sender_type = 'ai' AND body ~ '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]';
 """
 
 

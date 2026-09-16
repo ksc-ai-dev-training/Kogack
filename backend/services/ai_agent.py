@@ -640,21 +640,62 @@ def _rows_to_chat_messages(rows, names: dict[int, str], include_timestamps: bool
     検索ツールを自発的に使わない限り正確に答えられなかった）。_generate_and_post（通常のメンション
     応答・スレッド内メンション・proactive）でのみTrueを渡し、F-14要約（_generate_summary_and_post）
     は対象外のまま（要約は個々の発言の時刻より内容の集約が主目的で、既存の動作検証済みの挙動を
-    不用意に変えないため。ユーザーへの回答でも「直近の会話履歴」に限定して提案し合意を得た）"""
+    不用意に変えないため。ユーザーへの回答でも「直近の会話履歴」に限定して提案し合意を得た）
+
+    **バグ修正（2026-09-17、ユーザーからの報告「AIの返信の先頭に[YYYY-MM-DD HH:MM]という
+    日時表記が、2個付くとき・1個のとき・付かないときがある。これを付けないでほしい」）**:
+    role='assistant'（AI自身の過去の発言）にも同じ`[timestamp] `を前置きしていたが、Chat
+    Completions APIはモデル自身の新しい出力を「直前までのassistant役のやり取りの続き」として
+    強く模倣する性質があり、これが「自分の過去の発言は毎回[timestamp]から始まっている」という
+    パターンとしてモデルに学習され、新しい返信本文そのものの先頭にも同じ書式を実際に書き出して
+    しまう（本文としてDBへ保存・画面に表示されてしまう）不具合を実機で確認した。一度この
+    パターンが実際の発言本文に紛れ込むと、次にその発言が履歴として再度渡される際は
+    「機械的に付与される外側の[timestamp]」＋「本文に紛れ込んだままの内側の[timestamp]」の
+    二重になり、ユーザーの報告どおり「2個・1個・0個」がまちまちに見える状態になっていた
+    （紛れ込みが起きた発言だけ二重、起きていない発言は単発、この機能自体が無かった古い発言は
+    ゼロという素直な内訳）。role='ai'（assistant）の分岐だけ意図的にprefixを付けないようにし、
+    モデルが模倣する元凶（自分自身の過去のassistant発言に付いたタイムスタンプ表記）を断つ。
+    role='human'/BOT（いずれもuser役として渡す）は引き続きtimestamp付きのままとし、
+    「いつ誰それが言ったか」という主要な用途（ユーザーからの当初の要望どおり）は維持する。
+    これに加えて、_generate_and_postの保存直前で_strip_leaked_timestamp_prefix()により
+    生成結果本文からこのパターンを機械的に除去する安全策も講じている（このバグ修正が
+    完全に効かなかった場合や、user役側からの模倣が起きた場合でも、本文への実際の紛れ込みを
+    確実に防ぐ二重の対策）"""
     messages: list[dict] = []
     for r in rows:
         if not r["body"]:
             continue
-        prefix = f"[{r['created_at'].astimezone(JST).strftime('%Y-%m-%d %H:%M')}] " if include_timestamps else ""
+        # 2026-09-17のバグ修正: assistant役（AI自身の過去の発言）にはtimestampを付けない
+        # （上記docstring参照。モデルが新しい出力へこの書式を模倣してしまう元凶を断つため）
+        is_ai = r["sender_type"] == "ai"
+        prefix = (
+            f"[{r['created_at'].astimezone(JST).strftime('%Y-%m-%d %H:%M')}] "
+            if include_timestamps and not is_ai
+            else ""
+        )
         if r["sender_type"] == "human":
             name = names.get(r["sender_user_id"], "利用者")
             messages.append({"role": "user", "content": f"{prefix}{name}: {r['body']}"})
-        elif r["sender_type"] == "ai":
-            messages.append({"role": "assistant", "content": f"{prefix}{r['body']}"})
+        elif is_ai:
+            messages.append({"role": "assistant", "content": r["body"]})
         else:
             # BOT発言（定期投稿・トリガー）はAIの自己発言と混同しないよう利用者側の文脈として渡す
             messages.append({"role": "user", "content": f"{prefix}{r['bot_display_name'] or 'BOT'}: {r['body']}"})
     return messages
+
+
+# 上記_rows_to_chat_messagesのバグ修正（2026-09-17）と対になる、生成結果に対する安全策。
+# モデルが指示に反して（あるいは既に汚染された履歴から）`[YYYY-MM-DD HH:MM] `をなお模倣して
+# しまった場合でも、実際にDBへ保存・画面表示される本文には絶対に残らないようにする
+# （プロンプト側の対策だけに頼らない、というこのプロジェクトで繰り返し採用してきた方針——
+# 2026-09-11のsearch_documents tool_choice="required"強制と同じ「プロンプト指示だけでは
+# 小型モデルの挙動を確実に制御できないことがある」という教訓に基づく）。先頭に連続して
+# 複数個付いていた場合（二重に汚染されたケース）もまとめて除去できるよう`+`で繰り返しを許容する。
+_LEAKED_TIMESTAMP_PREFIX_RE = re.compile(r"^(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+")
+
+
+def _strip_leaked_timestamp_prefix(text: str) -> str:
+    return _LEAKED_TIMESTAMP_PREFIX_RE.sub("", text)
 
 
 async def maybe_trigger(
@@ -910,6 +951,7 @@ async def _generate_and_post(
 
         model = ai_client.get_model()
         reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_doc_tools)
+        reply = _strip_leaked_timestamp_prefix(reply)
 
         # WHERE generation_status='generating' は、生成の完了とほぼ同時にcancel_generationが
         # 呼ばれた場合の競合対策（cancel_generation側が既にキャンセル済みメッセージへ更新していれば
