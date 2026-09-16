@@ -1027,12 +1027,19 @@ async def _generate_and_post(
 
         if usage["prompt_tokens"] or usage["completion_tokens"]:
             cost = ai_client.estimate_cost_yen(model, usage["prompt_tokens"], usage["completion_tokens"])
+            # request_payload: _run_chat_with_toolsは受け取ったmessagesをin-placeで拡張する
+            # （tool_calls・tool結果を都度appendする）ため、ここで読める時点のmessagesが
+            # 実際にOpenAI APIへ送信した内容の最終形（複数ラウンドあった場合は全ラウンド分の
+            # 往復を含む）と一致する（A-76、ユーザーからの明示的な要望「AIとのやりとりを
+            # 画面上確認できるようにしてほしい」、2026-09-17）
             await pool.execute(
                 """INSERT INTO ai_usage_logs
-                       (channel_id, requested_by, model, input_tokens, output_tokens, estimated_cost_yen)
-                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                       (channel_id, requested_by, model, input_tokens, output_tokens, estimated_cost_yen,
+                        message_id, request_payload)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)""",
                 channel_id, requested_by, model,
                 usage["prompt_tokens"], usage["completion_tokens"], cost,
+                message_id, json.dumps(messages, ensure_ascii=False, default=str),
             )
     except asyncio.CancelledError:
         # cancel_generation()が呼ばれた場合。中断後のメッセージ本文は呼び出し元（cancel_generation）が
@@ -1231,10 +1238,12 @@ async def _generate_summary_and_post(
             cost = ai_client.estimate_cost_yen(model, res.usage.prompt_tokens, res.usage.completion_tokens)
             await pool.execute(
                 """INSERT INTO ai_usage_logs
-                       (channel_id, requested_by, model, input_tokens, output_tokens, estimated_cost_yen)
-                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                       (channel_id, requested_by, model, input_tokens, output_tokens, estimated_cost_yen,
+                        message_id, request_payload)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)""",
                 channel_id, requested_by, model,
                 res.usage.prompt_tokens, res.usage.completion_tokens, cost,
+                message_id, json.dumps(messages, ensure_ascii=False, default=str),
             )
     except asyncio.CancelledError:
         raise  # _generate_and_postと同じ理由（cancel_generationが本文の更新に責任を持つ）

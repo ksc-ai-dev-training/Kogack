@@ -212,6 +212,17 @@ export interface MessagesResponse {
   has_more: boolean
 }
 
+/** A-76「AIとのやりとりを見る」（ユーザーからの明示的な要望）。request_payloadは実際にOpenAI APIへ
+ * 送ったmessages配列（ツール呼び出しの往復を含む）そのもの */
+export interface AiRequestOut {
+  model: string
+  request_payload: unknown
+  input_tokens: number
+  output_tokens: number
+  estimated_cost_yen: number
+  created_at: string
+}
+
 export interface DmMember {
   id: string
   name: string

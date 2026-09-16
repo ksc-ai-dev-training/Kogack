@@ -329,6 +329,7 @@ export default function ChannelView() {
             unreadDividerMessageId={unreadDividerMessageId}
             aiPersonaName={channel?.ai_persona_name}
             highlightMessageId={highlightId}
+            isChannelAdmin={channel?.is_channel_admin || me?.role === 'admin'}
           />
         </div>
 
@@ -368,6 +369,7 @@ export default function ChannelView() {
           aiIsEnabled={channel?.ai_is_enabled}
           aiPersonaIconUrl={channel?.ai_persona_icon_url}
           highlightMessageId={highlightId}
+          isChannelAdmin={channel?.is_channel_admin || me?.role === 'admin'}
           onClose={closeThread}
           onReplyPosted={() => bumpThreadReplyCount(threadId)}
           onReplyDeleted={() => decrementThreadReplyCount(threadId)}

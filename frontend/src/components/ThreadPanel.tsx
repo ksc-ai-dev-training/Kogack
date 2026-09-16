@@ -43,6 +43,7 @@ export default function ThreadPanel({
   aiIsEnabled,
   aiPersonaIconUrl,
   highlightMessageId,
+  isChannelAdmin,
   onClose,
   onReplyPosted,
   onReplyDeleted,
@@ -62,6 +63,10 @@ export default function ThreadPanel({
   /** S-05横断検索の結果クリックでのハイライトジャンプ先（ユーザーからの明示的な要望）。
    * ChannelView/DmViewから?highlight=をそのまま渡す。この返信一覧に該当が無ければ何も起きない */
   highlightMessageId?: string | null
+  /** A-76「AIとのやりとりを見る」ボタンの表示可否（チャンネル管理者またはシステム管理者、
+   * ユーザーの選択どおり）。ChannelView/DmViewから渡す。DMのスレッドでは渡さない
+   * （AI発言自体がチャンネル専用のため） */
+  isChannelAdmin?: boolean
   onClose: () => void
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
@@ -325,6 +330,7 @@ export default function ThreadPanel({
           members={members}
           aiPersonaName={aiPersonaName}
           highlightMessageId={highlightMessageId}
+          isChannelAdmin={isChannelAdmin}
           onDeleted={() => {
             mutateReplies()
             onReplyDeleted?.()

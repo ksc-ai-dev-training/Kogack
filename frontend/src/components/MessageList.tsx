@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { useDraftKeys } from '../hooks/useDraftKeys'
-import { apiFetch, uploadAttachment } from '../lib/api'
+import { apiFetch, ApiError, uploadAttachment } from '../lib/api'
 import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
 import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
@@ -11,7 +11,7 @@ import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
 import { EMOJI_LIST } from './Composer'
-import type { AttachmentPayload, CitationPayload, MentionSourceMember, Message, MessageAttachment, MessageReaction } from '../types'
+import type { AiRequestOut, AttachmentPayload, CitationPayload, MentionSourceMember, Message, MessageAttachment, MessageReaction } from '../types'
 
 // Composer.tsxのMAX_ATTACHMENT_BYTESと同じ上限（F-07、05-1_詳細設計書_DB設計.html 3.6節）。
 // 発言の編集でファイルを追加する際もこの上限を適用する（ユーザーからの要望「編集の時にも
@@ -637,6 +637,84 @@ function AttachmentPreviewModal({
   )
 }
 
+// A-76「AIとのやりとりを見る」（ユーザーからの明示的な要望「AIとのやりとり（システムがAPIに
+// 投げている内容）を画面上確認できるようにしてほしい」）。実際にOpenAI APIへ送ったmessages配列
+// （ツール呼び出しの往復を含む、search_documents/search_channel_history/search_app_manualの
+// 結果もそのまま見える）をpretty-printしたJSONで表示する。AttachmentPreviewModalと同じ
+// 「document.bodyへcreatePortal・fixed inset-0のオーバーレイ・useOverlayClose・Escapeで閉じる」構成
+function AiRequestModal({ messageId, onClose }: { messageId: string; onClose: () => void }) {
+  const overlayClose = useOverlayClose(onClose)
+  const [data, setData] = useState<AiRequestOut | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    apiFetch<AiRequestOut>(`/api/messages/${messageId}/ai-request`)
+      .then((res) => {
+        if (!cancelled) setData(res)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : '送信内容を取得できませんでした')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [messageId])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.6)] p-6"
+      {...overlayClose}
+    >
+      <div
+        className="flex max-h-[86vh] w-full max-w-[720px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+          <span className="text-[13px] font-semibold text-ink">AIとのやりとり（送信内容）</span>
+          <button
+            type="button"
+            onClick={onClose}
+            title="閉じる"
+            className="rounded-md px-2 py-1 text-ink-subtle hover:bg-surface-muted"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto bg-surface-subtle p-3">
+          {error ? (
+            <p className="text-[12.5px] text-danger-text">{error}</p>
+          ) : !data ? (
+            <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
+          ) : (
+            <>
+              <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-ink-muted">
+                <span>モデル: {data.model}</span>
+                <span>入力トークン: {data.input_tokens}</span>
+                <span>出力トークン: {data.output_tokens}</span>
+                <span>概算コスト: {data.estimated_cost_yen.toFixed(3)}円</span>
+                <span>生成日時: {new Date(data.created_at).toLocaleString('ja-JP')}</span>
+              </div>
+              <pre className="whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 text-[11.5px] leading-[1.6] text-ink">
+                {JSON.stringify(data.request_payload, null, 2)}
+              </pre>
+            </>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 // F-07 ファイル共有。プレビュー対象形式（画像・PDF・プレーンテキスト）はクリックでアプリ内モーダルを
 // 開き、それ以外はA-22（/api/attachments/{id}）への通常のリンク遷移でダウンロードする
 // （同一オリジンのためCookieが自動的に付き、A-22側の参加者チェックを経てFileResponseが返る）
@@ -960,6 +1038,7 @@ export default function MessageList({
   unreadDividerMessageId,
   aiPersonaName,
   highlightMessageId,
+  isChannelAdmin,
 }: {
   messages: Message[]
   emptyMessage?: string
@@ -988,6 +1067,11 @@ export default function MessageList({
   /** AIメンション（本文中の「@ペルソナ名」）のハイライトに使う（チャンネルAIのpersona_name。
    * DM会話では渡さない。channel.ai_persona_nameを参照） */
   aiPersonaName?: string
+  /** A-76「AIとのやりとりを見る」ボタンの表示可否（ユーザーからの明示的な要望。着手前に
+   * 確認のうえチャンネル管理者・システム管理者に限定した）。呼び出し元が
+   * `channel?.is_channel_admin || me?.role === 'admin'` を渡す。DM会話では渡さない
+   * （AI応答は現状チャンネルのみのため対象外） */
+  isChannelAdmin?: boolean
 }) {
   const { me } = useMe()
   const confirm = useConfirm()
@@ -1002,6 +1086,10 @@ export default function MessageList({
   const [profileFor, setProfileFor] = useState<{ id: string; anchor: DOMRect } | null>(null)
   const openProfile = (id: string, e: MouseEvent<HTMLElement>) =>
     setProfileFor({ id, anchor: e.currentTarget.getBoundingClientRect() })
+
+  // A-76「AIとのやりとりを見る」モーダル（ユーザーからの明示的な要望）。開いている対象は
+  // メッセージid単位で持ち、実際のフェッチはモーダル自身（AiRequestModal）が担う
+  const [aiRequestFor, setAiRequestFor] = useState<string | null>(null)
 
   // 発言の右クリックメニュー（ユーザーからの明示的な要望「発言を右クリックすると、編集する、
   // 返信する、コピーする、削除するなどの選択肢が出るポップアップが出ると嬉しい」）。既存のホバー時
@@ -1254,6 +1342,10 @@ export default function MessageList({
         // 挙動）。システム通知（参加・退出の記録）へのリアクションも、返信・削除と異なり記録の
         // 信頼性を損なわないため対象外にしない（バックエンドA-75も同じ判断）
         const canReact = !!me
+        // A-76「AIとのやりとりを見る」ボタン（ユーザーからの明示的な要望「AIとのやりとり
+        // （システムがAPIに投げている内容）を画面上確認できるようにしてほしい」）。AI発言のみ、
+        // かつチャンネル管理者・システム管理者にのみ表示する
+        const canViewAiRequest = m.sender_type === 'ai' && !!isChannelAdmin
         const isNewDay = showDaySeparators && (i === 0 || dayKey(messages[i - 1].created_at) !== dayKey(m.created_at))
 
         return (
@@ -1584,7 +1676,7 @@ export default function MessageList({
                   </button>
                 )}
               </div>
-              {!isEditing && (canReact || showReplyButton || canDelete || canEdit) && (
+              {!isEditing && (canReact || showReplyButton || canDelete || canEdit || canViewAiRequest) && (
                 // 常時flowに置くと表示/非表示の切替で下の発言がガタつくため、絶対配置でホバー時だけ重ねて出す。
                 // リアクションのクイックボタン・絵文字ピッカーボタンは返信・削除ボタンの左隣に置く
                 // （ユーザーからの明示的な要望どおりの配置）。バー全体を1枚の枠（枠線＋背景＋影）で
@@ -1631,6 +1723,16 @@ export default function MessageList({
                       削除
                     </button>
                   )}
+                  {canViewAiRequest && (
+                    <button
+                      type="button"
+                      onClick={() => setAiRequestFor(m.id)}
+                      title="AIとのやりとりを見る（送信内容）"
+                      className="rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-accent-700"
+                    >
+                      🔍 送信内容
+                    </button>
+                  )}
                 </div>
               )}
               {emojiPickerFor?.id === m.id && (
@@ -1661,6 +1763,9 @@ export default function MessageList({
                       : []),
                   ]}
                 />
+              )}
+              {aiRequestFor === m.id && (
+                <AiRequestModal messageId={m.id} onClose={() => setAiRequestFor(null)} />
               )}
             </div>
           </div>

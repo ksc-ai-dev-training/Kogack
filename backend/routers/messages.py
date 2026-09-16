@@ -3,12 +3,13 @@
 # channel_id/dm_idを問わない）ため、権限判定は元発言のchannel_id/dm_idに応じて分岐する
 # （require_thread_access）。返信自体はネストしない（返信への返信は対象外）。
 import asyncio
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
-from auth_helpers import CurrentUser, require_auth, require_thread_access
+from auth_helpers import CurrentUser, require_auth, require_channel_admin, require_thread_access
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped, toggle_reaction
@@ -356,3 +357,44 @@ async def toggle_message_reaction(
     added = await toggle_reaction(pool, message_id, user.id, body.emoji)
     reactions_by_message = await fetch_reactions_grouped(pool, [message_id], user.id)
     return {"id": str(message_id), "added": added, "reactions": reactions_by_message.get(message_id, [])}
+
+
+@router.get("/{message_id}/ai-request")
+async def get_ai_request(message_id: int, user: CurrentUser = Depends(require_auth)):
+    """A-76: AI発言を生成した際に実際にOpenAI APIへ送信したリクエスト内容（システムプロンプト・
+    会話履歴・ツール呼び出しの往復を含むmessages配列、使用モデル、トークン数）を返す
+    （ユーザーからの明示的な要望「AIとのやりとり（システムがAPIに投げている内容）を画面上確認
+    できるようにしてほしい」）。着手前にユーザーへ確認し、閲覧権限はそのチャンネルのチャンネル
+    管理者（chadmin）またはシステム管理者に限定した（振る舞い定義等の既存のAI設定タブと同じ
+    権限レベル。require_channel_adminをDepends()を介さず直接呼び出して再利用する——A-22
+    ダウンロードがrequire_thread_accessを同じ手法で再利用しているのと同じパターン）。
+    AI以外の発言・DM上の発言（AI応答は現状チャンネルのみ）は対象外。ai_usage_logsに記録が
+    無い場合（この機能の実装より前に生成された発言等）は404を返す（reasonが分かるよう
+    メッセージを分けている）。"""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT channel_id, sender_type FROM messages WHERE id = $1 AND deleted_at IS NULL", message_id,
+    )
+    if row is None or row["channel_id"] is None:
+        raise HTTPException(404, detail="見つかりません")
+    if row["sender_type"] != "ai":
+        raise HTTPException(400, detail="AIの発言ではありません")
+    await require_channel_admin(row["channel_id"], user)
+
+    log = await pool.fetchrow(
+        """SELECT model, request_payload, input_tokens, output_tokens, estimated_cost_yen, created_at
+           FROM ai_usage_logs WHERE message_id = $1 ORDER BY created_at DESC LIMIT 1""",
+        message_id,
+    )
+    if log is None:
+        raise HTTPException(404, detail="送信内容の記録が見つかりません（この機能の実装より前に生成された発言など）")
+
+    payload = log["request_payload"]
+    return {
+        "model": log["model"],
+        "request_payload": json.loads(payload) if isinstance(payload, str) else payload,
+        "input_tokens": log["input_tokens"],
+        "output_tokens": log["output_tokens"],
+        "estimated_cost_yen": float(log["estimated_cost_yen"]),
+        "created_at": log["created_at"].isoformat(),
+    }

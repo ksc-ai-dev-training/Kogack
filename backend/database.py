@@ -283,10 +283,23 @@ CREATE TABLE IF NOT EXISTS ai_usage_logs (
     input_tokens        INT NOT NULL,
     output_tokens       INT NOT NULL,
     estimated_cost_yen  NUMERIC(10, 4) NOT NULL,
+    message_id          BIGINT REFERENCES messages(id) ON DELETE SET NULL,
+    request_payload     JSONB,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK ((channel_id IS NULL) <> (dm_id IS NULL))
 );
 ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
+-- message_id・request_payload（2026-09-17、ユーザーからの明示的な要望「AIとのやりとり
+-- （システムがAPIに投げている内容）を画面上確認できるようにしてほしい」）。上記の「質問文・
+-- 回答文そのものは記録しない」方針とは対象が異なる——request_payloadはOpenAI APIへ実際に
+-- 送信したmessages配列（システムプロンプト・会話履歴・ツール呼び出しのやり取りを含む完全な
+-- リクエスト内容）であり、生成された回答本文（T-05に既にある）の重複保存ではない。
+-- message_idはどの発言を生成する際のリクエストかを一意に特定するために追加した（ON DELETE
+-- SET NULLとしCASCADEにしない——発言が削除されても、S-08「AI利用状況・コスト」タブが
+-- 集計に使うコスト実績自体は残す必要があるため。T-16 audit_logs.target_channel_idと
+-- 同じ「履歴は消さない」設計判断）。
+ALTER TABLE ai_usage_logs ADD COLUMN IF NOT EXISTS message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL;
+ALTER TABLE ai_usage_logs ADD COLUMN IF NOT EXISTS request_payload JSONB;
 
 -- T-14 ai_usage_limits（05-1_詳細設計書_DB設計.html 3.11節）。S-08「AI利用状況・コスト」タブの
 -- 上限設定（A-43）用。scope='global'は最大1行、scope='channel'はchannel_idごとに最大1行に

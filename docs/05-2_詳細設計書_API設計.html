@@ -65,6 +65,7 @@
       <tr class="diff-new"><td>1.34</td><td>2026-09-07</td><td>F-41 @メンションをDMへも拡張した（ユーザーからの明示的な要望）。A-14の説明（4.3節）を「元発言がDMの場合は候補元が無いためmentionsを送っても無視される」から「元発言がチャンネル・DMいずれの場合もT-07へ保存する」に更新し、対象がそのDMの参加者であることを検証する点を明記した。A-19（4.4節）はmentionsフィールドを受け付けるようになったが、A-16・A-17と同じ形式でリクエスト/レスポンス例は既存のA-11の例と共通のため新規の例は追加していない。基本設計書（5.22節、v1.41）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.35</td><td>2026-09-17</td><td>チャンネルごとのAIモデル選択機能（ユーザーからの明示的な要望）に伴い、A-24のリクエストへ任意項目<code>ai_model</code>（null/空文字は既定値を使う、指定時は<code>services/ai_client.MODEL_COSTS</code>のキー集合以外422）を追加し、A-23・A-24のレスポンス（T-08該当カラム）へ<code>ai_model</code>・<code>default_model</code>（AI_MODEL環境変数の現在値）・<code>available_models</code>（選択肢一覧）を追加した。基本設計書（8.1節、v1.43）を一貫して更新した。要件定義書・画面モックアップは変更なし。</td></tr>
       <tr class="diff-new"><td>1.36</td><td>2026-09-17</td><td>ユーザーからの明示的な要望「選択肢の『既定（...）を使う』をなくして、どのチャンネルもデフォルトでgpt-4.1-nanoが選択されている状態にしたい。それぞれのモデルにコスト・速度・性能の簡潔な説明を入れてほしい」を受け、1.35版の<code>ai_model</code>（任意項目、null=環境変数追従という間接参照）を**必須項目**へ変更した（省略・null・空文字はいずれも422）。DB側もNOT NULL DEFAULT 'gpt-4.1-nano'へ変更したため常に具体的な値が入る（05-1 DB設計、T-08）。この変更に伴い<code>default_model</code>フィールド（「既定を使う」ラベル表示専用だった）は用済みとなり削除した。<code>available_models</code>の各要素を単純な文字列から<code>{value, label}</code>のオブジェクトへ変更し、<code>label</code>にコスト・速度・性能の簡潔な説明（services/ai_client.MODEL_DESCRIPTIONS）を括弧書きで含めた。基本設計書は今回変更なし（8.1節の設計判断＝チャンネルごとの設定という骨子自体は変わらないため）。要件定義書・画面モックアップは変更なし（画面モックアップのS-06選択肢の見た目のみ更新）。</td></tr>
+      <tr class="diff-new"><td>1.37</td><td>2026-09-17</td><td>新規API A-76（GET /api/messages/{id}/ai-request）を追加した。ユーザーからの明示的な要望「AIとのやりとり（システムがAPIに投げている内容）を画面上確認できるようにしてほしい」に対応するもので、AI発言ごとに実際にOpenAI APIへ送信したmessages配列（T-13.request_payload、05-1 DB設計v1.16）をそのまま返す。表示位置は各AI発言のホバー時アクションバー（ユーザーが「各AI発言にボタンを付ける（推奨）」を選択）、権限はそのチャンネルのchadminまたはシステムadmin（ユーザーが「チャンネル管理者（chadmin）も可」を選択、システムadmin限定へは絞らなかった）。基本設計書・要件定義書・画面モックアップは変更なし（既存のAI発言表示への機能追加のため）。</td></tr>
     </tbody>
   </table>
 
@@ -205,6 +206,18 @@ POST /api/channels/42/members
   <pre class="diff-new"><code>POST /api/messages/10306/cancel-generation
 // response 200: A-10等と同じ発言の形（body: "（利用者により生成が中断されました）", generation_status: null）</code></pre>
   <p class="muted diff-new">生成中（<code>sender_type='ai'</code>かつ<code>generation_status='generating'</code>）の発言を対象に、そのチャンネルの参加者であれば誰でも実行できる（A-12削除と異なり投稿者本人・admin限定にしない。AI発言に「所有者」という概念が無く、生成が詰まっている状態は参加者全員の閲覧を妨げるため）。対象が存在しない・参加していない会話の発言の場合は404、AI発言でない場合・既に生成が完了している場合は400。実行中の生成タスクがプロセス内に見つかればその場でキャンセルするが、見つからなくても失敗にしない（バックエンドプロセスの再起動でタスク自体が失われた「オーファン」状態でも、DB側の<code>generation_status</code>を直接クリアすることで復旧できる。基本設計書8.7節「設計判断」）。同種の理由により、アプリ起動時（lifespanのstartup）にも<code>generation_status='generating'</code>のまま残っている行を一括で自動復旧する処理を追加した（新規APIではなくアプリ内部の起動処理）。</p>
+
+  <p class="diff-new"><strong>A-76 <span class="badge badge-get">GET</span> /api/messages/{id}/ai-request（AIとのやりとりを見る）</strong></p>
+  <pre class="diff-new"><code>GET /api/messages/10420/ai-request
+// response 200
+{ "model": "gpt-4.1-nano",
+  "request_payload": [
+    { "role": "system", "content": "あなたは「Kogack AI」という..." },
+    { "role": "user", "content": "田中 智子: @Kogack AI 今日の予定は？" },
+    { "role": "assistant", "content": "..." } ],
+  "input_tokens": 2292, "output_tokens": 35, "estimated_cost_yen": 0.0372,
+  "created_at": "..." }</code></pre>
+  <p class="muted diff-new">ユーザーからの明示的な要望「AIとのやりとり（システムがAPIに投げている内容）を画面上確認できるようにしてほしい」により追加した。対象は<code>sender_type='ai'</code>の発言のみ（それ以外は400）。<code>request_payload</code>は実際にOpenAI APIへ送信したmessages配列そのもの（システムプロンプト・会話履歴・search_documents/search_channel_history/search_app_manual等のツール呼び出しの往復を含む、T-13.request_payload。05-1 DB設計v1.16参照）で、要約が無い代わりに全文をそのまま返す。権限は<strong>そのチャンネルのchadminまたはシステムadmin</strong>に限定する（表示位置は各AI発言のホバー時アクションバーに設けたボタン。ユーザーが「各AI発言にボタンを付ける」「チャンネル管理者（chadmin）も可」をそれぞれ選択）。参加していない非公開チャンネルの発言・存在しない発言はいずれも404（総論5.3節と同じ使い分け）、参加者だがchadminでもadminでもない場合は403。T-13にログが無い場合（この機能の実装より前に生成された発言等）は404を返す。</p>
 
   <p><strong>A-13 <span class="badge badge-get">GET</span> /api/messages/{id}/thread（スレッド内の返信一覧）</strong></p>
   <pre><code>// response 200
