@@ -430,8 +430,7 @@ function GeneralTab({
   }
 
   const changeModel = async (value: string) => {
-    const nextModel = value || null
-    if (nextModel === settings.ai_model || saving) return
+    if (value === settings.ai_model || saving) return
     setSaving(true)
     try {
       await apiFetch(`/api/channels/${channelId}/ai-settings/general`, {
@@ -439,7 +438,7 @@ function GeneralTab({
         body: JSON.stringify({
           is_ai_enabled: settings.is_ai_enabled,
           reaction_mode: settings.reaction_mode,
-          ai_model: nextModel,
+          ai_model: value,
         }),
       })
       await mutate()
@@ -486,20 +485,19 @@ function GeneralTab({
       <div className="mt-5 rounded-[10px] border border-line bg-surface-subtle px-3.5 py-3">
         <label className="field-label mb-1.5 block text-[13px] font-bold text-ink">AIモデル</label>
         <select
-          value={settings.ai_model ?? ''}
+          value={settings.ai_model}
           onChange={(e) => changeModel(e.target.value)}
           disabled={saving}
           className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-ink"
         >
-          <option value="">既定（{settings.default_model}）を使う</option>
           {settings.available_models.map((m) => (
-            <option key={m} value={m}>
-              {m}
+            <option key={m.value} value={m.value}>
+              {m.label}
             </option>
           ))}
         </select>
         <div className="mt-1.5 text-[11.5px] text-ink-subtle">
-          応答生成に使うOpenAIのモデルを個別に指定できます。指定しない場合はサーバー側の既定値（AI_MODEL環境変数）を使います。モデルによって応答速度・品質・コストが異なります。
+          応答生成に使うOpenAIのモデルをチャンネルごとに指定します。モデルによって応答速度・品質・コストが異なります（各選択肢の括弧内を参照）。
         </div>
       </div>
     </div>

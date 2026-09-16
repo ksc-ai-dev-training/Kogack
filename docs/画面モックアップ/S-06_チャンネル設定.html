@@ -514,13 +514,12 @@
         <div class="field-group diff-new" style="margin-top:16px;">
           <label class="field-label">AIモデル</label>
           <select>
-            <option selected>既定（gpt-4.1-nano）を使う</option>
-            <option>gpt-5-nano</option>
-            <option>gpt-4.1-nano</option>
-            <option>gpt-4.1-mini</option>
-            <option class="diff-new">gpt-5-mini</option>
+            <option>gpt-5-nano（推論系。複雑な多段階の論理・計算問題には強いが、応答はやや遅い）</option>
+            <option selected>gpt-4.1-nano（現在の既定。速度・コストのバランスが良く、アプリの用途に最も相性が良い）</option>
+            <option>gpt-4.1-mini（gpt-4.1-nanoより高性能。非推論系のため速度は保ちつつ応答の質を上げたいときに）</option>
+            <option>gpt-5-mini（推論系。gpt-5-nanoより高性能だが、応答は遅めでコストも高い）</option>
           </select>
-          <div class="field-hint">応答生成に使うOpenAIのモデルを個別に指定できます。指定しない場合はサーバー側の既定値（AI_MODEL環境変数）を使います。モデルによって応答速度・品質・コストが異なります。</div>
+          <div class="field-hint">応答生成に使うOpenAIのモデルをチャンネルごとに指定します。モデルによって応答速度・品質・コストが異なります（各選択肢の括弧内を参照）。</div>
         </div>
       </div>
 

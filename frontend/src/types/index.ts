@@ -73,10 +73,11 @@ export interface AiSettings {
   behavior_prompt: string | null
   reaction_mode: 'mention_only' | 'proactive'
   out_of_scope_policy: 'strict' | 'general'
-  /** チャンネルごとのAIモデル選択（2026-09-17）。nullは既定値（default_model）を使う */
-  ai_model: string | null
-  default_model: string
-  available_models: string[]
+  /** チャンネルごとのAIモデル選択（2026-09-17）。DB側がNOT NULL DEFAULT 'gpt-4.1-nano'のため
+   * 常に具体的なモデル名が入っている（「既定を使う」という抽象的な選択肢は撤去した） */
+  ai_model: string
+  /** 選択肢一覧。各labelにはコスト・速度・性能の簡潔な説明が括弧書きで含まれる（services/ai_client.MODEL_DESCRIPTIONS） */
+  available_models: { value: string; label: string }[]
   folder_ids: string[]
   skills: Skill[]
   auto_response_rules: AutoResponseRule[]

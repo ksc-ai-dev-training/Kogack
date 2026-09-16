@@ -245,18 +245,27 @@ CREATE TABLE IF NOT EXISTS channel_ai_settings (
     reaction_mode             TEXT NOT NULL DEFAULT 'mention_only' CHECK (reaction_mode IN ('mention_only', 'proactive')),
     out_of_scope_policy       TEXT NOT NULL DEFAULT 'strict' CHECK (out_of_scope_policy IN ('strict', 'general')),
     fallback_handoff_user_id  BIGINT REFERENCES users(id),
-    ai_model                  TEXT,
+    ai_model                  TEXT NOT NULL DEFAULT 'gpt-4.1-nano',
     updated_by                BIGINT REFERENCES users(id),
     created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE channel_ai_settings ENABLE ROW LEVEL SECURITY;
 -- ai_model（チャンネルごとのAIモデル選択、2026-09-17）。既存DBのテーブルには
--- CREATE TABLE IF NOT EXISTSが効かないためbackfillする。NULL＝AI_MODEL環境変数の既定値を
--- 使う（services/ai_client.py resolve_model参照）。選べる値そのものはDBのCHECK制約では縛らず
--- services/ai_client.MODEL_COSTSのキー集合をAPI層（routers/ai_settings.py）で検証する
+-- CREATE TABLE IF NOT EXISTSが効かないためbackfillする。選べる値そのものはDBのCHECK制約では
+-- 縛らずservices/ai_client.MODEL_COSTSのキー集合をAPI層（routers/ai_settings.py）で検証する
 -- （モデルを追加・削除するたびにDBスキーマ変更が要らないようにするため）。
+-- **2026-09-17に「既定（...）を使う」という抽象的な選択肢自体をユーザーの要望で廃止し、
+-- 常にgpt-4.1-nanoが具体的な選択値として入っている状態にした**（従来はNULL＝AI_MODEL環境変数の
+-- 既定値に追従、という間接参照だったが、この間接性自体が分かりにくいとの指摘を受けて撤去した）。
+-- 既存DBで既にNULLのまま残っている行をbackfillしてからNOT NULLを付与する（この順序を守らないと
+-- 既存NULL行がある状態でSET NOT NULLがエラーになる。冪等：2回目以降はUPDATE対象0件・
+-- SET DEFAULT/SET NOT NULLとも既に同じ状態への適用は無害なため、AUTO_MIGRATE=1で毎起動
+-- 実行しても安全）。
 ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS ai_model TEXT;
+UPDATE channel_ai_settings SET ai_model = 'gpt-4.1-nano' WHERE ai_model IS NULL;
+ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET DEFAULT 'gpt-4.1-nano';
+ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET NOT NULL;
 -- persona_nameの既定値を「AI」から「Kogack AI」へ変更した際のbackfill（CREATE TABLE IF NOT EXISTSは
 -- 既存DBのテーブルには効かないため、既存DBの以後のINSERT分にも新しい既定値を反映させる。
 -- 既にAI発言済みの行のpersona_name自体の書き換えは対象外＝一度きりの手動UPDATEで対応する）

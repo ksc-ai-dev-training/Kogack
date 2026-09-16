@@ -43,6 +43,16 @@ MODEL_COSTS = {
     "gpt-5-mini": {"input": 0.0383, "output": 0.3067},
 }
 
+# S-06基本設定タブのドロップダウンに表示する、各モデルの簡潔な特徴の説明（ユーザーからの明示的な
+# 要望「コスト・速度・性能の簡潔でわかりやすい説明を入れてほしい」、2026-09-17）。選択の判断材料
+# であって厳密なベンチマーク値ではないため、断定的な性能比較ではなく用途の目安として書く。
+MODEL_DESCRIPTIONS = {
+    "gpt-4.1-nano": "現在の既定。速度・コストのバランスが良く、アプリの用途に最も相性が良い",
+    "gpt-5-nano": "推論系。複雑な多段階の論理・計算問題には強いが、応答はやや遅い",
+    "gpt-4.1-mini": "gpt-4.1-nanoより高性能。非推論系のため速度は保ちつつ応答の質を上げたいときに",
+    "gpt-5-mini": "推論系。gpt-5-nanoより高性能だが、応答は遅めでコストも高い",
+}
+
 
 def _env(key: str, default: str = "") -> str:
     """環境変数優先でルート.envを読む（database.pyと同じ規約）"""
@@ -59,9 +69,11 @@ def get_model() -> str:
 
 
 def resolve_model(channel_model: str | None) -> str:
-    """チャンネルのai_model（channel_ai_settings.ai_model）が指定されていればそれを、
-    未指定（NULL・空文字）ならAI_MODEL環境変数の既定値を使う。services/ai_agent.pyの
-    実際にAPIを呼ぶ2箇所（_generate_and_post・_generate_summary_and_post）で使う"""
+    """チャンネルのai_model（channel_ai_settings.ai_model）を返す。2026-09-17にDBを
+    NOT NULL DEFAULT 'gpt-4.1-nano'へ変更したため通常は常に値が入っているが、念のため
+    NULL・空文字の場合はAI_MODEL環境変数の既定値へフォールバックする防御的な実装のまま
+    残す。services/ai_agent.pyの実際にAPIを呼ぶ2箇所（_generate_and_post・
+    _generate_summary_and_post）で使う"""
     return channel_model or get_model()
 
 

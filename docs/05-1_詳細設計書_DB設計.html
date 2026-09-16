@@ -43,7 +43,7 @@
       <tr class="diff-new"><td>1.12</td><td>2026-09-03</td><td>T-05 messagesに新規is_summary列（BOOLEAN、既定false）を追加した。F-14要約ボタン（A-15）で生成された発言のときのみtrueとし、通常のAIメンション応答と会話上で見分けられるようにする（ユーザーからの明示的な要望）。要約はチャンネル本体の新規発言として投稿される場合、thread_parent_idが通常のAI応答と同じくNULLになり既存の列だけでは区別できないため、専用フラグ列とした。</td></tr>
       <tr class="diff-new"><td>1.13</td><td>2026-09-03</td><td>T-09 doc_foldersにitem_type・parent_folder_idを追加した。フォルダ内の特定ファイルだけを参照範囲に含める機能（ユーザーからの明示的な要望）で、実際のDrive APIによる自動列挙ではなく手動URL貼り付け方式を選択した設計判断を3.9節にcalloutとして追記した。</td></tr>
       <tr class="diff-new"><td>1.14</td><td>2026-09-07</td><td>新規T-23 google_drive_tokensを追加した。層2ドキュメントQ&A（F-19〜F-22）に向けたGoogle Drive連携の最初のスライスとして、GCP側のDrive API有効化・OAuthスコープの全社展開について千田氏の許可を得て着手した。利用者ごとのGoogle Driveアクセストークン（access_token・refresh_token・有効期限）を保存し、期限切れ時はrefresh_tokenで自動更新する（services/google_drive.py）。索引作成・埋め込みベクトル化・検索本体は次のスライス。</td></tr>
-      <tr class="diff-new"><td>1.15</td><td>2026-09-17</td><td>T-08 channel_ai_settingsへ<code>ai_model</code>列（TEXT、NULL可）を追加した。チャンネルごとのAIモデル選択機能（基本設計書v1.43、ユーザーからの明示的な要望）に伴う変更。選択肢はDBのCHECK制約では縛らず、API層（services/ai_client.MODEL_COSTSのキー集合）で検証する設計とした（新しいモデルの単価行を追加するだけでDBスキーマ変更無しに選択肢が増えるようにするため）。本節のみで完結する変更のため、この局所的な更新（T-25〜T-27等、他の実装済みテーブルの網羅的なbackfillは含まない）に留める。</td></tr>
+      <tr class="diff-new"><td>1.15</td><td>2026-09-17</td><td>T-08 channel_ai_settingsへ<code>ai_model</code>列を追加した。チャンネルごとのAIモデル選択機能（基本設計書v1.43、ユーザーからの明示的な要望）に伴う変更。選択肢はDBのCHECK制約では縛らず、API層（services/ai_client.MODEL_COSTSのキー集合）で検証する設計とした（新しいモデルの単価行を追加するだけでDBスキーマ変更無しに選択肢が増えるようにするため）。**当初はTEXT・NULL可（NULL＝AI_MODEL環境変数の既定値に追従する間接参照）で実装したが、同日中にユーザーから「『既定（...）を使う』という選択肢自体をなくし、どのチャンネルも常にgpt-4.1-nanoが具体的に選択されている状態にしたい」との要望を受け、NOT NULL DEFAULT 'gpt-4.1-nano'へ変更した**（既存のNULL行はbackfillしてからNOT NULLを付与する冪等な移行、database.py参照）。本節のみで完結する変更のため、この局所的な更新（T-25〜T-27等、他の実装済みテーブルの網羅的なbackfillは含まない）に留める。</td></tr>
     </tbody>
   </table>
 
@@ -207,7 +207,7 @@
       <tr><td>reaction_mode</td><td>TEXT</td><td>NOT NULL</td><td>'mention_only'</td><td>CHECK IN ('mention_only','proactive')</td></tr>
       <tr><td>out_of_scope_policy</td><td>TEXT</td><td>NOT NULL</td><td>'strict'</td><td>CHECK IN ('strict','general')（F-11）</td></tr>
       <tr><td>fallback_handoff_user_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。NULL時は当該チャンネルchadminへ引き継ぐ（F-17）</td></tr>
-      <tr class="diff-new"><td>ai_model</td><td>TEXT</td><td>NULL可</td><td>-</td><td>2026-09-17追加。NULL時はAI_MODEL環境変数の既定値を使う。選択肢はDBのCHECK制約では縛らずAPI層（services/ai_client.MODEL_COSTSのキー集合）で検証する</td></tr>
+      <tr class="diff-new"><td>ai_model</td><td>TEXT</td><td>NOT NULL</td><td>'gpt-4.1-nano'</td><td>2026-09-17追加。当初はNULL可（NULL＝AI_MODEL環境変数の既定値を使う間接参照）だったが、同日中にユーザーの要望で「既定を使う」という抽象的な選択肢自体を撤去し、常に具体的なモデル名を持つNOT NULL DEFAULT 'gpt-4.1-nano'へ変更した。選択肢はDBのCHECK制約では縛らずAPI層（services/ai_client.MODEL_COSTSのキー集合）で検証する</td></tr>
       <tr><td>updated_by</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。監査ログの参照元</td></tr>
       <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>

@@ -23,8 +23,13 @@ def _out(row, folder_ids: list[str], skills: list[dict], auto_response_rules: li
         "reaction_mode": row["reaction_mode"],
         "out_of_scope_policy": row["out_of_scope_policy"],
         "ai_model": row["ai_model"],
-        "default_model": ai_client.get_model(),
-        "available_models": ai_client.selectable_models(),
+        # 2026-09-17: 「既定（...）を使う」という抽象的な選択肢を撤去し（ユーザーからの明示的な
+        # 要望）、常に具体的なモデル名が選択されている前提になったため、default_modelフィールドは
+        # 用済みとなり削除した。各選択肢にはコスト・速度・性能の簡潔な説明を添える（同じ要望）。
+        "available_models": [
+            {"value": m, "label": f"{m}（{ai_client.MODEL_DESCRIPTIONS.get(m, '')}）"}
+            for m in ai_client.selectable_models()
+        ],
         "folder_ids": folder_ids,
         "skills": skills,
         "auto_response_rules": auto_response_rules,
@@ -79,9 +84,11 @@ async def get_ai_settings(channel_id: int, user: CurrentUser = Depends(require_c
 class UpdateGeneralRequest(BaseModel):
     is_ai_enabled: bool
     reaction_mode: str
-    # チャンネルごとのAIモデル選択（2026-09-17、ユーザーからの明示的な要望）。null/空文字は
-    # 「AI_MODEL環境変数の既定値を使う」を意味する（services/ai_client.resolve_model参照）。
-    ai_model: str | None = None
+    # チャンネルごとのAIモデル選択（2026-09-17、ユーザーからの明示的な要望）。**必須項目**——
+    # 従来はnull/空文字で「AI_MODEL環境変数の既定値を使う」を表す間接参照だったが、この
+    # 抽象化自体をユーザーの要望で撤去し、常に具体的なモデル名を送る仕様にした
+    # （DB側もNOT NULL DEFAULT 'gpt-4.1-nano'へ変更済み、database.py参照）。
+    ai_model: str
 
 
 @router.put("/{channel_id}/ai-settings/general")
@@ -94,8 +101,7 @@ async def update_general(
     まま一緒に送る（差分計算はしない）"""
     if body.reaction_mode not in ("mention_only", "proactive"):
         raise HTTPException(422, detail="reaction_modeはmention_only/proactiveのいずれかです")
-    ai_model = body.ai_model or None
-    if ai_model is not None and ai_model not in ai_client.selectable_models():
+    if body.ai_model not in ai_client.selectable_models():
         raise HTTPException(422, detail="対応していないモデルです")
     await _get_or_create(channel_id)
     pool = get_pool()
@@ -103,13 +109,12 @@ async def update_general(
         """UPDATE channel_ai_settings SET is_ai_enabled = $2, reaction_mode = $3, ai_model = $4,
                updated_by = $5, updated_at = now()
            WHERE channel_id = $1 RETURNING *""",
-        channel_id, body.is_ai_enabled, body.reaction_mode, ai_model, user.id,
+        channel_id, body.is_ai_enabled, body.reaction_mode, body.ai_model, user.id,
     )
     mode_label = "メンション時のみ応答" if body.reaction_mode == "mention_only" else "投稿に自ら反応"
-    model_label = ai_model or "既定"
     await audit_log.record(
         pool, "channel_ai_setting_change", user.id,
-        f"AIを{'有効' if body.is_ai_enabled else '無効'}にし、反応モードを「{mode_label}」、モデルを「{model_label}」にしました",
+        f"AIを{'有効' if body.is_ai_enabled else '無効'}にし、反応モードを「{mode_label}」、モデルを「{body.ai_model}」にしました",
         target_channel_id=channel_id, target_field="general",
     )
     return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
