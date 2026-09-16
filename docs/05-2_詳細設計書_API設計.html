@@ -311,7 +311,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 { "channel_id": "42", "is_ai_enabled": true, "persona_name": "Kogack AI", "persona_icon_url": null,
   "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only",
   "out_of_scope_policy": "strict", <span class="diff-new">"ai_model": null, "default_model": "gpt-4.1-nano",
-  "available_models": ["gpt-4o-mini", "gpt-5-nano", "gpt-4.1-nano"],</span> "folder_ids": ["3", "5"],
+  "available_models": ["gpt-4o-mini", "gpt-5-nano", "gpt-4.1-nano", "gpt-4.1-mini"],</span> "folder_ids": ["3", "5"],
   "skills": [ { "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し..." } ],
   "fallback_handoff_user_id": "15" }</code></pre>
   <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。skills（T-11由来）・fallback_handoff_user_idはF-12実装（1.23版）に伴い追加した。skillsは登録が無ければ空配列、fallback_handoff_user_idは未設定ならnull（既定のチャンネル管理者へ引き継ぐ）。<span class="diff-new">ai_model・default_model・available_modelsは2026-09-17のチャンネルごとのAIモデル選択機能（1.35版）に伴い追加した。</span></span></p>
