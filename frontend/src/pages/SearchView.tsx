@@ -38,9 +38,8 @@ interface Candidate {
 const MODIFIER_LABEL: Record<ModifierType, string> = { in: 'チャンネル', from: '投稿者', with: 'DM相手' }
 const DATE_MODIFIER_TYPES: DateModifierType[] = ['before', 'after', 'on', 'during']
 // 日付系モディファイアの説明・入力例（着手の発端になったユーザーからの質問「使い方が分からない」への
-// 対応。カレンダー入力欄（<input type="date"/"month">）のvalueはブラウザのロケールに関わらず常に
-// YYYY-MM-DD（during:のみYYYY-MM）を返すため、backend/routers/search.pyの_as_date/_as_monthが
-// 期待するISO形式とそのまま一致する
+// 対応。DayCalendar/MonthCalendarのonSelectはYYYY-MM-DD（during:のみYYYY-MM）を返すため、
+// backend/routers/search.pyの_as_date/_as_monthが期待するISO形式とそのまま一致する
 const DATE_MODIFIER_LABEL: Record<DateModifierType, string> = {
   before: 'この日より前', after: 'この日以降', on: 'この日', during: 'この月',
 }
@@ -167,6 +166,145 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土']
+
+// before:/after:/on: 用の日単位カレンダー（ユーザーからの明示的な要望「カレンダーから日付を
+// クリックする方式にしてほしい」）。従来はブラウザ標準の<input type="date">を使っていたが、
+// ユーザーから具体的な不具合を報告された（yyyy/mm/ddの日欄に「15」と続けて打とうとすると、
+// 「1」を入力した時点でchrome系ブラウザのセグメント入力の仕様により「01」が確定してしまい、
+// 2桁の日付を素早くタイプできない）。この種のセグメント入力特有の癖はブラウザ・OS依存で
+// アプリ側からは制御できないため、タイプ自体が不要な「日付をクリックで選ぶ」独自グリッドに
+// 置き換えた（新規npm依存は追加せず、Composer.tsxの絵文字ピッカー等と同じ自前実装の方針を踏襲）。
+function DayCalendar({ onSelect }: { onSelect: (value: string) => void }) {
+  const today = new Date()
+  const [year, setYear] = useState(today.getFullYear())
+  const [month, setMonth] = useState(today.getMonth()) // 0-indexed
+
+  const startWeekday = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: (number | null)[] = []
+  for (let i = 0; i < startWeekday; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+
+  const goPrevMonth = () => {
+    if (month === 0) {
+      setYear((y) => y - 1)
+      setMonth(11)
+    } else {
+      setMonth((m) => m - 1)
+    }
+  }
+  const goNextMonth = () => {
+    if (month === 11) {
+      setYear((y) => y + 1)
+      setMonth(0)
+    } else {
+      setMonth((m) => m + 1)
+    }
+  }
+  const isToday = (d: number) => year === today.getFullYear() && month === today.getMonth() && d === today.getDate()
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={goPrevMonth}
+          aria-label="前の月"
+          className="rounded px-2 py-0.5 text-[13px] text-ink-muted hover:bg-surface-muted"
+        >
+          ‹
+        </button>
+        <span className="text-[12.5px] font-bold text-ink">
+          {year}年{month + 1}月
+        </span>
+        <button
+          type="button"
+          onClick={goNextMonth}
+          aria-label="次の月"
+          className="rounded px-2 py-0.5 text-[13px] text-ink-muted hover:bg-surface-muted"
+        >
+          ›
+        </button>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 text-center">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="py-0.5 text-[10px] text-ink-subtle">
+            {w}
+          </div>
+        ))}
+        {cells.map((d, i) =>
+          d === null ? (
+            <div key={i} />
+          ) : (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onSelect(`${year}-${pad2(month + 1)}-${pad2(d)}`)}
+              className={`rounded py-1 text-[12px] hover:bg-accent-200 hover:text-accent-700 ${
+                isToday(d) ? 'font-bold text-accent-700 ring-1 ring-inset ring-accent-300' : 'text-ink'
+              }`}
+            >
+              {d}
+            </button>
+          ),
+        )}
+      </div>
+    </div>
+  )
+}
+
+// during: 用の月単位カレンダー（年を切り替えつつ12ヶ月から選ぶ、日単位のDayCalendarと同じ
+// 「クリックで選ぶ」方式に揃えた）
+function MonthCalendar({ onSelect }: { onSelect: (value: string) => void }) {
+  const today = new Date()
+  const [year, setYear] = useState(today.getFullYear())
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setYear((y) => y - 1)}
+          aria-label="前の年"
+          className="rounded px-2 py-0.5 text-[13px] text-ink-muted hover:bg-surface-muted"
+        >
+          ‹
+        </button>
+        <span className="text-[12.5px] font-bold text-ink">{year}年</span>
+        <button
+          type="button"
+          onClick={() => setYear((y) => y + 1)}
+          aria-label="次の年"
+          className="rounded px-2 py-0.5 text-[13px] text-ink-muted hover:bg-surface-muted"
+        >
+          ›
+        </button>
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onSelect(`${year}-${pad2(m)}`)}
+            className={`rounded py-1.5 text-[12px] hover:bg-accent-200 hover:text-accent-700 ${
+              year === today.getFullYear() && m === today.getMonth() + 1
+                ? 'font-bold text-accent-700 ring-1 ring-inset ring-accent-300'
+                : 'text-ink'
+            }`}
+          >
+            {m}月
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // 検索欄のフリーテキスト部分（query.q）を検索語に分解する。routers/search.pyの_parse_termsと
@@ -489,23 +627,24 @@ export default function SearchView() {
             {pickerOpen && pickerType && (
               <div className="absolute left-0 top-full z-40 mt-1.5 max-h-[280px] w-[320px] overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
                 {isDateModifierType(pickerType) ? (
-                  // 日付系はカレンダー入力欄（<input type="date"/"month">）で選ぶ（ユーザーからの
-                  // 明示的な要望）。valueは常にYYYY-MM-DD/YYYY-MM形式で返るため、そのままトークンに
-                  // 使える。直接テキスト入力（例: before:2026-09-09）も引き続き使える旨を明記する
+                  // 日付系はクリックで選ぶ独自カレンダー（DayCalendar/MonthCalendar）で選ぶ
+                  // （ユーザーからの明示的な要望「カレンダーから日付をクリックする方式にして
+                  // ほしい」。従来のブラウザ標準<input type="date">は、日付欄に2桁の日を素早く
+                  // タイプしようとすると1桁目で確定してしまうというブラウザ側のセグメント入力の
+                  // 仕様に起因する不具合をユーザーから具体的に報告されたため、タイプ自体が
+                  // 不要な方式へ置き換えた）。直接テキスト入力（例: before:2026-09-09）も
+                  // 引き続き使える旨を明記する
                   <div className="p-2">
                     <div className="mb-1.5 text-[10.5px] font-bold text-ink-subtle">
                       {CHIP_LABEL[pickerType]}: — {DATE_MODIFIER_LABEL[pickerType]}
                     </div>
-                    <input
-                      type={pickerType === 'during' ? 'month' : 'date'}
-                      autoFocus
-                      onChange={(e) => {
-                        if (e.target.value) selectDate(e.target.value)
-                      }}
-                      className="w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-                    />
+                    {pickerType === 'during' ? (
+                      <MonthCalendar onSelect={selectDate} />
+                    ) : (
+                      <DayCalendar onSelect={selectDate} />
+                    )}
                     <div className="mt-1.5 text-[10.5px] leading-relaxed text-ink-subtle">
-                      カレンダーから選ぶか、
+                      クリックして選ぶか、
                       <code className="rounded bg-surface-muted px-1 text-accent-700">
                         {pickerType}:{DATE_MODIFIER_EXAMPLE[pickerType]}
                       </code>
