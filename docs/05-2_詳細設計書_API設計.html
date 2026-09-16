@@ -311,13 +311,13 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 { "channel_id": "42", "is_ai_enabled": true, "persona_name": "Kogack AI", "persona_icon_url": null,
   "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only",
   "out_of_scope_policy": "strict", <span class="diff-new">"ai_model": null, "default_model": "gpt-4.1-nano",
-  "available_models": ["gpt-4o-mini", "gpt-5-nano", "gpt-4.1-nano", "gpt-4.1-mini"],</span> "folder_ids": ["3", "5"],
+  "available_models": ["gpt-5-nano", "gpt-4.1-nano", "gpt-4.1-mini", "gpt-5-mini"],</span> "folder_ids": ["3", "5"],
   "skills": [ { "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し..." } ],
   "fallback_handoff_user_id": "15" }</code></pre>
   <p class="muted">T-08は既定値でチャンネル作成時（A-07）に1行作成するが、この機能より前に作成された既存チャンネルには行が無いため、A-23の初回アクセス時に既定値で作成する（get-or-create）。<span class="diff-new">out_of_scope_policy・folder_ids（T-10由来）はF-22実装（1.19版）に伴いレスポンスへ追加した。skills（T-11由来）・fallback_handoff_user_idはF-12実装（1.23版）に伴い追加した。skillsは登録が無ければ空配列、fallback_handoff_user_idは未設定ならnull（既定のチャンネル管理者へ引き継ぐ）。<span class="diff-new">ai_model・default_model・available_modelsは2026-09-17のチャンネルごとのAIモデル選択機能（1.35版）に伴い追加した。</span></span></p>
 
   <p><strong>A-24 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/general</strong></p>
-  <pre><code>{ "is_ai_enabled": false, "reaction_mode": "mention_only", <span class="diff-new">"ai_model": "gpt-4o-mini"</span> }
+  <pre><code>{ "is_ai_enabled": false, "reaction_mode": "mention_only", <span class="diff-new">"ai_model": "gpt-4.1-mini"</span> }
 // response 200: 更新後のT-08該当カラム（<span class="diff-new">ai_model・default_model・available_modelsを含む</span>）を返す（A-23と同じ形）</code></pre>
   <p class="muted"><code>reaction_mode</code>は<span class="diff-new">F-15実装（1.24版）に伴い必須項目としてこのAPIに追加した</span>。<code>'mention_only'</code>/<code>'proactive'</code>以外は422。<span class="diff-new"><code>ai_model</code>（1.35版で追加、任意項目・省略時null）はチャンネルごとのAIモデル上書き。null/空文字は「AI_MODEL環境変数の既定値（レスポンスの<code>default_model</code>）を使う」ことを意味する。<code>services/ai_client.py</code>の単価表<code>MODEL_COSTS</code>のキー集合（レスポンスの<code>available_models</code>と同じ）以外は422。</span>基本設定タブ（is_ai_enabled・ai_modelを変更）・反応モードタブ（reaction_modeを変更）はいずれもこのAPIを共用し、自分が変更しない側のフィールドも現在値のまま一緒に送る（A-27参照ドキュメント範囲がfolder_ids・out_of_scope_policyを束ねて送るのと同じ考え方）。<code>'proactive'</code>時の起動条件（人間の投稿には関連性判定を挟まず常に応答する）は基本設計書8.1節の設計判断を参照。</p>
 

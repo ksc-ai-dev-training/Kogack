@@ -12,14 +12,18 @@ from openai import AsyncOpenAI
 
 from database import ROOT_ENV
 
-DEFAULT_MODEL = "gpt-4o-mini"
+# 2026-09-17にgpt-4o-miniをMODEL_COSTS・選択肢から除外したことに伴い、DEFAULT_MODELも
+# 実際にAI_MODEL環境変数の値として使われているgpt-4.1-nanoへ変更した（未知モデルの
+# コスト概算フォールバック先＝MODEL_COSTS[DEFAULT_MODEL]がMODEL_COSTSに存在しないキーを
+# 指すと例外になるため、必ずMODEL_COSTSに存在するキーに保つ必要がある）
+DEFAULT_MODEL = "gpt-4.1-nano"
 
 # 1000トークンあたりの単価（円）。実際の契約プランに応じて調整する想定（10.5節の例をそのまま採用）。
 # 未知のモデルは既定モデルの単価で概算する。各行はOpenAI公表のUSD単価（1Mトークンあたり）を
-# gpt-4o-miniの行と同じ換算レート（約153.33円/USD、既存の0.023円/0.092円から逆算した値）で
+# 統一の換算レート（約153.33円/USD、2026-09-02時点のgpt-4o-mini行0.023円/0.092円から逆算した値。
+# gpt-4o-mini自体は2026-09-17に選択肢から除外したがレートの基準としては引き続き使う）で
 # 円/1000トークンへ換算している（レートを行ごとに変えると単価表内で整合しなくなるため統一する）
 MODEL_COSTS = {
-    "gpt-4o-mini": {"input": 0.023, "output": 0.092},
     # gpt-5-nano: $0.05/$0.40（1Mトークン、USD）。ローカル動作確認用に最安のテキスト生成モデルとして採用
     # （2026-09-02時点のOpenAI公式単価、developers.openai.com/api/docs/pricing）
     "gpt-5-nano": {"input": 0.0077, "output": 0.0613},
@@ -32,6 +36,11 @@ MODEL_COSTS = {
     # gpt-4.1-nanoとgpt-4.1（フル版、$2.00/$8.00）のちょうど中間の性能・単価帯（2026-09-17時点の
     # OpenAI公式単価、developers.openai.com/api/docs/pricing）
     "gpt-4.1-mini": {"input": 0.0613, "output": 0.2453},
+    # gpt-5-mini: $0.25/$2.00（1Mトークン、USD）。ユーザーからの明示的な要望「4o-miniを除外して
+    # 5-miniを追加してほしい」への対応（2026-09-17）。gpt-5-nanoと同じGPT-5系の推論モデルのため
+    # REASONING_MODELSにも追加する（下記）。gpt-4o-mini（$0.15/$0.60）は同じユーザー要望により
+    # 選択肢から除外した（実際の応答品質・速度でgpt-4.1-nano系に劣ると判断されたため）。
+    "gpt-5-mini": {"input": 0.0383, "output": 0.3067},
 }
 
 
@@ -65,9 +74,10 @@ def selectable_models() -> list[str]:
 # reasoning系モデル（gpt-5-nano等）はChat Completions APIで`reasoning_effort`を指定しないと、
 # 内部の思考にreasoning_tokensを使い切ってmax_completion_tokensに達し、応答本文が空のまま
 # finish_reason='length'で返ってくることを実機検証で確認した（トークンはreasoning_tokensとして
-# 消費済みのため課金は発生する）。逆に非reasoningモデル（gpt-4o-mini等）に`reasoning_effort`を
-# 渡すと「Unrecognized request argument」で400エラーになるため、無条件には指定できない
-REASONING_MODELS = {"gpt-5-nano"}
+# 消費済みのため課金は発生する）。逆に非reasoningモデル（gpt-4.1-nano等）に`reasoning_effort`を
+# 渡すと「Unrecognized request argument」で400エラーになるため、無条件には指定できない。
+# gpt-5-mini（2026-09-17追加）もgpt-5-nanoと同じGPT-5系の推論モデルのため同じ扱いが必要
+REASONING_MODELS = {"gpt-5-nano", "gpt-5-mini"}
 
 
 def is_reasoning_model(model: str) -> bool:
