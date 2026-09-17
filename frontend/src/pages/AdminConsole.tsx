@@ -26,6 +26,15 @@ function formatYen(yen: number) {
   return `¥${Math.round(yen).toLocaleString('ja-JP')}`
 }
 
+// 利用者管理テーブルで、氏名・チャンネル管理者のチャンネル名が長いと隣の列まで文字が
+// はみ出してしまう不具合（ユーザーからの報告）への対応。CSSのtruncate（隠す）だけでは
+// 「、」区切りで並ぶ複数チャンネル名の1つ1つを個別に短縮できないため、文字数ベースで
+// 直接切り詰める（末尾に「…」を付与、fullには常に元の文字列をtitle属性として渡し
+// ホバーで全文を確認できるようにする）。
+function truncateLabel(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
 function currentMonthStr() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -179,9 +188,10 @@ function UsersTab({ me }: { me: Me | null }) {
                       </span>
                     )}
                     <span
+                      title={u.name}
                       className={`whitespace-nowrap font-semibold ${u.is_active ? 'text-ink' : 'text-ink-subtle line-through'}`}
                     >
-                      {u.name}
+                      {truncateLabel(u.name, 12)}
                     </span>
                     {u.id === me?.id && <span className="text-[10px] text-ink-subtle">(本人)</span>}
                   </div>
@@ -206,8 +216,12 @@ function UsersTab({ me }: { me: Me | null }) {
                     u.chadmin_channels.map((c, i) => (
                       <span key={c.id}>
                         {i > 0 && '、'}
-                        <Link to={`/channels/${c.id}/settings`} className="text-accent-700 hover:underline">
-                          # {c.name}
+                        <Link
+                          to={`/channels/${c.id}/settings`}
+                          title={c.name}
+                          className="text-accent-700 hover:underline"
+                        >
+                          # {truncateLabel(c.name, 15)}
                         </Link>
                       </span>
                     ))
