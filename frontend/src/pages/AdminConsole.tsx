@@ -149,7 +149,9 @@ function UsersTab({ me }: { me: Me | null }) {
               {['氏名', 'メールアドレス', 'ロール', 'チャンネル管理者', 'ステータス', '最終ログイン', ''].map((h) => (
                 <th
                   key={h}
-                  className="border-b border-line-strong px-3 py-1.5 text-[11px] font-bold text-ink-subtle"
+                  className={`whitespace-nowrap border-b border-line-strong px-3 py-1.5 text-[11px] font-bold text-ink-subtle ${
+                    h === 'チャンネル管理者' ? 'whitespace-normal' : ''
+                  }`}
                 >
                   {h}
                 </th>
@@ -176,7 +178,9 @@ function UsersTab({ me }: { me: Me | null }) {
                         {u.name.slice(0, 1)}
                       </span>
                     )}
-                    <span className={`font-semibold ${u.is_active ? 'text-ink' : 'text-ink-subtle line-through'}`}>
+                    <span
+                      className={`whitespace-nowrap font-semibold ${u.is_active ? 'text-ink' : 'text-ink-subtle line-through'}`}
+                    >
                       {u.name}
                     </span>
                     {u.id === me?.id && <span className="text-[10px] text-ink-subtle">(本人)</span>}
@@ -197,7 +201,7 @@ function UsersTab({ me }: { me: Me | null }) {
                     <option value="member">member</option>
                   </select>
                 </td>
-                <td className="px-3 py-2.5 text-ink-subtle">
+                <td className="max-w-[210px] px-3 py-2.5 text-ink-subtle">
                   {u.chadmin_channels.length > 0 ? (
                     u.chadmin_channels.map((c, i) => (
                       <span key={c.id}>
@@ -213,20 +217,20 @@ function UsersTab({ me }: { me: Me | null }) {
                 </td>
                 <td className="px-3 py-2.5">
                   <span
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                    className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold ${
                       u.is_active ? 'bg-ok-bg text-ok-text' : 'bg-off-bg text-off-text'
                     }`}
                   >
                     {u.is_active ? '有効' : '無効'}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-ink-subtle">{formatDateTime(u.last_login_at)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-ink-subtle">{formatDateTime(u.last_login_at)}</td>
                 <td className="px-3 py-2.5 text-right">
                   <button
                     type="button"
                     onClick={() => toggleActive(u.id, u.name, !u.is_active)}
                     disabled={u.id === me?.id}
-                    className="text-[11.5px] font-medium text-accent-700 hover:underline disabled:opacity-30 disabled:hover:no-underline"
+                    className="whitespace-nowrap text-[11.5px] font-medium text-accent-700 hover:underline disabled:opacity-30 disabled:hover:no-underline"
                   >
                     {u.is_active ? '無効化' : '有効化'}
                   </button>
