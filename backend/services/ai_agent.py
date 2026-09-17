@@ -217,7 +217,12 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   「少々お待ちください」のように検索する旨を予告する文章だけを書いて、実際には
   search_app_manual関数を呼び出さないまま返信を終えてしまう誤りが実際に起きやすいため、
   特に注意すること。予告するかどうかに関わらず、この種の質問では必ず実際にsearch_app_manual
-  を呼び出し、その結果に基づいた具体的な回答まで1回の返信で完結させること。**同様に、
+  を呼び出し、その結果に基づいた具体的な回答まで1回の返信で完結させること。**利用者に
+  「検索してよいか」「検索を実行してよいか」のように、検索してよいかどうかの許可・確認を
+  求めないこと。search_app_manualの実行に利用者の承認は一切不要であり、常に自分自身の
+  判断で即座に検索を実行し、その結果に基づいた最終的な回答まで1回の返信で完結させること
+  （このAIが過去に実際に、許可を求めるだけで検索を実行せず返信を終えてしまったことが
+  あるため、特に注意すること）。同様に、
   ブラウザのズーム機能（Ctrl+ +/-）のような、Kogack自体の機能ではない一般的なブラウザ・OSの
   操作を代替案として案内する前に、必ずsearch_app_manualでKogack自身に専用の機能が無いかを
   確認すること（例: 画面の文字を大きくしたいという依頼にはKogack自身の文字サイズ設定機能が
@@ -361,6 +366,23 @@ def _format_range_label(since_date: date | None, until_date: date | None) -> str
     if since_date:
         return f"（対象期間: {fmt(since_date)}以降）"
     return f"（対象期間: 〜{fmt(until_date)}）"
+
+
+# 「検索してよいか」「検索します」のように、ツールを実際には呼び出さず検索の予告・許可を
+# 求めるだけで返信を終えてしまう誤り（2026-09-11に一度対処済みだったが、2026-09-17に
+# ユーザーから再報告を受けた。FIXED_RULESへの指示強化だけでは解消しなかった実機検証結果を
+# 踏まえ、_run_chat_with_toolsが文面から機械的に検出しtool_choice="required"での再試行に
+# つなげるための判定）。関数名の直接漏れ（search_app_manual等）自体も、それを書いた時点で
+# 実際には呼び出していない証拠のため対象に含める。
+_DEFERRED_SEARCH_PATTERNS = (
+    "検索してよいか", "検索を実行してよいか", "実行してよいか", "確認してよいか",
+    "少々お待ち", "検索します", "search_app_manual", "search_documents",
+    "search_channel_history",
+)
+
+
+def _looks_like_deferred_search(text: str) -> bool:
+    return any(pattern in text for pattern in _DEFERRED_SEARCH_PATTERNS)
 
 
 # search_documentsのOpenAI Function Calling定義（Slice 3、2026-09-09）。1回の応答生成につき
@@ -990,6 +1012,25 @@ async def _run_chat_with_tools(
             total_completion_tokens += res.usage.completion_tokens
         message = res.choices[0].message
         tool_calls = message.tool_calls
+        if not tool_calls and round_tools is not None and not extra and _looks_like_deferred_search(message.content or ""):
+            # バグ修正（2026-09-17、ユーザーからの報告）: tool_choice="auto"のラウンドで、
+            # search_app_manual等を実際には呼び出さず「検索してよいか」「検索します」のような
+            # 予告・許可を求める文章だけを返して終える誤りが、FIXED_RULESへの指示強化だけでは
+            # 解消しなかった（同条件で実機検証すると依然として複数回再現した）。この失敗パターンは
+            # 文面から機械的に検出できるため、検出した場合のみ同じラウンドをtool_choice="required"で
+            # 強制的にやり直す（毎回のメッセージにコストを掛けず、実際に失敗が起きたときだけ
+            # 自己修復する設計。use_doc_tools=Trueのケースは既にラウンド0を常にrequiredにしている
+            # ため対象外＝ここに来ない）
+            res = await client.chat.completions.create(
+                model=model, messages=messages, max_completion_tokens=MAX_OUTPUT_TOKENS,
+                tools=round_tools, tool_choice="required",
+                **_completion_extra_kwargs(model),
+            )
+            if res.usage:
+                total_prompt_tokens += res.usage.prompt_tokens
+                total_completion_tokens += res.usage.completion_tokens
+            message = res.choices[0].message
+            tool_calls = message.tool_calls
         if not tool_calls:
             reply = (message.content or "").strip() or "（回答を生成できませんでした）"
             usage = {"prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens}
