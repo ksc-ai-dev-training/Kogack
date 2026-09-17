@@ -245,7 +245,7 @@ CREATE TABLE IF NOT EXISTS channel_ai_settings (
     reaction_mode             TEXT NOT NULL DEFAULT 'mention_only' CHECK (reaction_mode IN ('mention_only', 'proactive')),
     out_of_scope_policy       TEXT NOT NULL DEFAULT 'strict' CHECK (out_of_scope_policy IN ('strict', 'general')),
     fallback_handoff_user_id  BIGINT REFERENCES users(id),
-    ai_model                  TEXT NOT NULL DEFAULT 'gpt-4.1-nano',
+    ai_model                  TEXT NOT NULL DEFAULT 'gpt-5-mini',
     updated_by                BIGINT REFERENCES users(id),
     created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -264,7 +264,18 @@ ALTER TABLE channel_ai_settings ENABLE ROW LEVEL SECURITY;
 -- 実行しても安全）。
 ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS ai_model TEXT;
 UPDATE channel_ai_settings SET ai_model = 'gpt-4.1-nano' WHERE ai_model IS NULL;
-ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET DEFAULT 'gpt-4.1-nano';
+-- 2026-09-17続報: ユーザーからの明示的な要望「速度は遅くなってもかまわないので、既定モデルを
+-- 高性能なものにしましょう」を受け、既定をgpt-4.1-nanoからgpt-5-miniへ変更した。この設定は
+-- NOT NULLで各チャンネルへ常に具体的な値を持たせる方式（上記）にしたため、単にDEFAULT句を
+-- 変えるだけでは新規チャンネルにしか反映されない。ユーザーに確認のうえ、既存チャンネルの
+-- ai_model列（当時の既定値のまま未変更の行）もまとめてbackfillすることにした。**S-06で
+-- チャンネル管理者がgpt-4.1-nanoを明示的に選び直していた場合と、単に当時の既定値のまま
+-- 一度も変更していない場合を区別する手段がDB上に無いため、両者を区別せず一律に更新する**
+-- （前者に該当するチャンネルがあれば後からS-06で選び直してもらう必要がある）。冪等：
+-- 2回目以降はUPDATE対象0件・SET DEFAULTも既に同じ状態への適用で無害なため、AUTO_MIGRATE=1で
+-- 毎起動実行しても安全。
+UPDATE channel_ai_settings SET ai_model = 'gpt-5-mini' WHERE ai_model = 'gpt-4.1-nano';
+ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET DEFAULT 'gpt-5-mini';
 ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET NOT NULL;
 -- persona_nameの既定値を「AI」から「Kogack AI」へ変更した際のbackfill（CREATE TABLE IF NOT EXISTSは
 -- 既存DBのテーブルには効かないため、既存DBの以後のINSERT分にも新しい既定値を反映させる。
