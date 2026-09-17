@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { useDraftKeys } from '../hooks/useDraftKeys'
+import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { apiFetch, ApiError, uploadAttachment } from '../lib/api'
 import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
 import { currentUiZoomScale } from '../lib/uiZoom'
@@ -11,7 +12,20 @@ import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
 import { EMOJI_LIST } from './Composer'
-import type { AiRequestOut, AttachmentPayload, CitationPayload, MentionSourceMember, Message, MessageAttachment, MessageReaction } from '../types'
+import { AddCustomEmojiModal } from './AddCustomEmojiModal'
+import type {
+  AiRequestOut, AttachmentPayload, CitationPayload, CustomEmoji, MentionSourceMember, Message, MessageAttachment,
+  MessageReaction,
+} from '../types'
+
+// カスタム絵文字のショートコード（`:name:`）と、実際の画像URLへの解決（ユーザーからの明示的な
+// 要望「Slackみたいにリアクションスタンプを自分で作成できる機能」、2026-09-17）。リアクション
+// ピル（ReactionPills）・メッセージ本文中の両方で、この形式の文字列を見つけたら画像として
+// 描画する。customEmojiのnameは大小文字を区別しない一意制約（DB側）のためLOWER比較で引く。
+function findCustomEmojiUrl(shortcodeWithColons: string, customEmoji: CustomEmoji[]): string | null {
+  const name = shortcodeWithColons.slice(1, -1).toLowerCase()
+  return customEmoji.find((e) => e.name.toLowerCase() === name)?.image_url ?? null
+}
 
 // Composer.tsxのMAX_ATTACHMENT_BYTESと同じ上限（F-07、05-1_詳細設計書_DB設計.html 3.6節）。
 // 発言の編集でファイルを追加する際もこの上限を適用する（ユーザーからの要望「編集の時にも
@@ -210,6 +224,7 @@ function renderInlineSegment(
   usedMentionNeedles: Set<string>,
   aiPersonaName: string | undefined,
   keyPrefix: string,
+  customEmoji: CustomEmoji[],
 ): ReactNode[] {
   type Candidate = { start: number; end: number; priority: number; render: (key: string) => ReactNode }
   const candidates: Candidate[] = []
@@ -314,6 +329,30 @@ function renderInlineSegment(
       render: (key) => <s key={key} className="line-through">{content}</s>,
     })
   }
+  // カスタム絵文字（2026-09-17）。`:name:`のnameが登録済みの絵文字名と一致する場合のみ画像として
+  // 描画し、一致しない（未登録・打ち間違い等の）`:foo:`はそのまま文字列として残す
+  if (customEmoji.length > 0) {
+    const customEmojiByName = new Map(customEmoji.map((e) => [e.name.toLowerCase(), e]))
+    for (const m of text.matchAll(/:([a-zA-Z0-9_+-]{2,24}):/g)) {
+      const emoji = customEmojiByName.get(m[1].toLowerCase())
+      if (!emoji) continue
+      const start = m.index ?? 0
+      candidates.push({
+        start,
+        end: start + m[0].length,
+        priority: 3,
+        render: (key) => (
+          <img
+            key={key}
+            src={emoji.image_url}
+            alt={m[0]}
+            title={m[0]}
+            className="-mb-[3px] inline-block h-[18px] w-[18px] object-contain align-text-bottom"
+          />
+        ),
+      })
+    }
+  }
   for (const def of mentionDefs) {
     if (usedMentionNeedles.has(def.needle)) continue
     const idx = text.indexOf(def.needle)
@@ -380,6 +419,7 @@ export function renderMessageBody(
   blocks: Message['blocks'],
   members?: MentionSourceMember[],
   aiPersonaName?: string,
+  customEmoji: CustomEmoji[] = [],
 ): ReactNode {
   const mentions = (blocks ?? []).filter(
     (b): b is { block_type: 'mention'; payload: { target_user_id?: string; display_name_snapshot?: string; kind?: string }; sort_order: number } =>
@@ -421,13 +461,15 @@ export function renderMessageBody(
           <ul key={`list-${segIdx}-${lsIdx}`} className="my-1 list-disc space-y-0.5 pl-5">
             {ls.items.map((item, ii) => (
               <li key={ii}>
-                {renderInlineSegment(item, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}-li${ii}`)}
+                {renderInlineSegment(item, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}-li${ii}`, customEmoji)}
               </li>
             ))}
           </ul>,
         )
       } else {
-        nodes.push(...renderInlineSegment(ls.content, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}`))
+        nodes.push(
+          ...renderInlineSegment(ls.content, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}`, customEmoji),
+        )
       }
     })
   })
@@ -971,7 +1013,10 @@ const EMOJI_GRID_HEIGHT_ESTIMATE = 200 // 実測前の見積もり（下開き/�
 // （クリックした要素のgetBoundingClientRect）を基準にposition: fixedで配置、下に十分な余白が
 // 無ければ自動的に上開きに切り替える」方式にした（従来は発言行の中でabsolute配置していたため、
 // 会話ログのoverflow-y-autoスクロール領域の下端でクリップされ、画面下寄りの発言では投稿欄の
-// 裏に隠れて見えなくなっていた）。document内の他の場所をクリックすると閉じる
+// 裏に隠れて見えなくなっていた）。document内の他の場所をクリックすると閉じる。
+// カスタム絵文字（2026-09-17）はEMOJI_LISTの後ろに画像タイルとして並べ、選択すると`:name:`を
+// onSelectへ渡す（呼び出し元はUnicode絵文字と同じ1つの文字列として扱えるため、Composer.tsxの
+// 挿入処理・reactions.toggle_reactionいずれも変更不要だった）。末尾の「＋」から新規登録できる
 export function EmojiGridPopover({
   anchor,
   onSelect,
@@ -982,14 +1027,19 @@ export function EmojiGridPopover({
   onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const { customEmoji, mutate: mutateCustomEmoji } = useCustomEmoji()
+  const [showAddModal, setShowAddModal] = useState(false)
 
   useEffect(() => {
     const onDocMouseDown = (e: globalThis.MouseEvent) => {
+      // 追加モーダル（同じくdocument.bodyへのポータル）を開いている間は、そのモーダル内の
+      // クリックがこのグリッドから見て「外側」と判定されて誤って閉じてしまうため無効化する
+      if (showAddModal) return
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
     document.addEventListener('mousedown', onDocMouseDown)
     return () => document.removeEventListener('mousedown', onDocMouseDown)
-  }, [onClose])
+  }, [onClose, showAddModal])
 
   // +6は下開き時に実際に使うanchor.bottomとの間隔（下記style参照）。この分を含めずに判定すると
   // 「ギリギリ収まる」と判定されたケースで実際には6px分だけ画面下端をはみ出すことがあったため
@@ -1025,22 +1075,52 @@ export function EmojiGridPopover({
   }
 
   return createPortal(
-    <div
-      ref={ref}
-      style={style}
-      className="z-50 grid max-h-[200px] w-[240px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
-    >
-      {EMOJI_LIST.map((emoji, i) => (
+    <>
+      <div
+        ref={ref}
+        style={style}
+        className="z-50 grid max-h-[200px] w-[240px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
+      >
+        {EMOJI_LIST.map((emoji, i) => (
+          <button
+            key={`${emoji}-${i}`}
+            type="button"
+            onClick={() => onSelect(emoji)}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] hover:bg-surface-muted"
+          >
+            {emoji}
+          </button>
+        ))}
+        {customEmoji.map((e) => (
+          <button
+            key={e.id}
+            type="button"
+            onClick={() => onSelect(`:${e.name}:`)}
+            title={`:${e.name}:`}
+            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted"
+          >
+            <img src={e.image_url} alt={e.name} className="h-5 w-5 object-contain" />
+          </button>
+        ))}
         <button
-          key={`${emoji}-${i}`}
           type="button"
-          onClick={() => onSelect(emoji)}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] hover:bg-surface-muted"
+          onClick={() => setShowAddModal(true)}
+          title="絵文字を追加"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] text-ink-subtle hover:bg-surface-muted"
         >
-          {emoji}
+          ＋
         </button>
-      ))}
-    </div>,
+      </div>
+      {showAddModal && (
+        <AddCustomEmojiModal
+          onClose={() => setShowAddModal(false)}
+          onCreated={() => {
+            void mutateCustomEmoji()
+            setShowAddModal(false)
+          }}
+        />
+      )}
+    </>,
     document.body,
   )
 }
@@ -1132,10 +1212,15 @@ export function ReactionPills({
   reactions: MessageReaction[] | undefined
   onToggle: (emoji: string) => void
 }) {
+  // カスタム絵文字（2026-09-17）はr.emojiが`:name:`形式のときのみ画像として描画し、それ以外
+  // （Unicode絵文字・未知のショートコード）は従来どおり文字列のまま表示する
+  const { customEmoji } = useCustomEmoji()
   if (!reactions || reactions.length === 0) return null
   return (
     <div className="mt-1.5 flex flex-wrap gap-1">
-      {reactions.map((r) => (
+      {reactions.map((r) => {
+        const customUrl = /^:[a-zA-Z0-9_+-]{2,24}:$/.test(r.emoji) ? findCustomEmojiUrl(r.emoji, customEmoji) : null
+        return (
         <button
           key={r.emoji}
           type="button"
@@ -1159,7 +1244,7 @@ export function ReactionPills({
               : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-subtle'
           }`}
         >
-          <span>{r.emoji}</span>
+          {customUrl ? <img src={customUrl} alt={r.emoji} className="h-3.5 w-3.5 object-contain" /> : <span>{r.emoji}</span>}
           <span className="text-[11px] font-semibold">{r.count}</span>
           <span
             role="tooltip"
@@ -1168,7 +1253,8 @@ export function ReactionPills({
             {r.user_names.join('、')}
           </span>
         </button>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -1228,6 +1314,10 @@ export default function MessageList({
   const { me } = useMe()
   const confirm = useConfirm()
   const toast = useToast()
+  // カスタム絵文字（2026-09-17）。メッセージ本文中の`:name:`表示に使う（SWRのキャッシュ共有により
+  // EmojiGridPopover・ReactionPills等の他箇所での呼び出しと同じリクエストを再利用するだけで、
+  // 追加のAPI呼び出しにはならない）
+  const { customEmoji } = useCustomEmoji()
   // メッセージ下書きの永続化（ユーザーからの明示的な要望「下書きが残っているチャンネルや
   // スレッドは見てわかるような記述やマークを付けてほしい」）。サイドバーはチャンネル・DM分を
   // 表示するため対象外だが、スレッドはサイドバーに一覧が無いため「💬 N件の返信」導線の隣に表示する
@@ -1778,7 +1868,7 @@ export default function MessageList({
                       isEmojiOnlyBody(m.body) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
                     }`}
                   >
-                    {renderMessageBody(m.body, m.blocks, members, aiPersonaName)}
+                    {renderMessageBody(m.body, m.blocks, members, aiPersonaName, customEmoji)}
                   </div>
                 )}
                 {m.sender_type === 'ai' && m.generation_status !== 'generating' && (

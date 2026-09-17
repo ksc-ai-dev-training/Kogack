@@ -4,6 +4,7 @@
 # （require_thread_access）。返信自体はネストしない（返信への返信は対象外）。
 import asyncio
 import json
+import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -323,6 +324,15 @@ class ToggleReactionRequest(BaseModel):
     emoji: str = Field(min_length=1, max_length=32)
 
 
+# カスタム絵文字（T-28、2026-09-17）は`:name:`という文字列そのものをemojiとして保存する
+# （message_reactions.emoji自体は従来どおり自由文字列のままでスキーマ変更は不要——2026-09-10
+# 実装時のコメント「フロントの投稿欄と同じ絵文字ピッカーの選択肢に依存させず、将来ピッカー側の
+# 選択肢を増やしてもスキーマ変更が要らないように」という設計がそのまま活きた）。この形式に
+# 一致する場合のみ、実際に登録済みのカスタム絵文字かをDBで確認し、存在しない`:name:`文字列が
+# リアクションとして保存されることを防ぐ（Unicode絵文字はこの形式に一致しないため対象外）
+_CUSTOM_EMOJI_SHORTCODE_RE = re.compile(r"^:([a-zA-Z0-9_+-]{2,24}):$")
+
+
 @router.post("/{message_id}/reactions/toggle")
 async def toggle_message_reaction(
     message_id: int, body: ToggleReactionRequest, user: CurrentUser = Depends(require_auth),
@@ -355,6 +365,14 @@ async def toggle_message_reaction(
         if not is_member:
             # 参加していない会話の発言は存在自体を伏せる（A-12・A-74・総論5.3節と同じ考え方）
             raise HTTPException(404, detail="見つかりません")
+
+    shortcode_match = _CUSTOM_EMOJI_SHORTCODE_RE.match(body.emoji)
+    if shortcode_match:
+        exists = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM custom_emoji WHERE LOWER(name) = LOWER($1))", shortcode_match.group(1),
+        )
+        if not exists:
+            raise HTTPException(404, detail="そのカスタム絵文字は見つかりません")
 
     added = await toggle_reaction(pool, message_id, user.id, body.emoji)
     reactions_by_message = await fetch_reactions_grouped(pool, [message_id], user.id)

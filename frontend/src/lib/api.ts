@@ -124,3 +124,12 @@ export async function createUploadDocFolder(
     body: JSON.stringify({ folder_name: folderName, is_restricted: isRestricted, viewer_user_ids: viewerUserIds }),
   })
 }
+
+// カスタム絵文字（2026-09-17）。画像自体はuploadIcon（既存の汎用アップロードAPI）で先に
+// アップロードし、その公開URLをここでnameに紐づける（2段階のフロー、AddCustomEmojiModal参照）。
+export async function createCustomEmoji(name: string, imageUrl: string): Promise<import('../types').CustomEmoji> {
+  return apiFetch('/api/custom-emoji', {
+    method: 'POST',
+    body: JSON.stringify({ name, image_url: imageUrl }),
+  })
+}

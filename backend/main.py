@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 import database
 from routers import (
-    admin, ai_settings, attachments, auth, channels, dms, icons, messages, push, recurring_posts,
+    admin, ai_settings, attachments, auth, channels, custom_emoji, dms, icons, messages, push, recurring_posts,
     scheduled_messages, search, trigger_rules, users,
 )
 from services import ai_agent, app_help_indexer, scheduled_dispatcher
@@ -38,6 +38,7 @@ app.include_router(ai_settings.router)
 app.include_router(attachments.router)
 app.include_router(auth.router)
 app.include_router(channels.router)
+app.include_router(custom_emoji.router)
 app.include_router(dms.router)
 app.include_router(icons.router)
 app.include_router(messages.router)

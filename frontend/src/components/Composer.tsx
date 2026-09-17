@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { avatarColorFor } from '../lib/avatarColor'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { getDraft, setDraft } from '../lib/drafts'
+import { useCustomEmoji } from '../hooks/useCustomEmoji'
+import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import { useToast } from './Toast'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
@@ -148,6 +150,8 @@ export default function Composer({
   const [pickerQuery, setPickerQuery] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [showAddEmojiModal, setShowAddEmojiModal] = useState(false)
+  const { customEmoji, mutate: mutateCustomEmoji } = useCustomEmoji()
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
   const [scheduleTime, setScheduleTime] = useState('')
@@ -741,7 +745,44 @@ export default function Composer({
               {emoji}
             </button>
           ))}
+          {/* カスタム絵文字（2026-09-17）。`:name:`をショートコードとしてそのまま挿入する
+              （MessageList.tsxのEmojiGridPopoverと同じ考え方、送信時はComposerにとって
+              単なる文字列のため既存の挿入処理を変更不要） */}
+          {customEmoji.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              title={`:${e.name}:`}
+              onMouseDown={(ev) => {
+                ev.preventDefault()
+                insertEmoji(`:${e.name}:`)
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted"
+            >
+              <img src={e.image_url} alt={e.name} className="h-5 w-5 object-contain" />
+            </button>
+          ))}
+          <button
+            type="button"
+            title="絵文字を追加"
+            onMouseDown={(ev) => {
+              ev.preventDefault()
+              setShowAddEmojiModal(true)
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] text-ink-subtle hover:bg-surface-muted"
+          >
+            ＋
+          </button>
         </div>
+      )}
+      {showAddEmojiModal && (
+        <AddCustomEmojiModal
+          onClose={() => setShowAddEmojiModal(false)}
+          onCreated={() => {
+            void mutateCustomEmoji()
+            setShowAddEmojiModal(false)
+          }}
+        />
       )}
       {scheduleOpen && (
         <div className="absolute bottom-full right-0 z-40 mb-2 w-[260px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">

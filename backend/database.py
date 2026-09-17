@@ -766,6 +766,28 @@ UPDATE channels SET topic = LEFT(topic, 500), updated_at = now()
 -- 安全・冪等（2026-09-09の文字数切り詰めbackfillと同じ考え方）。
 UPDATE messages SET body = regexp_replace(body, '^(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+', ''), updated_at = now()
     WHERE sender_type = 'ai' AND body ~ '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]';
+
+-- T-28 custom_emoji: カスタム絵文字（ユーザーからの明示的な要望「Slackみたいに、リアクション
+-- スタンプ（絵文字）を自分で作成できる機能が欲しい」、2026-09-17）。着手前に「誰が作成できるか」
+-- 「どこで使えるか」をユーザーへ確認し、利用者全員が作成可能・リアクション＋メッセージ本文の
+-- 両方で使える、という仕様で合意した。画像本体は既存の汎用アップロードAPI（A-61 POST /api/icons、
+-- プロフィール画像・チャンネルAIアイコン等と共用）をそのまま再利用し（Supabase Storage
+-- ICON_BUCKET、本番はPublic URL・ローカル開発はディスク保存へのフォールバックも含めて流用）、
+-- このテーブルは「name（ショートコード）→image_url」の対応付けのみを持つ薄いテーブルにした
+-- （新規のストレージ経路・バケットを増やさない設計判断）。nameは大小文字を区別せず一意
+-- （`:Foo:`と`:foo:`を別物として登録できてしまうと紛らわしいため、UNIQUE制約はLOWER(name)に
+-- 掛ける）。削除時の実ファイル削除は行わない（ICON_BUCKETは他の用途（プロフィール画像等）とも
+-- 共用しており、このテーブルの行だけを見て安全に削除できる保証が無いため。アイコン自体も
+-- 同様の理由で従来から未削除のまま運用されている）。
+CREATE TABLE IF NOT EXISTS custom_emoji (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name        TEXT NOT NULL,
+    image_url   TEXT NOT NULL,
+    created_by  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_emoji_name_lower ON custom_emoji (LOWER(name));
+ALTER TABLE custom_emoji ENABLE ROW LEVEL SECURITY;
 """
 
 

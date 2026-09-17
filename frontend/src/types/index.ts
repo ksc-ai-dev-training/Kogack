@@ -489,3 +489,19 @@ export interface AuditLogsResponse {
   items: AuditLogEntry[]
   has_more: boolean
 }
+
+/** T-28 custom_emoji（ユーザーからの明示的な要望「Slackみたいにリアクションスタンプ（絵文字）を
+ * 自分で作成できる機能が欲しい」、2026-09-17）。nameはショートコード（`:name:`のnameの部分、
+ * コロンを含まない）で、リアクション（message_reactions.emoji）・メッセージ本文の両方で
+ * `:name:`という文字列として使う */
+export interface CustomEmoji {
+  id: string
+  name: string
+  image_url: string
+  created_by_name: string
+  created_at: string
+}
+
+export interface CustomEmojiResponse {
+  items: CustomEmoji[]
+}

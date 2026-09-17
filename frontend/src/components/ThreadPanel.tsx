@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useThread } from '../hooks/useThread'
+import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { apiFetch } from '../lib/api'
 import MessageList, {
   Avatar, EmojiGridPopover, ReactionPills, ReactionQuickButtons, formatTime, isEmojiOnlyBody, renderMessageBody,
@@ -72,6 +73,7 @@ export default function ThreadPanel({
   onReplyDeleted?: () => void
 }) {
   const { replies, mutate: mutateReplies, updateReplyReactions, updateReplyMessage } = useThread(messageId)
+  const { customEmoji } = useCustomEmoji()
   const bodyRef = useRef<HTMLDivElement>(null)
 
   // パネル幅のドラッグリサイズ。ドラッグ開始時のマウスX座標・幅をdragStartRefに記録し、
@@ -271,7 +273,7 @@ export default function ThreadPanel({
                   isEmojiOnlyBody(parentMessage.body) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
                 }`}
               >
-                {renderMessageBody(parentMessage.body, parentMessage.blocks, members, aiPersonaName)}
+                {renderMessageBody(parentMessage.body, parentMessage.blocks, members, aiPersonaName, customEmoji)}
               </div>
               {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (
                 // F-30（MessageList.tsxと同じ）。元発言はMessageListを経由せずここで個別に描画しているため
