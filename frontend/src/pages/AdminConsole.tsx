@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAdminUsers } from '../hooks/useAdminUsers'
 import { useAuditLogs } from '../hooks/useAuditLogs'
@@ -33,6 +34,126 @@ function formatYen(yen: number) {
 // ホバーで全文を確認できるようにする）。
 function truncateLabel(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
+// S-08「ドキュメント参照範囲」タブでのアプリ内プレビュー（ユーザーからの明示的な要望
+// 「アプリ内で参照ドキュメントをプレビューする機能を付けられますか」、2026-09-17。
+// 対象画面はS-08管理コンソールのみとする方針で確認済み）。対応形式の判定は
+// MessageList.tsxのattachmentPreviewKind（F-07添付ファイルプレビュー、2026-09-11）と
+// 同じ拡張子集合・同じ理由（SVGは意図的に除外）で、バックエンド側の判定
+// （routers/admin.py _preview_content_type）とも揃えている。ファイル自体が別ドメイン
+// （doc_foldersと message_attachments）のため、MessageList.tsx側のコンポーネントは
+// 変更せずこちらに小さく複製する。
+type DocPreviewKind = 'image' | 'pdf' | 'text'
+const DOC_PREVIEW_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
+const DOC_PREVIEW_TEXT_EXT = new Set(['txt', 'md', 'csv', 'json', 'log'])
+function docPreviewKind(fileName: string): DocPreviewKind | null {
+  const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : ''
+  if (DOC_PREVIEW_IMAGE_EXT.has(ext)) return 'image'
+  if (ext === 'pdf') return 'pdf'
+  if (DOC_PREVIEW_TEXT_EXT.has(ext)) return 'text'
+  return null
+}
+
+function DocPreviewModal({
+  folderId,
+  fileName,
+  kind,
+  onClose,
+}: {
+  folderId: string
+  fileName: string
+  kind: DocPreviewKind
+  onClose: () => void
+}) {
+  const overlayClose = useOverlayClose(onClose)
+  const [text, setText] = useState<string | null>(null)
+  const [textError, setTextError] = useState<string | null>(null)
+  const previewUrl = `/api/admin/doc-folders/${folderId}/preview`
+
+  useEffect(() => {
+    if (kind !== 'text') return
+    let cancelled = false
+    fetch(previewUrl, { credentials: 'same-origin' })
+      .then((res) => {
+        if (!res.ok) throw new Error('プレビューを取得できませんでした')
+        return res.text()
+      })
+      .then((t) => {
+        if (!cancelled) setText(t)
+      })
+      .catch((e) => {
+        if (!cancelled) setTextError(e instanceof Error ? e.message : 'プレビューを取得できませんでした')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [kind, previewUrl])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.6)] p-6"
+      {...overlayClose}
+    >
+      <div
+        className="flex max-h-[86vh] w-full max-w-[860px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{fileName}</span>
+          <div className="flex flex-none items-center gap-2">
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] text-ink-muted hover:bg-surface-subtle"
+            >
+              新しいタブで開く
+            </a>
+            <button
+              type="button"
+              onClick={onClose}
+              title="閉じる"
+              className="rounded-md px-2 py-1 text-ink-subtle hover:bg-surface-muted"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto bg-surface-subtle p-3">
+          {kind === 'image' && (
+            <img src={previewUrl} alt={fileName} className="mx-auto max-h-[70vh] max-w-full object-contain" />
+          )}
+          {kind === 'pdf' && (
+            <iframe
+              src={previewUrl}
+              title={fileName}
+              className="h-[70vh] w-full rounded-md border border-line bg-surface"
+            />
+          )}
+          {kind === 'text' &&
+            (textError ? (
+              <p className="text-[12.5px] text-danger-text">{textError}</p>
+            ) : text === null ? (
+              <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 text-[12.5px] leading-[1.6] text-ink">
+                {text}
+              </pre>
+            ))}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
 }
 
 function currentMonthStr() {
@@ -596,6 +717,8 @@ function DocFoldersTab() {
   const [isRestricted, setIsRestricted] = useState(false)
   const [viewerIds, setViewerIds] = useState<Set<string>>(new Set())
   const [editingViewersFor, setEditingViewersFor] = useState<DocFolder | null>(null)
+  // アプリ内プレビュー（2026-09-17）。対応形式（画像・PDF・プレーンテキスト）のファイルのみ対象
+  const [previewTarget, setPreviewTarget] = useState<DocFolder | null>(null)
   // フォルダ名クリックで中の登録ファイルを展開/折りたたみする（ユーザーからの明示的な要望
   // 「フォルダ名をクリックするとその中のファイルが表示されて」。S-06 DocScopeTabと同じ挙動）
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
@@ -822,6 +945,15 @@ function DocFoldersTab() {
                     {nameBlock}
                   </div>
                 )}
+                {f.item_type === 'file' && f.source === 'upload' && docPreviewKind(f.drive_folder_name) !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTarget(f)}
+                    className="flex-none bg-transparent text-[11.5px] text-accent-700 hover:underline"
+                  >
+                    プレビュー
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setEditingViewersFor(f)}
@@ -891,6 +1023,21 @@ function DocFoldersTab() {
           }}
         />
       )}
+
+      {previewTarget &&
+        (() => {
+          const kind = docPreviewKind(previewTarget.drive_folder_name)
+          return (
+            kind && (
+              <DocPreviewModal
+                folderId={previewTarget.id}
+                fileName={previewTarget.drive_folder_name}
+                kind={kind}
+                onClose={() => setPreviewTarget(null)}
+              />
+            )
+          )
+        })()}
     </div>
   )
 }

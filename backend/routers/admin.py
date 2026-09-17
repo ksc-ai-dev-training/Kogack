@@ -6,9 +6,10 @@ import json
 import re
 from datetime import date, datetime, time
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from auth_helpers import CurrentUser, require_auth, require_roles
@@ -95,6 +96,26 @@ async def update_user(
 
     row = await pool.fetchrow("SELECT id, role, is_active FROM users WHERE id = $1", target_id)
     return {"id": str(row["id"]), "role": row["role"], "is_active": row["is_active"]}
+
+
+# S-08管理コンソール「ドキュメント参照範囲」タブでのアプリ内プレビュー（ユーザーからの明示的な
+# 要望「アプリ内で参照ドキュメントをプレビューする機能を付けられますか」、2026-09-17）。対象を
+# S-08のみに絞るかS-06（チャンネル設定）も含めるかを確認し、S-08限定を選択された。F-07添付
+# ファイルプレビュー（routers/attachments.py、2026-09-11）と全く同じ「対応形式のみ・拡張子で
+# Content-Typeを決定・inline配信・SVGは意図的に除外」方針をそのまま踏襲する。
+_PREVIEW_IMAGE_EXT = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
+_PREVIEW_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".log"}
+
+
+def _preview_content_type(file_name: str) -> str | None:
+    ext = Path(file_name).suffix.lower()
+    if ext in _PREVIEW_IMAGE_EXT:
+        return _PREVIEW_IMAGE_EXT[ext]
+    if ext == ".pdf":
+        return "application/pdf"
+    if ext in _PREVIEW_TEXT_EXT:
+        return "text/plain; charset=utf-8"
+    return None
 
 
 _DRIVE_FOLDER_URL_RE = re.compile(r"drive\.google\.com/(?:drive/)?(?:u/\d+/)?folders/([a-zA-Z0-9_-]+)")
@@ -362,6 +383,40 @@ async def upload_doc_file(
         )
     row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), new_id)
     return _doc_folder_out(row)
+
+
+@router.get("/doc-folders/{folder_id}/preview")
+async def preview_doc_folder(folder_id: int, user: CurrentUser = Depends(require_roles("admin"))):
+    """新規: 参照ドキュメントのアプリ内プレビュー（2026-09-17）。権限はこのファイルの他の
+    doc-folders系エンドポイントと同じrequire_roles("admin")に統一する（S-08自体がadmin限定の
+    画面のため、F-19〜F-22の閲覧権限モデル（doc_permissions.py、is_restricted等）をここで別途
+    判定する必要はない）。フォルダ自体（item_type='folder'）やDrive由来の候補（source='drive'、
+    実体を持たない）にはプレビュー対象の実ファイルが無いため404。"""
+    row = await get_pool().fetchrow(
+        "SELECT item_type, source, storage_path, drive_folder_name FROM doc_folders WHERE id = $1", folder_id
+    )
+    if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
+        raise HTTPException(404, detail="見つかりません")
+
+    content_type = _preview_content_type(row["drive_folder_name"])
+    if content_type is None:
+        raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
+
+    try:
+        data = doc_storage.read(row["storage_path"])
+    except FileNotFoundError:
+        raise HTTPException(404, detail="見つかりません")
+
+    ascii_fallback = row["drive_folder_name"].encode("ascii", "replace").decode("ascii")
+    headers = {
+        "Content-Disposition": (
+            f'inline; filename="{ascii_fallback}"; filename*=utf-8\'\'{quote(row["drive_folder_name"])}'
+        )
+    }
+    if content_type.startswith("text/plain"):
+        text = data.decode("utf-8", errors="replace")
+        return Response(content=text, media_type=content_type, headers=headers)
+    return Response(content=data, media_type=content_type, headers=headers)
 
 
 @router.delete("/doc-folders/{folder_id}", status_code=204)
