@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
 from services import ai_client, doc_indexer, doc_permissions, doc_storage
+from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 JST = ZoneInfo("Asia/Tokyo")
@@ -102,21 +103,8 @@ async def update_user(
 # 要望「アプリ内で参照ドキュメントをプレビューする機能を付けられますか」、2026-09-17）。対象を
 # S-08のみに絞るかS-06（チャンネル設定）も含めるかを確認し、S-08限定を選択された。F-07添付
 # ファイルプレビュー（routers/attachments.py、2026-09-11）と全く同じ「対応形式のみ・拡張子で
-# Content-Typeを決定・inline配信・SVGは意図的に除外」方針をそのまま踏襲する。
-_PREVIEW_IMAGE_EXT = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
-_PREVIEW_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".log"}
-
-
-def _preview_content_type(file_name: str) -> str | None:
-    ext = Path(file_name).suffix.lower()
-    if ext in _PREVIEW_IMAGE_EXT:
-        return _PREVIEW_IMAGE_EXT[ext]
-    if ext == ".pdf":
-        return "application/pdf"
-    if ext in _PREVIEW_TEXT_EXT:
-        return "text/plain; charset=utf-8"
-    return None
-
+# Content-Typeを決定・inline配信・SVGは意図的に除外」方針をそのまま踏襲する（判定ロジック自体は
+# services/preview_kind.pyの共通関数を使う）。
 
 _DRIVE_FOLDER_URL_RE = re.compile(r"drive\.google\.com/(?:drive/)?(?:u/\d+/)?folders/([a-zA-Z0-9_-]+)")
 # ファイル登録用（フォルダ内の特定ファイルだけを参照範囲に含める機能。CLAUDE.md実装状況節）。
@@ -398,7 +386,7 @@ async def preview_doc_folder(folder_id: int, user: CurrentUser = Depends(require
     if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
         raise HTTPException(404, detail="見つかりません")
 
-    content_type = _preview_content_type(row["drive_folder_name"])
+    content_type = preview_content_type(row["drive_folder_name"])
     if content_type is None:
         raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
 

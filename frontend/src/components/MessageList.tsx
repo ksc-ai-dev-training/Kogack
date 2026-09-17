@@ -758,6 +758,158 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
   )
 }
 
+// F-20 回答根拠の提示（citation）のアプリ内プレビュー（ユーザーからの明示的な要望「AIの回答には
+// 誤りが含まれるという表示があるので、参照した文書を実際にアプリ上ですぐ確認できると便利」、
+// 2026-09-17）。プレビュー対象形式の判定はAttachmentPreviewModalと全く同じattachmentPreviewKind
+// を再利用する（doc_folders.drive_folder_nameは元のファイル名そのままで、citationのfolder_name
+// はそれをそのまま返す値のため、拡張子ベースの判定を流用できる）。バックエンド
+// （GET /api/messages/{id}/citations/{folder_id}/preview）にdoc_folders専用のダウンロード
+// エンドポイントが無いため、AttachmentPreviewModalの「ダウンロード」リンクの代わりに
+// 「新しいタブで開く」リンク（プレビューURL自体をtarget="_blank"で開く）にしている
+// （S-08管理コンソールのDocPreviewModalと同じ考え方）
+function CitationPreviewModal({
+  messageId,
+  folderId,
+  fileName,
+  kind,
+  onClose,
+}: {
+  messageId: string
+  folderId: string
+  fileName: string
+  kind: PreviewKind
+  onClose: () => void
+}) {
+  const overlayClose = useOverlayClose(onClose)
+  const [text, setText] = useState<string | null>(null)
+  const [textError, setTextError] = useState<string | null>(null)
+  const previewUrl = `/api/messages/${messageId}/citations/${folderId}/preview`
+
+  useEffect(() => {
+    if (kind !== 'text') return
+    let cancelled = false
+    fetch(previewUrl, { credentials: 'same-origin' })
+      .then((res) => {
+        if (!res.ok) throw new Error('プレビューを取得できませんでした')
+        return res.text()
+      })
+      .then((t) => {
+        if (!cancelled) setText(t)
+      })
+      .catch((e) => {
+        if (!cancelled) setTextError(e instanceof Error ? e.message : 'プレビューを取得できませんでした')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [kind, previewUrl])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,24,33,0.6)] p-6"
+      {...overlayClose}
+    >
+      <div
+        className="flex max-h-[86vh] w-full max-w-[860px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-[0_24px_60px_rgba(16,24,40,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">📄 {fileName}</span>
+          <div className="flex flex-none items-center gap-2">
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] text-ink-muted hover:bg-surface-subtle"
+            >
+              新しいタブで開く
+            </a>
+            <button
+              type="button"
+              onClick={onClose}
+              title="閉じる"
+              className="rounded-md px-2 py-1 text-ink-subtle hover:bg-surface-muted"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto bg-surface-subtle p-3">
+          {kind === 'image' && (
+            <img src={previewUrl} alt={fileName} className="mx-auto max-h-[70vh] max-w-full object-contain" />
+          )}
+          {kind === 'pdf' && (
+            <iframe
+              src={previewUrl}
+              title={fileName}
+              className="h-[70vh] w-full rounded-md border border-line bg-surface"
+            />
+          )}
+          {kind === 'text' &&
+            (textError ? (
+              <p className="text-[12.5px] text-danger-text">{textError}</p>
+            ) : text === null ? (
+              <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 text-[12.5px] leading-[1.6] text-ink">
+                {text}
+              </pre>
+            ))}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function CitationList({ messageId, blocks }: { messageId: string; blocks: Message['blocks'] }) {
+  const [previewFor, setPreviewFor] = useState<{ folderId: string; fileName: string; kind: PreviewKind } | null>(
+    null,
+  )
+  const citations = (blocks ?? []).filter((b) => b.block_type === 'citation')
+  if (citations.length === 0) return null
+  return (
+    <div className="mt-[5px] flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-ink-subtle">
+      <span>📄 参照:</span>
+      {citations.map((b, i) => {
+        const payload = b.payload as CitationPayload
+        const kind = attachmentPreviewKind(payload.folder_name)
+        return kind ? (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setPreviewFor({ folderId: payload.folder_id, fileName: payload.folder_name, kind })}
+            className="rounded bg-bot-bg px-1.5 py-0.5 text-bot-text hover:underline"
+          >
+            {payload.folder_name}
+          </button>
+        ) : (
+          <span key={i} className="rounded bg-bot-bg px-1.5 py-0.5 text-bot-text">
+            {payload.folder_name}
+          </span>
+        )
+      })}
+      {previewFor && (
+        <CitationPreviewModal
+          messageId={messageId}
+          folderId={previewFor.folderId}
+          fileName={previewFor.fileName}
+          kind={previewFor.kind}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 // 絵文字リアクション（ユーザーからの明示的な要望「Slackのように発言一つ一つに対して絵文字で
 // リアクションできるようにしたい」）。要望どおり「返信・削除ボタンの左隣によく使いそうな絵文字を
 // 数種類、その横に絵文字一覧を開くボタン」という構成にした。クイックリアクションは投稿欄の絵文字
@@ -1640,18 +1792,10 @@ export default function MessageList({
                   </div>
                 )}
                 {/* F-20 回答根拠の提示（Slice 3、2026-09-09）。search_documentsが実際に参照した
-                    文書をblock_type='citation'として表示する。生成中は（まだ根拠が確定していないため）表示しない */}
-                {m.sender_type === 'ai' && m.generation_status !== 'generating' && (m.blocks ?? []).some((b) => b.block_type === 'citation') && (
-                  <div className="mt-[5px] flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-ink-subtle">
-                    <span>📄 参照:</span>
-                    {(m.blocks ?? [])
-                      .filter((b) => b.block_type === 'citation')
-                      .map((b, i) => (
-                        <span key={i} className="rounded bg-bot-bg px-1.5 py-0.5 text-bot-text">
-                          {(b.payload as CitationPayload).folder_name}
-                        </span>
-                      ))}
-                  </div>
+                    文書をblock_type='citation'として表示する。生成中は（まだ根拠が確定していないため）表示しない。
+                    対応形式（画像・PDF・プレーンテキスト）はクリックでアプリ内プレビューを開く（2026-09-17） */}
+                {m.sender_type === 'ai' && m.generation_status !== 'generating' && (
+                  <CitationList messageId={m.id} blocks={m.blocks} />
                 )}
                 <AttachmentList attachments={m.attachments} />
                 <ReactionPills reactions={m.reactions} onToggle={(emoji) => toggleReaction(m.id, emoji)} />

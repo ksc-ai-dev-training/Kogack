@@ -4,8 +4,9 @@
 # （require_thread_access）。返信自体はネストしない（返信への返信は対象外）。
 import asyncio
 import json
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
@@ -13,7 +14,8 @@ from auth_helpers import CurrentUser, require_auth, require_channel_admin, requi
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped, toggle_reaction
-from services import ai_agent, push_sender
+from services import ai_agent, doc_storage, push_sender
+from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -398,3 +400,60 @@ async def get_ai_request(message_id: int, user: CurrentUser = Depends(require_au
         "estimated_cost_yen": float(log["estimated_cost_yen"]),
         "created_at": log["created_at"].isoformat(),
     }
+
+
+@router.get("/{message_id}/citations/{folder_id}/preview")
+async def preview_citation(
+    message_id: int, folder_id: int, user: CurrentUser = Depends(require_auth),
+):
+    """新規: AI発言の「📄 参照: ...」（F-20回答根拠の提示）が指す文書を、チャット上からそのまま
+    プレビューできるようにする（ユーザーからの明示的な要望「AIの回答には誤りが含まれるという
+    表示があるので、参照した文書を実際にアプリ上ですぐ確認できると便利」、2026-09-17）。
+
+    権限はrequire_thread_access（A-22添付ダウンロードと同じ、その発言を見られる参加者なら誰でも）
+    とし、同日に実装したS-08管理コンソールのプレビュー（require_roles("admin")限定）とは
+    意図的に異なる基準にした——F-19〜F-22の閲覧権限モデル（services/doc_permissions.py）は
+    「チャンネルが参照する限定公開フォルダは、そのチャンネルの参加者全員が既に閲覧権限を
+    持っている場合のみ割り当てられる」という不変条件をSlice 2bで強制しているため、この
+    メッセージを見られる参加者は、実際にそのメッセージが引用した文書についても閲覧権限を
+    既に持っているはずである（doc_permissions側の判定をここで再度行う必要は無い）。
+    folder_idがこの発言の実際の引用（message_blocks.block_type='citation'）に含まれているかも
+    確認し、参加者が無関係なdoc_folder idを推測して閲覧することを防ぐ（2026-09-16 F-30の
+    「存在を伏せる」設計と同じ考え方）。"""
+    await require_thread_access(message_id=message_id, user=user)
+
+    cited = await get_pool().fetchval(
+        """SELECT EXISTS(
+               SELECT 1 FROM message_blocks
+               WHERE message_id = $1 AND block_type = 'citation' AND payload->>'folder_id' = $2::text
+           )""",
+        message_id, str(folder_id),
+    )
+    if not cited:
+        raise HTTPException(404, detail="見つかりません")
+
+    row = await get_pool().fetchrow(
+        "SELECT item_type, source, storage_path, drive_folder_name FROM doc_folders WHERE id = $1", folder_id
+    )
+    if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
+        raise HTTPException(404, detail="見つかりません")
+
+    content_type = preview_content_type(row["drive_folder_name"])
+    if content_type is None:
+        raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
+
+    try:
+        data = doc_storage.read(row["storage_path"])
+    except FileNotFoundError:
+        raise HTTPException(404, detail="見つかりません")
+
+    ascii_fallback = row["drive_folder_name"].encode("ascii", "replace").decode("ascii")
+    headers = {
+        "Content-Disposition": (
+            f'inline; filename="{ascii_fallback}"; filename*=utf-8\'\'{quote(row["drive_folder_name"])}'
+        )
+    }
+    if content_type.startswith("text/plain"):
+        text = data.decode("utf-8", errors="replace")
+        return Response(content=text, media_type=content_type, headers=headers)
+    return Response(content=data, media_type=content_type, headers=headers)

@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse
 from auth_helpers import CurrentUser, require_auth, require_thread_access
 from database import get_pool
 from services import storage
+from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
@@ -36,24 +37,8 @@ _MAX_BYTES = 20 * 1024 * 1024  # 20MB（05-1_詳細設計書_DB設計.html 3.6�
 # inlineとして配信する。**SVGは画像として一般的だがインラインスクリプトを実行できる既知のリスクが
 # あるため、意図的にプレビュー対象から除外している**（A-22が全形式を固定していた本来の理由と同じ）。
 # Word/Excel/PowerPoint等は元々ブラウザがネイティブ表示できないため対象外のまま（引き続きA-22の
-# ダウンロードのみ）。
-_PREVIEW_IMAGE_EXT = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
-_PREVIEW_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".log"}
-
-
-def _preview_content_type(file_name: str) -> str | None:
-    """プレビュー対象として安全と判断した拡張子ならContent-Typeを返す。対象外（未対応形式・
-    拡張子偽装によるものを含め一切）はNoneを返し、呼び出し元は404でプレビューを拒否する。
-    テキストは実際のファイル内容に関わらず常にtext/plainとして返す（例えば.mdファイルの中身に
-    <script>タグが書かれていても、ブラウザにHTMLとして解釈・実行させないための防御）。"""
-    ext = Path(file_name).suffix.lower()
-    if ext in _PREVIEW_IMAGE_EXT:
-        return _PREVIEW_IMAGE_EXT[ext]
-    if ext == ".pdf":
-        return "application/pdf"
-    if ext in _PREVIEW_TEXT_EXT:
-        return "text/plain; charset=utf-8"
-    return None
+# ダウンロードのみ）。判定ロジック自体はservices/preview_kind.pyへ抽出済み（2026-09-17、
+# S-08・チャット引用プレビューでも同じ判定が必要になったため）。
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "attachments"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -135,7 +120,7 @@ async def preview_attachment(attachment_id: int, user: CurrentUser = Depends(req
         raise HTTPException(404, detail="見つかりません")
     await require_thread_access(message_id=row["message_id"], user=user)
 
-    content_type = _preview_content_type(row["file_name"])
+    content_type = preview_content_type(row["file_name"])
     if content_type is None:
         raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
 
