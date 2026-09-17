@@ -284,10 +284,16 @@ ALTER TABLE channel_ai_settings ALTER COLUMN persona_name SET DEFAULT 'Kogack AI
 
 -- T-13 ai_usage_logs（05-1_詳細設計書_DB設計.html 3.11節）。質問文・回答文そのものは記録しない
 -- （発言本文はT-05に既に保存されているため。基本設計書8.6節）。dm_idはDMでのAI応答が未実装のため
--- 現状常にNULL。
+-- 現状常にNULL。channel_idはON DELETE SET NULL（CASCADEにしない——チャンネルを削除しても
+-- S-08「AI利用状況・コスト」タブが集計に使うコスト実績自体は残す必要があるため。T-16
+-- audit_logs.target_channel_id・message_id列と同じ「履歴は消さない」設計判断。2026-09-17、
+-- ユーザーからの報告「テストチャンネルを削除したら概算コスト合計が減った」を受けて変更した
+-- ——実際のOpenAI側の課金額自体はKogackのDB操作と無関係に発生済みのまま変わらないが、
+-- Kogack内部の集計記録だけがチャンネル削除の道連れで消えてしまうのは実績確認の目的に反すると
+-- 判断した。dm_idは現状常にNULLで実害が無いためCASCADEのまま変更していない）。
 CREATE TABLE IF NOT EXISTS ai_usage_logs (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    channel_id          BIGINT REFERENCES channels(id) ON DELETE CASCADE,
+    channel_id          BIGINT REFERENCES channels(id) ON DELETE SET NULL,
     dm_id               BIGINT REFERENCES direct_messages(id) ON DELETE CASCADE,
     requested_by        BIGINT NOT NULL REFERENCES users(id),
     model               TEXT NOT NULL,
@@ -297,7 +303,10 @@ CREATE TABLE IF NOT EXISTS ai_usage_logs (
     message_id          BIGINT REFERENCES messages(id) ON DELETE SET NULL,
     request_payload     JSONB,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK ((channel_id IS NULL) <> (dm_id IS NULL))
+    -- 元は「必ずどちらか一方」のXOR制約だったが、channel_idをSET NULLに変更したことで
+    -- チャンネル削除後は両方NULLになりうるため、「両方同時に設定されていない」ことのみを
+    -- 強制する制約に緩めた（挿入時に誤って両方指定してしまう事故は引き続き防げる）
+    CHECK (channel_id IS NULL OR dm_id IS NULL)
 );
 ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
 -- message_id・request_payload（2026-09-17、ユーザーからの明示的な要望「AIとのやりとり
@@ -311,6 +320,23 @@ ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
 -- 同じ「履歴は消さない」設計判断）。
 ALTER TABLE ai_usage_logs ADD COLUMN IF NOT EXISTS message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL;
 ALTER TABLE ai_usage_logs ADD COLUMN IF NOT EXISTS request_payload JSONB;
+
+-- channel_idをON DELETE CASCADEからSET NULLへ変更（2026-09-17、ユーザーからの報告
+-- 「テストチャンネルを削除したらS-08の概算コスト合計が減った」を受けて対応。実際のOpenAI側の
+-- 課金額自体はKogackのDB操作と無関係に発生済みのまま変わらないが、Kogack内部の集計記録だけが
+-- チャンネル削除の道連れで消えるのはコスト実績確認の目的に反するため、T-16
+-- audit_logs.target_channel_id・ai_usage_logs.message_idと同じ「履歴は消さない」設計判断に揃えた。
+-- 既存の制約名を明示的にDROPしてから同名でADDし直す（2026-09-09に確立したパターン）。
+-- あわせて、元のCHECK制約（channel_id/dm_idのどちらか一方を必須とするXOR）がchannel_idのSET NULL
+-- と両立しない（チャンネル削除後にchannel_id・dm_idとも NULL になった瞬間、このCHECK自体が
+-- DELETE文のFKアクション内で違反しチャンネル削除そのものが失敗する）ことに気づいたため、
+-- 「両方同時に設定されていない」ことのみを強制する制約に緩めて同時に差し替える。
+ALTER TABLE ai_usage_logs DROP CONSTRAINT IF EXISTS ai_usage_logs_channel_id_fkey;
+ALTER TABLE ai_usage_logs ADD CONSTRAINT ai_usage_logs_channel_id_fkey
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL;
+ALTER TABLE ai_usage_logs DROP CONSTRAINT IF EXISTS ai_usage_logs_check;
+ALTER TABLE ai_usage_logs ADD CONSTRAINT ai_usage_logs_check
+    CHECK (channel_id IS NULL OR dm_id IS NULL);
 
 -- T-14 ai_usage_limits（05-1_詳細設計書_DB設計.html 3.11節）。S-08「AI利用状況・コスト」タブの
 -- 上限設定（A-43）用。scope='global'は最大1行、scope='channel'はchannel_idごとに最大1行に
