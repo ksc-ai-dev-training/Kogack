@@ -730,8 +730,10 @@ export default function Composer({
           ))}
         </div>
       )}
+      {/* タイルサイズ・グリッド幅はMessageList.tsxのEmojiGridPopoverと同じ理由・同じ比率で拡大した
+          （ユーザーからの明示的な要望「全体的にスタンプ小さいので大きくしてもらえますか」、2026-09-17） */}
       {emojiOpen && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[220px] w-[264px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+        <div className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[280px] w-[314px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
           {EMOJI_LIST.map((emoji, i) => (
             <button
               key={`${emoji}-${i}`}
@@ -740,7 +742,7 @@ export default function Composer({
                 e.preventDefault()
                 insertEmoji(emoji)
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[16px] hover:bg-surface-muted"
+              className="flex h-9 w-9 items-center justify-center rounded-md text-[20px] hover:bg-surface-muted"
             >
               {emoji}
             </button>
@@ -757,9 +759,9 @@ export default function Composer({
                 ev.preventDefault()
                 insertEmoji(`:${e.name}:`)
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted"
+              className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-surface-muted"
             >
-              <img src={e.image_url} alt={e.name} className="h-5 w-5 object-contain" />
+              <img src={e.image_url} alt={e.name} className="h-7 w-7 object-contain" />
             </button>
           ))}
           <button
@@ -769,7 +771,7 @@ export default function Composer({
               ev.preventDefault()
               setShowAddEmojiModal(true)
             }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] text-ink-subtle hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-[19px] text-ink-subtle hover:bg-surface-muted"
           >
             ＋
           </button>

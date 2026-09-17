@@ -347,7 +347,7 @@ function renderInlineSegment(
             src={emoji.image_url}
             alt={m[0]}
             title={m[0]}
-            className="-mb-[3px] inline-block h-[18px] w-[18px] object-contain align-text-bottom"
+            className="-mb-[4px] inline-block h-[22px] w-[22px] object-contain align-text-bottom"
           />
         ),
       })
@@ -1004,8 +1004,13 @@ export function ReactionQuickButtons({
   )
 }
 
-const EMOJI_GRID_WIDTH = 240
-const EMOJI_GRID_HEIGHT_ESTIMATE = 200 // 実測前の見積もり（下開き/上開きの判定用途のみ、ProfileCardと同じ考え方）
+// ユーザーからの明示的な要望「全体的にスタンプ小さいので大きくしてもらえますか」を受けて
+// タイルサイズをh-7 w-7（28px）からh-9 w-9（36px）へ拡大した（2026-09-17）。グリッド全体の
+// 幅・高さの見積もり定数（画面端はみ出し判定にのみ使う、実測ではなく概算）もこれに合わせて
+// 拡大した——実際のCSS（w-[…px]・max-h-[…px]）とズレるとProfileCard/EmojiGridPopoverで過去に
+// 踏んだ「はみ出し判定が狂う」不具合（2026-09-11）を再発させるため、両方を必ず同じ値に揃える
+const EMOJI_GRID_WIDTH = 310
+const EMOJI_GRID_HEIGHT_ESTIMATE = 260 // 実測前の見積もり（下開き/上開きの判定用途のみ、ProfileCardと同じ考え方）
 
 // クイックリアクション横の「もっと見る」ボタンから開く絵文字グリッド（Composer.tsxの絵文字
 // ピッカーと同じ見た目・EMOJI_LISTを共有）。ユーザーからの報告「絵文字ピッカーが投稿欄の裏に
@@ -1079,14 +1084,14 @@ export function EmojiGridPopover({
       <div
         ref={ref}
         style={style}
-        className="z-50 grid max-h-[200px] w-[240px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
+        className="z-50 grid max-h-[260px] w-[310px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
       >
         {EMOJI_LIST.map((emoji, i) => (
           <button
             key={`${emoji}-${i}`}
             type="button"
             onClick={() => onSelect(emoji)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-[19px] hover:bg-surface-muted"
           >
             {emoji}
           </button>
@@ -1097,16 +1102,16 @@ export function EmojiGridPopover({
             type="button"
             onClick={() => onSelect(`:${e.name}:`)}
             title={`:${e.name}:`}
-            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-surface-muted"
           >
-            <img src={e.image_url} alt={e.name} className="h-5 w-5 object-contain" />
+            <img src={e.image_url} alt={e.name} className="h-7 w-7 object-contain" />
           </button>
         ))}
         <button
           type="button"
           onClick={() => setShowAddModal(true)}
           title="絵文字を追加"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[15px] text-ink-subtle hover:bg-surface-muted"
+          className="flex h-9 w-9 items-center justify-center rounded-md text-[19px] text-ink-subtle hover:bg-surface-muted"
         >
           ＋
         </button>
