@@ -368,8 +368,8 @@ function renderInlineSegment(
             title={m[0]}
             className={
               jumbo
-                ? '-mb-[7px] inline-block h-[38px] w-[38px] object-contain align-text-bottom'
-                : '-mb-[3px] inline-block h-[16px] w-[16px] object-contain align-text-bottom'
+                ? 'mb-[2px] inline-block h-[38px] w-[38px] object-contain align-text-bottom'
+                : 'mb-[1px] inline-block h-[16px] w-[16px] object-contain align-text-bottom'
             }
           />
         ),
