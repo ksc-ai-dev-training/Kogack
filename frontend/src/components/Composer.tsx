@@ -5,7 +5,7 @@ import { getDraft, setDraft } from '../lib/drafts'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import { useToast } from './Toast'
-import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
+import type { AttachmentPayload, CustomEmoji, MentionPayload, ScheduleTarget } from '../types'
 
 const MIN_ROWS = 2
 const MAX_ROWS = 10
@@ -102,6 +102,28 @@ export function findMentionHighlights(
     }
   }
   matches.sort((a, b) => a.start - b.start)
+  return matches
+}
+
+// 入力中の本文中でカスタム絵文字（:name:）を実際の画像プレビューとして表示する（ユーザーからの
+// 明示的な要望「自分で作ったスタンプをメッセージ欄に入力すると、:aurora:みたいな表示ではなく、
+// スタンプの画像を表示させてほしい」）。MessageList.tsxのrenderInlineSegmentが送信後のメッセージに
+// 対して行っている`:name:`→画像の解決と同じ正規表現・同じ照合ロジック（大小文字を区別しない
+// name一致）をここでも使う。メンションと同じくComposer専用（ChannelSettings.tsxのfindMentionHighlights
+// 再利用には含めない、S-06定期投稿/トリガーの本文欄には絵文字ピッカー自体はあるがプレビュー要望の
+// 対象外のため）
+function findCustomEmojiHighlights(
+  text: string,
+  customEmoji: CustomEmoji[],
+): { start: number; end: number; url: string }[] {
+  const byName = new Map(customEmoji.map((e) => [e.name.toLowerCase(), e]))
+  const matches: { start: number; end: number; url: string }[] = []
+  for (const m of text.matchAll(/:([a-zA-Z0-9_+-]{2,24}):/g)) {
+    const emoji = byName.get(m[1].toLowerCase())
+    if (!emoji) continue
+    const start = m.index ?? 0
+    matches.push({ start, end: start + m[0].length, url: emoji.image_url })
+  }
   return matches
 }
 
@@ -229,17 +251,37 @@ export default function Composer({
   // あえて別（bg-accent-300、index.css参照）にしているのは、入力中はpadding/太字を付けられない分
   // 体感の濃さが弱く見えるため（ユーザーからの明示的な要望「送った後と同じくらいに濃くしてほしい」、
   // 2026-09-15）、背景色だけを一段濃くしてチップと同程度の視認性に近づけるため
-  const highlightMatches = findMentionHighlights(body, mentions, aiPersonaName)
+  // メンション・カスタム絵文字それぞれの検出範囲を開始位置でマージして描画する（`:name:`と
+  // `@氏名`が同じ範囲に重なることは実際には無いが、念のため重なった場合は先に確定した方を優先し
+  // 後発は無視する、既存のメンション単体の重なり除去と同じ単純な方式）
+  type HighlightSpan =
+    | { start: number; end: number; kind: 'mention' }
+    | { start: number; end: number; kind: 'emoji'; url: string }
+  const combinedMatches: HighlightSpan[] = [
+    ...findMentionHighlights(body, mentions, aiPersonaName).map((m) => ({ ...m, kind: 'mention' as const })),
+    ...findCustomEmojiHighlights(body, customEmoji).map((m) => ({ ...m, kind: 'emoji' as const })),
+  ].sort((a, b) => a.start - b.start)
   const highlightNodes: ReactNode[] = []
   let highlightCursor = 0
-  highlightMatches.forEach((m, i) => {
+  combinedMatches.forEach((m, i) => {
     if (m.start < highlightCursor) return
     if (m.start > highlightCursor) highlightNodes.push(body.slice(highlightCursor, m.start))
-    highlightNodes.push(
-      <span key={i} className="rounded-[3px] bg-accent-300 text-accent-700">
-        {body.slice(m.start, m.end)}
-      </span>,
-    )
+    if (m.kind === 'emoji') {
+      highlightNodes.push(
+        <img
+          key={i}
+          src={m.url}
+          alt={body.slice(m.start, m.end)}
+          className="-mb-[4px] inline-block h-[22px] w-[22px] object-contain align-text-bottom"
+        />,
+      )
+    } else {
+      highlightNodes.push(
+        <span key={i} className="rounded-[3px] bg-accent-300 text-accent-700">
+          {body.slice(m.start, m.end)}
+        </span>,
+      )
+    }
     highlightCursor = m.end
   })
   if (highlightCursor < body.length) highlightNodes.push(body.slice(highlightCursor))
