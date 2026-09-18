@@ -1,15 +1,30 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { getDraft, setDraft } from '../lib/drafts'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import { useToast } from './Toast'
-import type { AttachmentPayload, CustomEmoji, MentionPayload, ScheduleTarget } from '../types'
+import {
+  domToPlainText,
+  deserializeFromText,
+  getSelectionOffsets,
+  setSelectionOffsets,
+  replaceRangeWithText,
+  replaceRangeWithMentionSpan,
+  insertTextAfterNode,
+  insertAtomicEmojiAtCursor,
+  tryConvertJustCompletedShortcode,
+  enforceMaxLength,
+  removeStrayEmptyBr,
+  normalizeInvariants,
+} from '../lib/composerEditing'
+import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
 const MIN_ROWS = 2
 const MAX_ROWS = 10
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024 // 20MB（F-07、05-1_詳細設計書_DB設計.html 3.6節）
+const MAX_BODY_LENGTH = 4000
 
 // 絵文字入力ボタン（ユーザーからの明示的な要望「Slackのように絵文字入力ボタンをメンションの
 // 横につけたい」）。フルの絵文字ピッカーライブラリは導入せず、業務チャットでよく使う絵文字を
@@ -68,6 +83,8 @@ function defaultScheduleDateTime(): { date: string; time: string } {
 // 続く文字列をメンション候補の絞り込みクエリとして検出する（F-41）。入力欄の冒頭や直前の文字に
 // 関わらず、「@」を入力した瞬間に候補を表示する（ユーザーからの要望。以前は直前が空白または
 // 本文の先頭のときのみ検出していたが、文中の任意の位置でもメンションできるよう緩和した）。
+// ChannelSettings.tsx（S-06定期投稿/トリガーの素の<textarea>）が今もこの関数をここから
+// importして使っているため、シグネチャ・純粋な文字列関数という性質は変更しない。
 export function detectMentionQuery(text: string, cursor: number): { atIndex: number; query: string } | null {
   const uptoCursor = text.slice(0, cursor)
   const atIndex = Math.max(uptoCursor.lastIndexOf('@'), uptoCursor.lastIndexOf('＠'))
@@ -77,11 +94,13 @@ export function detectMentionQuery(text: string, cursor: number): { atIndex: num
   return { atIndex, query }
 }
 
-// 入力中の本文中でメンションを青くハイライトする（ユーザーからの要望。投稿後のMessageList.
-// renderMessageBodyと同じ考え方だが、こちらは確定前のプレーンテキストのため現在の表示名解決は
-// 行わず、選択済みメンション（mentions state）のdisplay_name_snapshotとAIメンション
-// （aiPersonaNameとの文字列一致）をそのまま本文中から検索する。手で削除された分は
-// indexOfが見つからず自然にハイライト対象から外れる（activeMentionsInと同じ考え方）
+// メンションハイライトの範囲検出（本文中のdisplay_name_snapshot・AIペルソナ名の出現箇所）。
+// ChannelSettings.tsx（S-06定期投稿/トリガーの素の<textarea>、透明textarea＋オーバーレイ方式を
+// 今も使っている）が今もこの関数をここからimportして使っているため、シグネチャ・純粋な文字列
+// 関数という性質は変更しない。Composer.tsx自身は2026-09-18のcontentEditable化後、この関数を
+// 継続的な全文再スキャンには使わなくなった（メンションは挿入時点でハイライトspanを直接
+// DOMへ埋め込む方式に変更したため。詳細はcomposerEditing.tsのコメント参照）が、外部契約を
+// 壊さないためエクスポートはそのまま残す。
 export function findMentionHighlights(
   text: string,
   mentions: MentionPayload[],
@@ -105,28 +124,6 @@ export function findMentionHighlights(
   return matches
 }
 
-// 入力中の本文中でカスタム絵文字（:name:）を実際の画像プレビューとして表示する（ユーザーからの
-// 明示的な要望「自分で作ったスタンプをメッセージ欄に入力すると、:aurora:みたいな表示ではなく、
-// スタンプの画像を表示させてほしい」）。MessageList.tsxのrenderInlineSegmentが送信後のメッセージに
-// 対して行っている`:name:`→画像の解決と同じ正規表現・同じ照合ロジック（大小文字を区別しない
-// name一致）をここでも使う。メンションと同じくComposer専用（ChannelSettings.tsxのfindMentionHighlights
-// 再利用には含めない、S-06定期投稿/トリガーの本文欄には絵文字ピッカー自体はあるがプレビュー要望の
-// 対象外のため）
-function findCustomEmojiHighlights(
-  text: string,
-  customEmoji: CustomEmoji[],
-): { start: number; end: number; url: string }[] {
-  const byName = new Map(customEmoji.map((e) => [e.name.toLowerCase(), e]))
-  const matches: { start: number; end: number; url: string }[] = []
-  for (const m of text.matchAll(/:([a-zA-Z0-9_+-]{2,24}):/g)) {
-    const emoji = byName.get(m[1].toLowerCase())
-    if (!emoji) continue
-    const start = m.index ?? 0
-    matches.push({ start, end: start + m[0].length, url: emoji.image_url })
-  }
-  return matches
-}
-
 // S-03・S-04共通の投稿欄（詳細設計書 画面設計11.3節）。呼び出し元はAPI呼び出し（A-11/A-14/A-19）
 // とmutate()だけを担い、送信中状態・エラートーストはこちらで一元管理する。
 // mentionCandidatesを渡すと「@」入力でF-41のオートコンプリートが有効になる（チャンネル会話のみ。
@@ -138,19 +135,35 @@ function findCustomEmojiHighlights(
 // ファイル添付（F-07）はメンション候補の有無・送信予約対応の有無に関わらず常に使える（チャンネル・
 // DM・スレッド返信いずれもA-21/A-22は候補元に依存しないため）。ただし送信予約では利用できない
 // （confirmScheduleでattachmentsが1件以上あれば拒否する。基本設計書6.2節「設計判断」）。
+//
+// 実装方式（2026-09-18、ユーザーからの明示的な要望「カスタム絵文字を普通の絵文字のように1文字
+// として扱いたい」による全面書き換え）: 従来の「透明textarea＋背後オーバーレイ」方式では、
+// 見た目は画像に差し替えても実際のtextareaには`:aurora:`という生テキストがそのまま残っており、
+// カーソル移動・Backspace・クリック位置決めのすべてが8文字ぶん動くという違和感があった。
+// これをcontentEditableな<div>へ書き換え、カスタム絵文字だけを`contenteditable="false"`の
+// 原子img要素として実際にDOM上へ埋め込む（メンションはプレーンテキストのまま、選択・確定した
+// 瞬間だけハイライトspanで囲む——継続的な全文再スキャンをしないことで、自前contentEditable
+// 実装で最もバグりやすい「入力のたびにスタイル付きノードをDOMツリー全体で差分再構築する」
+// 処理を避ける設計判断。詳細はlib/composerEditing.tsの冒頭コメント参照）。
+// body: stringというReact stateは廃止し、送信・下書き保存・メンション検出はいずれも
+// domToPlainText(editorRef.current)をその場で呼ぶ（唯一の真実の情報源はDOM自体）。
 export default function Composer({
   placeholder,
   onSend,
   mentionCandidates,
-  aiPersonaName,
+  aiPersonaName: _aiPersonaName,
   scheduleTarget,
   draftKey,
 }: {
   placeholder: string
   onSend: (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => Promise<void>
   mentionCandidates?: MentionCandidate[]
-  /** 入力中のAIメンションのハイライト用（チャンネルAIのpersona_name）。MessageList/ThreadPanelと
-   * 同じ値をそのまま渡す想定 */
+  /** 入力中のAIメンションのハイライト用（チャンネルAIのpersona_name）。以前はfindMentionHighlights
+   * による全文再スキャンでこの値を使ってハイライトしていたが、2026-09-18のcontentEditable化で
+   * メンションは挿入時点のみハイライトする方式へ変更したため、AI候補選択時のハイライトは
+   * MentionCandidate.isAi自体から直接行うようになり、この値自体は現在使用していない。
+   * 呼び出し元（ChannelView.tsx・ThreadPanel.tsx）との既存props契約を壊さないためprop自体は
+   * 残す（未使用であることが分かるよう`_aiPersonaName`として受け取る）。 */
   aiPersonaName?: string
   scheduleTarget?: ScheduleTarget
   /** 下書きの永続化キー（lib/drafts.ts。チャンネルは`c:<id>`、DMは`d:<id>`、スレッドは`t:<messageId>`）。
@@ -158,14 +171,8 @@ export default function Composer({
    * 再マウントする実装（2026-09-14）のため、このpropもそのたびに新しい値で初期状態から始まる */
   draftKey?: string
 }) {
-  // バグ修正（ユーザーからの報告、2026-09-14）: 下書きの本文だけでなくmentions（構造化メンション、
-  // ハイライト表示・送信時の通知対象の両方に使う）も同じキーから復元する。従来はbodyのみ復元して
-  // いたため、本文には「@氏名」の文字列こそ残るが、mentions stateは再マウントのたびに空配列に
-  // リセットされ、青いハイライトが消え、実際に送信してもメンション通知が飛ばなくなっていた
-  // （getDraftはどちらの初期化子も初回レンダー時にしか呼ばれない=lazy initializerのため、
-  // 2回呼んでもlocalStorageアクセスはマウント毎に2回で済む）
-  const [body, setBody] = useState(() => (draftKey ? getDraft(draftKey).body : ''))
   const [sending, setSending] = useState(false)
+  const [hasContent, setHasContent] = useState(false)
   const [mentions, setMentions] = useState<MentionPayload[]>(() => (draftKey ? getDraft(draftKey).mentions : []))
   const [attachments, setAttachments] = useState<AttachmentPayload[]>([])
   const [uploading, setUploading] = useState(false)
@@ -173,126 +180,171 @@ export default function Composer({
   const [activeIndex, setActiveIndex] = useState(0)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [showAddEmojiModal, setShowAddEmojiModal] = useState(false)
-  const { customEmoji, mutate: mutateCustomEmoji } = useCustomEmoji()
+  const { customEmoji, isLoading: customEmojiLoading, mutate: mutateCustomEmoji } = useCustomEmoji()
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
   const [scheduleTime, setScheduleTime] = useState('')
   const [scheduling, setScheduling] = useState(false)
+  // 下書き永続化を発火させるためだけの軽量なカウンタ（bodyという文字列stateを持たなくなったため、
+  // DOMの内容が変わったことをuseEffectへ伝える最小限のトリガーとして使う。mentions配列は
+  // React state自体を依存に含めているため、mentions変化時は素直に再実行される）
+  const [contentVersion, setContentVersion] = useState(0)
   // リンク挿入ポップアップ（ユーザーからの明示的な要望「スラックみたいに、リンクもボタンを
-  // 押したら、テキストとリンクを設定する画面ポップアップが出てきてほしい」）。当初は🔗ボタンで
-  // 選択文字列を`[選択文字列](url)`へ直接書き換え「url」部分を選択状態にするだけの簡易実装
-  // だったが、今回テキスト・URLをそれぞれ入力するポップアップへ置き換えた（貼り付けでの自動変換
-  // ＝handlePasteは即座に変換する挙動のままにする方が使い勝手が良いため、そちらは変更していない）
+  // 押したら、テキストとリンクを設定する画面ポップアップが出てきてほしい」）。ボタン自体は
+  // onMouseDown+preventDefaultでcontentEditableのフォーカス（＝選択範囲）を失わせないため、
+  // 開いた時点の選択範囲をオフセットとしてrefへ退避しておく必要は無くなった…と思いきや、
+  // ポップアップ内のテキスト/URL入力欄は実際に入力するため本物のフォーカスが必要で、
+  // その時点でcontentEditableの選択は失われる。そのため引き続き開いた瞬間の選択範囲を
+  // オフセットとして退避しておき、確定時にその範囲を置き換える。
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkText, setLinkText] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
-  // ポップアップの入力欄にフォーカスが移るとtextarea自身のselectionStart/Endが失われるため、
-  // 開いた時点の選択範囲をrefへ退避しておき、確定時にその範囲を置き換える
   const linkSelectionRef = useRef({ start: 0, end: 0 })
   const toast = useToast()
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const highlightRef = useRef<HTMLDivElement>(null)
+  const sendingRef = useRef(false)
+  // 下書き復元直後、まだcustomEmojiの読み込み（非同期SWR）が完了していない場合に:name:が
+  // プレーンテキストのまま残る問題への対処（詳細はcustomEmojiのuseEffect参照）。利用者が
+  // 既に編集を始めていたら追いかけ変換で上書きしないためのフラグ。afterMutate()（ユーザー
+  // 操作起点の変更）でのみtrueにし、マウント時の下書き復元自体では立てない。
+  const hasUserEditedRef = useRef(false)
+  const emojiCatchUpAppliedRef = useRef(false)
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
-
-  // 3行目以降は入力に合わせて自動的に高さを広げ、10行を超えたらそれ以上は広げずスクロールにする。
-  // バグ修正（ユーザーからの報告「縦スクロールが出てくるような長い文章を打ち込むと、カーソルの
-  // 位置がちょっとずれる」）: 10行を超えてtextareaが内部スクロール可能になった状態でこの効果が
-  // 走ると、`el.style.height = 'auto'`で一旦高さを本文全体が収まるサイズまで戻す（＝この瞬間だけ
-  // スクロール不要な状態になりscrollTopが暗黙的に0へ戻る）→その後maxHeightへ戻すが、scrollTopは
-  // 0のまま復元されない、という挙動になる。ところがキー入力自体はこの効果が走る「前」に、
-  // ブラウザ自身がネイティブに「カーソル位置が見えるようにスクロール」を済ませているため、
-  // 結果としてこの効果がその正しいスクロール位置を毎キー入力のたびに踏みつぶして0へ戻し、
-  // カーソルが一瞬ずれて見える（実際には高さの付け直し後に何らかの拍子で戻ることもあるが、
-  // それがちらつき・ずれとして体感される）。対策として、高さを付け直す前のscrollTopを保存し、
-  // 高さ確定後に復元する。`useEffect`（描画後に非同期実行）ではなく`useLayoutEffect`
-  // （DOM更新後・ブラウザの描画前に同期実行）にすることで、ずれた状態が一瞬でも画面に
-  // 表示されてしまうのを防ぐ。ハイライト用オーバーレイ（highlightRef）のscrollTopも
-  // 同じタイミングで揃える（textareaのonScrollイベント経由の同期を待たない）
-  useLayoutEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    const style = window.getComputedStyle(el)
-    const lineHeight = parseFloat(style.lineHeight) || 20
-    const paddingY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
-    const minHeight = lineHeight * MIN_ROWS + paddingY
-    const maxHeight = lineHeight * MAX_ROWS + paddingY
-
-    const prevScrollTop = el.scrollTop
-    el.style.height = 'auto'
-    const next = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)
-    el.style.height = `${next}px`
-    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
-    el.scrollTop = prevScrollTop
-    if (highlightRef.current) highlightRef.current.scrollTop = el.scrollTop
-  }, [body])
-
-  // 下書きの永続化（ユーザーからの明示的な要望）。setBodyの呼び出し箇所（通常入力・絵文字挿入・
-  // 書式ボタン・メンション選択・送信/予約後のクリアなど）を個別に触らず、bodyの変化をまとめて
-  // 1箇所で拾ってlib/drafts.tsへ書き込む（送信・送信予約成功後はbodyが''になるため、この効果が
-  // そのまま下書きの削除も兼ねる。lib/drafts.tsのsetDraftは空文字を渡すとエントリ自体を消す）。
-  // mentionsもあわせて保存する（バグ修正、2026-09-14。上記のstate初期化コメント参照）
-  useEffect(() => {
-    if (!draftKey) return
-    setDraft(draftKey, body, mentions)
-  }, [draftKey, body, mentions])
 
   const filteredCandidates = (mentionCandidates ?? []).filter((c) =>
     c.name.toLowerCase().includes((pickerQuery ?? '').toLowerCase()),
   )
   const pickerOpen = pickerQuery !== null && filteredCandidates.length > 0
 
-  // 入力中のハイライト表示（透明なtextareaの背後に同じ文字列を重ねて描画する、いわゆる
-  // オーバーレイ方式）。textarea自体はcolor:transparentで文字を見せず、この要素側の
-  // 該当範囲だけ青背景で描画する。パディング・フォント・折り返しをtextareaと完全に一致させないと
-  // ずれるため、ハイライト部分には背景色以外（padding/font-weight等）を一切加えない。
-  // 送信後の表示（MessageList.tsx、bg-accent-200＋px-1＋font-semiboldの「チップ」形状）と背景色を
-  // あえて別（bg-accent-300、index.css参照）にしているのは、入力中はpadding/太字を付けられない分
-  // 体感の濃さが弱く見えるため（ユーザーからの明示的な要望「送った後と同じくらいに濃くしてほしい」、
-  // 2026-09-15）、背景色だけを一段濃くしてチップと同程度の視認性に近づけるため
-  // メンション・カスタム絵文字それぞれの検出範囲を開始位置でマージして描画する（`:name:`と
-  // `@氏名`が同じ範囲に重なることは実際には無いが、念のため重なった場合は先に確定した方を優先し
-  // 後発は無視する、既存のメンション単体の重なり除去と同じ単純な方式）
-  type HighlightSpan =
-    | { start: number; end: number; kind: 'mention' }
-    | { start: number; end: number; kind: 'emoji'; url: string }
-  const combinedMatches: HighlightSpan[] = [
-    ...findMentionHighlights(body, mentions, aiPersonaName).map((m) => ({ ...m, kind: 'mention' as const })),
-    ...findCustomEmojiHighlights(body, customEmoji).map((m) => ({ ...m, kind: 'emoji' as const })),
-  ].sort((a, b) => a.start - b.start)
-  const highlightNodes: ReactNode[] = []
-  let highlightCursor = 0
-  combinedMatches.forEach((m, i) => {
-    if (m.start < highlightCursor) return
-    if (m.start > highlightCursor) highlightNodes.push(body.slice(highlightCursor, m.start))
-    if (m.kind === 'emoji') {
-      highlightNodes.push(
-        <img
-          key={i}
-          src={m.url}
-          alt={body.slice(m.start, m.end)}
-          className="-mb-[4px] inline-block h-[22px] w-[22px] object-contain align-text-bottom"
-        />,
-      )
-    } else {
-      highlightNodes.push(
-        <span key={i} className="rounded-[3px] bg-accent-300 text-accent-700">
-          {body.slice(m.start, m.end)}
-        </span>,
-      )
-    }
-    highlightCursor = m.end
-  })
-  if (highlightCursor < body.length) highlightNodes.push(body.slice(highlightCursor))
+  // オートリサイズ（MIN_ROWS〜MAX_ROWSまでは入力に合わせて高さを広げ、超えたらスクロール）。
+  // 旧実装はbody state変化に反応するuseLayoutEffectだったが、bodyというReact stateを
+  // 廃止したため、このタイミングで同期的に直接呼ぶ形にした（むしろuseLayoutEffectの依存配列
+  // タイミング問題を気にしなくてよくなり単純化した）。resizeでel.style.height='auto'にすると
+  // 一瞬scrollTopがリセットされる既知の挙動（過去のバグ修正コメント参照）は変わらず存在するため、
+  // 保存→復元は引き続き必要。
+  const resizeEditor = () => {
+    const el = editorRef.current
+    if (!el) return
+    const style = window.getComputedStyle(el)
+    const lineHeight = parseFloat(style.lineHeight) || 20
+    const paddingY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+    const minHeight = lineHeight * MIN_ROWS + paddingY
+    const maxHeight = lineHeight * MAX_ROWS + paddingY
+    const prevScrollTop = el.scrollTop
+    el.style.height = 'auto'
+    const next = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
+    el.scrollTop = prevScrollTop
+  }
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const text = e.target.value
-    setBody(text)
-    if (!mentionCandidates) return
-    const match = detectMentionQuery(text, e.target.selectionStart ?? text.length)
-    setPickerQuery(match?.query ?? null)
-    setActiveIndex(0)
+  // マウント時1回だけ下書きを復元する（Composerは会話が変わるたびkey propで再マウントされる
+  // 既存設計、2026-09-14）。useLayoutEffectにするのは、復元前の空表示・復元後の高さ再計算前の
+  // 状態が一瞬でも画面に見えてしまうのを防ぐため（既存のリサイズ処理と同じ理由）。
+  useLayoutEffect(() => {
+    const root = editorRef.current
+    if (!root) return
+    if (draftKey) {
+      const draft = getDraft(draftKey)
+      if (draft.body) root.replaceChildren(deserializeFromText(draft.body, customEmoji))
+    }
+    setHasContent(domToPlainText(root).trim().length > 0)
+    resizeEditor()
+    // マウント時に1回だけ実行する（draftKey・customEmojiは意図的に依存から外している。
+    // customEmojiが後から読み込まれた場合の追いかけ変換は下のuseEffectで別途行う）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // バグ予防（Planサブエージェントによる設計精査で指摘された懸念）: customEmoji一覧は非同期
+  // （SWR）で読み込まれるため、マウント時点の下書き復元（上のuseLayoutEffect）がまだ空の
+  // customEmojiで実行されると、その時点で解決できなかった`:aurora:`等のショートコードは
+  // プレーンテキストのまま残ってしまう。旧実装（textarea＋オーバーレイ）はcustomEmojiが
+  // 読み込まれるたびに自動的に全文再スキャンしていたため自己修復していたが、新実装は
+  // 継続的な再スキャンをしない設計のため、customEmojiの読み込みが完了した瞬間に一度だけ
+  // 追いかけ変換を行う（ただし、その間に利用者が既に編集を始めていたら上書きしない）。
+  useEffect(() => {
+    if (emojiCatchUpAppliedRef.current) return
+    if (customEmojiLoading) return
+    emojiCatchUpAppliedRef.current = true
+    if (hasUserEditedRef.current) return
+    const root = editorRef.current
+    if (!root || !draftKey) return
+    const currentText = domToPlainText(root)
+    if (!currentText) return
+    root.replaceChildren(deserializeFromText(currentText, customEmoji))
+    setHasContent(domToPlainText(root).trim().length > 0)
+    resizeEditor()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customEmojiLoading])
+
+  // 下書きの永続化（ユーザーからの明示的な要望）。setBodyという単一の変更点が無くなったため、
+  // 「内容が変わったことを示す軽量なカウンタ」contentVersionと、React stateのままのmentionsを
+  // 依存にしたuseEffectで代替する。実行時は常にeditorRef.currentから最新のDOMを直接読み直す
+  // ため、古い値を参照してしまう心配が無い（送信・送信予約成功後はDOMがクリアされ本文が
+  // 空になるため、この効果がそのまま下書きの削除も兼ねる。lib/drafts.tsのsetDraftは
+  // 空文字を渡すとエントリ自体を消す）。
+  useEffect(() => {
+    if (!draftKey) return
+    const root = editorRef.current
+    if (!root) return
+    setDraft(draftKey, domToPlainText(root), mentions)
+  }, [draftKey, mentions, contentVersion])
+
+  // 純粋な「見た目・下書き反映の更新」だけを行う（hasUserEditedRefは変更しない）。マウント時の
+  // 下書き復元・customEmoji読み込み後の追いかけ変換など、利用者の操作に起因しないDOM変更から呼ぶ。
+  const refreshEditorHousekeeping = () => {
+    const root = editorRef.current
+    if (!root) return
+    setHasContent(domToPlainText(root).trim().length > 0)
+    setContentVersion((v) => v + 1)
+    resizeEditor()
+  }
+  // 利用者の操作（入力・ボタンクリック等）によるDOM変更のあとに呼ぶ。hasUserEditedRefを立てる
+  // ことで、customEmoji読み込み待ちの追いかけ変換（上のuseEffect）が、既に本人が編集を始めた
+  // 内容を勝手に上書きしないようにする。
+  const afterMutate = () => {
+    hasUserEditedRef.current = true
+    refreshEditorHousekeeping()
+  }
+
+  const runPostInputChecks = (root: HTMLDivElement) => {
+    tryConvertJustCompletedShortcode(root, customEmoji)
+    enforceMaxLength(root, MAX_BODY_LENGTH)
+    removeStrayEmptyBr(root)
+    root.normalize()
+    if (mentionCandidates) {
+      const cursor = getSelectionOffsets(root)?.start ?? 0
+      const match = detectMentionQuery(domToPlainText(root), cursor)
+      setPickerQuery(match?.query ?? null)
+      setActiveIndex(0)
+    }
+  }
+
+  // ネイティブ入力（IME・直接タイプ・OSレベルの貼り付け以外の入力全般）を受けるハンドラ。
+  // IME合成中（e.nativeEvent.isComposing）は、ショートコード変換・文字数上限の適用・
+  // メンション候補の絞り込みを一切行わない（合成中にDOMを書き換えるとIMEの変換候補ウィンドウが
+  // 壊れる/キャンセルされるおそれがあるため）。合成が確定した瞬間はonCompositionEndで
+  // 改めて同じチェックを走らせる。
+  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
+    const root = editorRef.current
+    if (!root) return
+    const native = e.nativeEvent as InputEvent
+    if (native.inputType === 'historyUndo' || native.inputType === 'historyRedo') {
+      normalizeInvariants(root)
+    }
+    if (!native.isComposing) {
+      runPostInputChecks(root)
+    }
+    afterMutate()
+  }
+
+  const handleCompositionEnd = () => {
+    const root = editorRef.current
+    if (!root) return
+    runPostInputChecks(root)
+    afterMutate()
   }
 
   const toggleSchedulePopover = () => {
@@ -308,30 +360,26 @@ export default function Composer({
   }
 
   // 絵文字入力（ユーザーからの明示的な要望「Slackのように絵文字入力ボタンをメンションの横に
-  // つけたい」）。カーソル位置にそのまま絵文字を挿入する（@メンションのようなトリガー文字・
-  // 候補絞り込みは不要な単純な挿入のみ）。ボタンクリック自体でフォーカスがボタンへ移ってしまうと
-  // （ブラウザの既定挙動）、textareaのonKeyDownに書いたEscapeでの閉じる処理が効かなくなるため、
-  // 開いたあとフォーカスをtextareaへ戻す（Playwrightでの実機検証で実際にEscapeが効かない不具合を
-  // 発見し、この対処で解消した）
-  const toggleEmojiPopover = () => {
-    if (!emojiOpen) {
-      setPickerQuery(null)
-      setScheduleOpen(false)
-      setLinkOpen(false)
-    }
-    setEmojiOpen((v) => !v)
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }
+  // つけたい」）。カスタム絵文字（`:name:`ショートコードでcustomEmojiに解決できるもの）は
+  // その場で原子img要素として挿入し、それ以外（Unicode絵文字）はプレーンテキストとして挿入する。
   const insertEmoji = (emoji: string) => {
-    const el = textareaRef.current
-    const cursor = el?.selectionStart ?? body.length
-    setBody(body.slice(0, cursor) + emoji + body.slice(cursor))
+    const root = editorRef.current
+    if (!root) return
+    const shortcodeMatch = /^:([a-zA-Z0-9_+-]{2,24}):$/.exec(emoji)
+    const resolved = shortcodeMatch
+      ? customEmoji.find((e) => e.name.toLowerCase() === shortcodeMatch[1].toLowerCase())
+      : undefined
+    if (resolved) {
+      insertAtomicEmojiAtCursor(root, resolved.name, resolved.image_url)
+    } else {
+      const offs = getSelectionOffsets(root)
+      const total = domToPlainText(root).length
+      const start = offs?.start ?? total
+      const end = offs?.end ?? start
+      replaceRangeWithText(root, start, end, emoji)
+    }
     setEmojiOpen(false)
-    requestAnimationFrame(() => {
-      const pos = cursor + emoji.length
-      el?.focus()
-      el?.setSelectionRange(pos, pos)
-    })
+    afterMutate()
   }
 
   // 本文から削除されたメンションは除外する（選択後にテキストを手で消した場合の整合性維持。
@@ -359,8 +407,16 @@ export default function Composer({
   }
   const removeAttachment = (index: number) => setAttachments((prev) => prev.filter((_, i) => i !== index))
 
+  const clearEditor = () => {
+    const root = editorRef.current
+    if (!root) return
+    root.replaceChildren()
+    afterMutate()
+  }
+
   const confirmSchedule = async () => {
-    const text = body.trim()
+    const root = editorRef.current
+    const text = (root ? domToPlainText(root) : '').trim()
     if (!text) {
       toast('本文を入力してください', 'error')
       return
@@ -390,7 +446,7 @@ export default function Composer({
           scheduled_at: scheduledAt.toISOString(),
         }),
       })
-      setBody('')
+      clearEditor()
       setMentions([])
       setScheduleOpen(false)
       toast('送信を予約しました')
@@ -403,45 +459,46 @@ export default function Composer({
 
   // 書式ツールバー（太字・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望
   // 「Slackのメッセージ入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような
-  // 機能を付けたい」による追加。実装方針は着手前にユーザーへ確認し、(1) GFM風のMarkdown記法
-  // （`**太字**`・`` `コード` ``・``` ```コードブロック``` ```・行頭「- 」の箇条書き）を採用（Slack
-  // 自体の単一`*`/`~`記法は、日本語の波ダッシュ「〜」や文中の`*`との誤検出が多いため避けた）、
-  // (2) 下線はSlack自体の書式メニューにも標準Markdownにも存在しないため取り消し線
-  // （`~~text~~`）に置き換える、の2点で合意した。投稿欄はキー入力中のリアルタイム装飾（太字等が
-  // 実際に太字に見える）までは行わず（ユーザーが選択した方式）、GitHubのコメント欄等と同じ
-  // 「選択範囲をボタンでマーカー文字列ごと囲む」挿入補助のみ提供する。実際の装飾表示は投稿後の
-  // 会話ログ（MessageList.tsx・ThreadPanel.tsxのrenderMessageBody）側で行う。
+  // 機能を付けたい」による追加。記法・下線の扱いは既存のとおり（GFM風のMarkdown記法、下線は
+  // 独自の`++text++`）。すべてのボタンはonMouseDown+preventDefaultでフォーカス（＝
+  // contentEditableの選択範囲）を失わせない（既存のメンション/絵文字ピッカーと同じパターンを
+  // 全ボタンへ広げた。2026-09-18のcontentEditable化に伴う変更——textareaのselectionStartは
+  // フォーカスを失っても値を保持するが、contentEditableのSelectionはフォーカスを失うと
+  // 容易に失われるため、そもそもフォーカスを離さない設計にした）。
   const wrapSelection = (prefix: string, suffix: string) => {
-    const el = textareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? body.length
-    const end = el.selectionEnd ?? body.length
-    const before = body.slice(0, start)
-    const selected = body.slice(start, end)
-    const after = body.slice(end)
-    setBody(before + prefix + selected + suffix + after)
+    const root = editorRef.current
+    if (!root) return
+    const offs = getSelectionOffsets(root)
+    const total = domToPlainText(root).length
+    const start = offs?.start ?? total
+    const end = offs?.end ?? start
+    const hasSelection = start !== end
+    const selectedLength = end - start
+    // 終端側を先に挿入してから始端側を挿入する（始端側の挿入が終端側のオフセットへ影響しない
+    // 順序にする。選択されていた中身＝原子絵文字img等はこの間一切触らないため安全）
+    replaceRangeWithText(root, end, end, suffix)
+    replaceRangeWithText(root, start, start, prefix)
+    if (hasSelection) {
+      setSelectionOffsets(root, start, start + prefix.length + selectedLength + suffix.length)
+    } else {
+      setSelectionOffsets(root, start + prefix.length)
+    }
     setPickerQuery(null)
-    requestAnimationFrame(() => {
-      el.focus()
-      if (selected) {
-        // 選択があった場合はマーカーを含めた範囲を選択し直す（続けて別の書式を重ねがけしやすいように）
-        el.setSelectionRange(start, start + prefix.length + selected.length + suffix.length)
-      } else {
-        // 選択が無ければカーソルをマーカーの間に置き、そのまま続けて入力できるようにする
-        const pos = start + prefix.length
-        el.setSelectionRange(pos, pos)
-      }
-    })
+    afterMutate()
   }
 
   // コードボタンは選択範囲に改行を含むかで自動的にインラインコード/コードブロックを切り替える
   // （GitHubのコメント欄と同じ挙動。ボタンを1つに減らせるうえ直感的なため）
   const wrapCode = () => {
-    const el = textareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? body.length
-    const end = el.selectionEnd ?? body.length
-    if (body.slice(start, end).includes('\n')) {
+    const root = editorRef.current
+    if (!root) return
+    const offs = getSelectionOffsets(root)
+    if (!offs) {
+      wrapSelection('`', '`')
+      return
+    }
+    const selectedText = domToPlainText(root).slice(offs.start, offs.end)
+    if (selectedText.includes('\n')) {
       wrapSelection('```\n', '\n```')
     } else {
       wrapSelection('`', '`')
@@ -449,19 +506,19 @@ export default function Composer({
   }
 
   // リンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい」）。記法は他の書式
-  // （`**太字**`等）と同じGFM（GitHub Flavored Markdown）風の`[表示文字](URL)`を採用した
-  // （Slack自体の`<url|text>`記法は他の書式と同様に独自すぎるため避けた）。当初はGitHubの
-  // コメント欄のリンクボタンと同じ「選択文字列を`[選択文字列](url)`へ直接書き換えurl部分を
-  // 選択状態にする」簡易実装だったが、ユーザーからの明示的な要望「スラックみたいに、リンクも
-  // ボタンを押したら、テキストとリンクを設定する画面ポップアップが出てきてほしい」を受け、
-  // テキスト・URLをそれぞれ入力するポップアップ方式に置き換えた。
+  // （`**太字**`等）と同じGFM風の`[表示文字](URL)`を採用（Slack自体の`<url|text>`記法は
+  // 他の書式と同様に独自すぎるため避けた）。ユーザーからの明示的な要望「スラックみたいに、
+  // リンクもボタンを押したら、テキストとリンクを設定する画面ポップアップが出てきてほしい」を
+  // 受け、テキスト・URLをそれぞれ入力するポップアップ方式にしている。
   const toggleLinkPopover = () => {
     if (!linkOpen) {
-      const el = textareaRef.current
-      const start = el?.selectionStart ?? body.length
-      const end = el?.selectionEnd ?? body.length
+      const root = editorRef.current
+      const offs = root ? getSelectionOffsets(root) : null
+      const total = root ? domToPlainText(root).length : 0
+      const start = offs?.start ?? total
+      const end = offs?.end ?? start
       linkSelectionRef.current = { start, end }
-      setLinkText(body.slice(start, end))
+      setLinkText(root ? domToPlainText(root).slice(start, end) : '')
       setLinkUrl('')
       setPickerQuery(null)
       setEmojiOpen(false)
@@ -480,44 +537,45 @@ export default function Composer({
     // テキスト未入力時はURL自体を表示文字にする（Slackも同様に、テキストを指定しなければURLが
     // そのまま表示される）
     const text = linkText.trim() || url
+    const root = editorRef.current
+    if (!root) return
     const { start, end } = linkSelectionRef.current
-    const before = body.slice(0, start)
-    const after = body.slice(end)
-    const inserted = `[${text}](${url})`
-    setBody(before + inserted + after)
+    replaceRangeWithText(root, start, end, `[${text}](${url})`)
     setLinkOpen(false)
-    requestAnimationFrame(() => {
-      const pos = before.length + inserted.length
-      textareaRef.current?.focus()
-      textareaRef.current?.setSelectionRange(pos, pos)
-    })
+    afterMutate()
   }
 
   // 選択中の文字列の上にURLを貼り付けると、その文字列をリンクの表示テキストにしたリンクへ変換する
   // （ユーザーからの明示的な要望「欲を言うとslackみたいに文字指定してリンクを張り付けるとリンクが
-  // 格納されるととてもうれしい」）。選択範囲が無い場合・貼り付けた内容がURL単体でない場合
-  // （複数行や前後にテキストを含む場合）はブラウザ標準の貼り付け動作のままにする（意図せず
-  // 通常のテキスト貼り付けまでリンク化してしまわないように、URLそのものだけの貼り付けに限定した）
+  // 格納されるととてもうれしい」）。それ以外の貼り付けはプレーンテキストとして挿入する
+  // （2026-09-18のcontentEditable化に伴い、あらゆる貼り付けを自前化した。ブラウザ既定のリッチ
+  // 貼り付けに任せると、Wordや任意のWebページからのコピーで想定外のブロック要素・スタイル・
+  // 偽の<img>が紛れ込み、原子絵文字img（data-emoji-name属性で判別）との区別がつかなくなり、
+  // 以後のオフセットベース処理全体が壊れるため、常にpreventDefaultしてプレーンテキストのみ
+  // 手動挿入する）。
   const LINK_PASTE_URL_RE = /^https?:\/\/\S+$/
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const el = textareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? 0
-    const end = el.selectionEnd ?? 0
-    if (start === end) return
-    const pasted = e.clipboardData.getData('text/plain').trim()
-    if (!LINK_PASTE_URL_RE.test(pasted)) return
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     e.preventDefault()
-    const before = body.slice(0, start)
-    const selected = body.slice(start, end)
-    const after = body.slice(end)
-    const inserted = `[${selected}](${pasted})`
-    setBody(before + inserted + after)
-    requestAnimationFrame(() => {
-      const pos = before.length + inserted.length
-      el.focus()
-      el.setSelectionRange(pos, pos)
-    })
+    const root = editorRef.current
+    if (!root) return
+    const offs = getSelectionOffsets(root)
+    const total = domToPlainText(root).length
+    const start = offs?.start ?? total
+    const end = offs?.end ?? start
+    const pasted = e.clipboardData.getData('text/plain')
+    const trimmed = pasted.trim()
+    if (start !== end && LINK_PASTE_URL_RE.test(trimmed)) {
+      const selectedText = domToPlainText(root).slice(start, end)
+      replaceRangeWithText(root, start, end, `[${selectedText}](${trimmed})`)
+    } else {
+      replaceRangeWithText(root, start, end, pasted)
+    }
+    // 旧実装（textarea）はブラウザ既定の貼り付けが自動的にmaxLength属性で切り詰めてくれていたが、
+    // 貼り付けを全面的に自前化した（全ての貼り付けをpreventDefaultしプレーンテキストのみ手動挿入
+    // する設計、上のコメント参照）ことでこの自動切り詰めが失われた。paste特有の欠落のため、ここで
+    // 明示的に補う（書式ボタン等での数文字程度の超過は旧実装でも元々防げていなかったため対象外）。
+    enforceMaxLength(root, MAX_BODY_LENGTH)
+    afterMutate()
   }
 
   // 箇条書きボタンは選択範囲を含む行全体を対象に行頭へ「- 」を付ける（既に全行付いていれば外す
@@ -527,39 +585,47 @@ export default function Composer({
   // 箇条書きのマークが出てくるようにしたい」）。allBulletedは空行を除いた行だけで判定する
   // （空行しか無い1行だけの対象を「既に箇条書き済み」と誤判定して何もしなくなるのを防ぐため）
   const insertBulletList = () => {
-    const el = textareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? body.length
-    const end = el.selectionEnd ?? body.length
-    const lineStart = body.lastIndexOf('\n', start - 1) + 1
-    const nextNewline = body.indexOf('\n', end)
-    const lineEnd = nextNewline === -1 ? body.length : nextNewline
-    const lines = body.slice(lineStart, lineEnd).split('\n')
+    const root = editorRef.current
+    if (!root) return
+    const offs = getSelectionOffsets(root)
+    const total = domToPlainText(root).length
+    const start = offs?.start ?? total
+    const end = offs?.end ?? start
+    const text = domToPlainText(root)
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1
+    const nextNewline = text.indexOf('\n', end)
+    const lineEnd = nextNewline === -1 ? text.length : nextNewline
+    const lines = text.slice(lineStart, lineEnd).split('\n')
     const nonBlankLines = lines.filter((l) => l.trim() !== '')
     const allBulleted = nonBlankLines.length > 0 && nonBlankLines.every((l) => l.startsWith('- '))
     const nextLines = lines.map((l) => {
       if (l.trim() === '') return lines.length === 1 ? '- ' : l
-      return allBulleted ? l.replace(/^- /, '') : (l.startsWith('- ') ? l : `- ${l}`)
+      return allBulleted ? l.replace(/^- /, '') : l.startsWith('- ') ? l : `- ${l}`
     })
     const nextBlock = nextLines.join('\n')
-    setBody(body.slice(0, lineStart) + nextBlock + body.slice(lineEnd))
+    replaceRangeWithText(root, lineStart, lineEnd, nextBlock)
     setPickerQuery(null)
-    requestAnimationFrame(() => {
-      el.focus()
-      const pos = lineStart + nextBlock.length
-      el.setSelectionRange(pos, pos)
-    })
+    afterMutate()
   }
 
+  // メンション候補の選択（人間・@channel・@here・チャンネルAIすべて共通）。ハイライトは
+  // 挿入時点のみ付与する（詳細はcomposerEditing.tsの冒頭コメント参照）。挿入した表示文字列
+  // 直後の空白は意図的にハイライトspanの外側（別のプレーンテキストノード）として挿入し、
+  // 利用者がメンションの直後から手打ちを続けたときに新しい文字が誤ってspanへ吸い込まれ
+  // ハイライトが不自然に広がってしまう可能性を減らす（Planサブエージェントの精査で指摘された
+  // 境界問題への緩和。完全な防止ではなく既知の表示上の制約として許容する）。
   const selectCandidate = (candidate: MentionCandidate) => {
-    const el = textareaRef.current
-    const cursor = el?.selectionStart ?? body.length
-    const match = detectMentionQuery(body, cursor)
+    const root = editorRef.current
+    if (!root) return
+    const cursor = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
+    const match = detectMentionQuery(domToPlainText(root), cursor)
     if (!match) return
-    const before = body.slice(0, match.atIndex)
-    const after = body.slice(cursor)
-    const insertText = `@${candidate.name} `
-    setBody(before + insertText + after)
+    const displayText = `@${candidate.name}`
+    const { span } = replaceRangeWithMentionSpan(root, match.atIndex, cursor, displayText)
+    // span要素そのものへの参照を使い、DOM操作でspanの兄弟として明示的に外側へ空白を挿入する
+    // （オフセットベースの挿入だとspanの中に吸い込まれてしまう、詳細はcomposerEditing.tsの
+    // insertTextAfterNodeのコメント参照）。カーソル位置もこの関数が直接設定する。
+    insertTextAfterNode(span, ' ')
     if (candidate.isChannel) {
       // @channel はkind='channel'として送る（target_user_idは使わない）。重複選択しても1件だけ持つ
       setMentions((prev) =>
@@ -578,31 +644,36 @@ export default function Composer({
       setMentions((prev) => [...prev, { target_user_id: candidate.id, display_name_snapshot: candidate.name }])
     }
     setPickerQuery(null)
-    requestAnimationFrame(() => {
-      const pos = before.length + insertText.length
-      el?.focus()
-      el?.setSelectionRange(pos, pos)
-    })
+    afterMutate()
   }
 
   // 入力欄下のメンションボタン（画面モックアップS-03のmention-btn）。カーソル位置に「@」を挿入し
   // ピッカーを開く。直前の文字が空白でない場合はdetectMentionQueryの開始条件を満たすよう半角空白を補う。
   const insertMentionTrigger = () => {
-    const el = textareaRef.current
-    const cursor = el?.selectionStart ?? body.length
-    const before = body[cursor - 1]
+    const root = editorRef.current
+    if (!root) return
+    const cursor = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
+    const text = domToPlainText(root)
+    const before = text[cursor - 1]
     const insertText = cursor === 0 || before === undefined || /\s/.test(before) ? '@' : ' @'
-    setBody(body.slice(0, cursor) + insertText + body.slice(cursor))
+    replaceRangeWithText(root, cursor, cursor, insertText)
     setPickerQuery('')
     setActiveIndex(0)
     setScheduleOpen(false)
     setEmojiOpen(false)
     setLinkOpen(false)
-    requestAnimationFrame(() => {
-      const pos = cursor + insertText.length
-      el?.focus()
-      el?.setSelectionRange(pos, pos)
-    })
+    afterMutate()
+  }
+
+  // 絵文字ピッカーの開閉。ボタン自体はonMouseDown+preventDefaultでフォーカスを失わせないため、
+  // 旧実装にあったrequestAnimationFrameでの再フォーカスは不要になった。
+  const toggleEmojiPopover = () => {
+    if (!emojiOpen) {
+      setPickerQuery(null)
+      setScheduleOpen(false)
+      setLinkOpen(false)
+    }
+    setEmojiOpen((v) => !v)
   }
 
   // バグ調査（ユーザーからの報告「たまにAIが二回応答するときがある」）: 本番DBを実際に調査した結果、
@@ -613,16 +684,17 @@ export default function Composer({
   // 防いでいたが、キーボード経由の送信にはこの保護が一切掛かっていなかった。sendingRef（useRef）で
   // 同期的な再入防止を行う（sending stateはReactのバッチ更新の都合上、同一tick内の連続呼び出しでは
   // 更新前の古い値を見てしまう可能性があるため、refで即座に一貫した値を参照できるようにする）
-  const sendingRef = useRef(false)
   const send = async () => {
     if (sendingRef.current) return
-    const text = body.trim()
+    const root = editorRef.current
+    if (!root) return
+    const text = domToPlainText(root).trim()
     if (!text) return
     sendingRef.current = true
     setSending(true)
     try {
       await onSend(text, activeMentionsIn(text), attachments)
-      setBody('')
+      clearEditor()
       setMentions([])
       setAttachments([])
     } catch (e) {
@@ -633,7 +705,36 @@ export default function Composer({
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  // バグ修正（実機Playwright検証で発見）: 原子絵文字img（contenteditable="false"）へ直接
+  // クリックしても、通常のテキストクリックと異なりChromiumがネイティブにキャレットを
+  // 再配置しない（クリック前のカーソル位置がそのまま残ってしまう）ことを実機で確認した。
+  // 一方、同じ座標を`document.caretRangeFromPoint`へ直接問い合わせると正しい境界位置
+  // （画像の手前/直後）を返すことも確認できたため、原子ノードへのクリックだけを対象に、
+  // このAPIで明示的にキャレット位置を計算し直す（通常のテキスト上のクリック・ドラッグ選択は
+  // ブラウザのネイティブ処理のまま変更しない——これらは既に正しく動作しているため、全クリックを
+  // 一律に上書きすると複数文字のドラッグ選択等を壊してしまう）。
+  const handleEditorClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement
+    if (target.tagName !== 'IMG' || !target.hasAttribute('data-emoji-name')) return
+    const doc = target.ownerDocument as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null
+    }
+    if (!doc.caretRangeFromPoint) return
+    const range = doc.caretRangeFromPoint(e.clientX, e.clientY)
+    if (!range) return
+    const sel = window.getSelection()
+    if (!sel) return
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // IME（日本語入力）の変換候補確定中に送信・改行・箇条書き継続・メンション候補選択と
+    // 誤って解釈しないための最重要ガード。変換確定のEnterキー等はここで一切処理せず、
+    // ブラウザのネイティブなIME処理にそのまま委ねる（Planサブエージェントの設計精査で
+    // 指摘された、この種の実装で最も起きやすい不具合クラスへの対処）。
+    if ((e.nativeEvent as KeyboardEvent).isComposing) return
+
     if (emojiOpen && e.key === 'Escape') {
       setEmojiOpen(false)
       return
@@ -660,8 +761,7 @@ export default function Composer({
       }
     }
     // Enterキー＝改行・Ctrl+Enter（Macは⌘+Enter）＝送信（Slackと同じ挙動。ユーザーからの明示的な
-    // 要望による変更、従来はEnter単体で即送信・Shift+Enterで改行だった）。Enter単体はここでは
-    // 何もせず（preventDefaultしない）、textarea標準の改行動作にそのまま委ねる。
+    // 要望による変更、従来はEnter単体で即送信・Shift+Enterで改行だった）。
     // バグ修正（ユーザーからの報告「たまにAIが二回応答するときがある」、実機データで原因を特定
     // ——詳細はsend()直前のコメント参照）: e.repeatはOSのキーリピート（キーを押しっぱなしにした
     // 際に発火し続けるkeydown）のときtrueになる。Ctrl+Enterを押しっぱなしにすると本来の1回の
@@ -673,39 +773,38 @@ export default function Composer({
       send()
       return
     }
-    // 箇条書きの行でEnterを押すと、次の行にも自動的に「- 」を付けて箇条書きを続ける
-    // （ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を置き換える
-    // 通常の入力）は対象外とし、素朴にカーソル位置のみのケースに絞る。何も入力していない
-    // 箇条書き行でEnterを押した場合は、そのままだと空の「- 」が際限なく増えてしまうため、
+    // contentEditableではEnterキーの既定挙動（ブロック要素の分割等、ブラウザ間で挙動が
+    // 大きく異なる）に任せず、常に自前で処理する（改行はテキストノード内の生の"\n"文字として
+    // 挿入し、white-space:pre-wrapで見た目を成立させる。詳細はcomposerEditing.tsの
+    // 冒頭コメント参照）。箇条書きの行でEnterを押すと、次の行にも自動的に「- 」を付けて
+    // 箇条書きを続ける（ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を
+    // 置き換える通常の入力）は対象外とし、素朴にカーソル位置のみのケースに絞る。何も入力して
+    // いない箇条書き行でEnterを押した場合は、そのままだと空の「- 」が際限なく増えてしまうため、
     // 多くのエディタ（Notion・GitHub等）と同じくマーカーを外してリストから抜ける
-    if (e.key === 'Enter' && !e.shiftKey) {
-      const el = e.currentTarget
-      if (el.selectionStart === el.selectionEnd) {
-        const cursor = el.selectionStart
-        const lineStart = body.lastIndexOf('\n', cursor - 1) + 1
-        const nextNewlineIdx = body.indexOf('\n', cursor)
-        const lineEnd = nextNewlineIdx === -1 ? body.length : nextNewlineIdx
-        const bulletMatch = /^- (.*)$/.exec(body.slice(lineStart, lineEnd))
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const root = editorRef.current
+      if (!root) return
+      const offs = getSelectionOffsets(root)
+      if (offs && offs.start === offs.end && !e.shiftKey) {
+        const text = domToPlainText(root)
+        const cursor = offs.start
+        const lineStart = text.lastIndexOf('\n', cursor - 1) + 1
+        const nextNewlineIdx = text.indexOf('\n', cursor)
+        const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
+        const bulletMatch = /^- (.*)$/.exec(text.slice(lineStart, lineEnd))
         if (bulletMatch) {
-          e.preventDefault()
           if (bulletMatch[1].trim() === '') {
-            const nextBody = body.slice(0, lineStart) + body.slice(lineEnd)
-            setBody(nextBody)
-            requestAnimationFrame(() => {
-              el.focus()
-              el.setSelectionRange(lineStart, lineStart)
-            })
+            replaceRangeWithText(root, lineStart, lineEnd, '')
           } else {
-            const insertText = '\n- '
-            setBody(body.slice(0, cursor) + insertText + body.slice(cursor))
-            requestAnimationFrame(() => {
-              el.focus()
-              const pos = cursor + insertText.length
-              el.setSelectionRange(pos, pos)
-            })
+            replaceRangeWithText(root, cursor, cursor, '\n- ')
           }
+          afterMutate()
+          return
         }
       }
+      if (offs) replaceRangeWithText(root, offs.start, offs.end, '\n')
+      afterMutate()
     }
   }
 
@@ -722,19 +821,10 @@ export default function Composer({
                 selectCandidate(c)
               }}
               className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
-                // 選択中（キーボードの↑↓で移動した行）の背景色が薄すぎて分かりにくいとの
-                // ユーザーからの指摘を受け、従来のbg-surface-subtle（#fafbfc、ほぼ白）から
-                // bg-accent-100（#dbeafe）へ変更したところ、続けて「もっと濃い青にしましょう」との
-                // 追加要望を受け、新設のbg-accent-200（#bfdbfe、index.css参照）へさらに変更した。
-                // 未選択行のホバーは従来どおりbg-surface-subtleのままにして、選択中とホバーが
-                // 区別できるようにする
                 i === activeIndex ? 'bg-accent-200' : 'hover:bg-surface-subtle'
               }`}
             >
               {c.picture_url ? (
-                // 実際に発言したときのAvatar（MessageList.tsx）と同じ優先順位（画像優先）・形状
-                // （AIは角丸四角、人間は円形）にする。従来は画像の有無を見ず常に色付き頭文字/AI表示
-                // だったため、発言時のアイコンと一致していなかった（ユーザーからの指摘で修正）
                 <img
                   src={c.picture_url}
                   alt=""
@@ -772,8 +862,6 @@ export default function Composer({
           ))}
         </div>
       )}
-      {/* タイルサイズ・グリッド幅はMessageList.tsxのEmojiGridPopoverと同じ理由・同じ比率で拡大した
-          （ユーザーからの明示的な要望「全体的にスタンプ小さいので大きくしてもらえますか」、2026-09-17） */}
       {emojiOpen && (
         <div className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[280px] w-[314px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
           {EMOJI_LIST.map((emoji, i) => (
@@ -789,9 +877,6 @@ export default function Composer({
               {emoji}
             </button>
           ))}
-          {/* カスタム絵文字（2026-09-17）。`:name:`をショートコードとしてそのまま挿入する
-              （MessageList.tsxのEmojiGridPopoverと同じ考え方、送信時はComposerにとって
-              単なる文字列のため既存の挿入処理を変更不要） */}
           {customEmoji.map((e) => (
             <button
               key={e.id}
@@ -927,7 +1012,10 @@ export default function Composer({
         <button
           type="button"
           title="太字（**で囲みます）"
-          onClick={() => wrapSelection('**', '**')}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            wrapSelection('**', '**')
+          }}
           className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted"
         >
           B
@@ -935,7 +1023,10 @@ export default function Composer({
         <button
           type="button"
           title="斜体（_で囲みます）"
-          onClick={() => wrapSelection('_', '_')}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            wrapSelection('_', '_')
+          }}
           className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic text-ink-subtle hover:bg-surface-muted"
         >
           I
@@ -943,7 +1034,10 @@ export default function Composer({
         <button
           type="button"
           title="下線（++で囲みます）"
-          onClick={() => wrapSelection('++', '++')}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            wrapSelection('++', '++')
+          }}
           className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle underline hover:bg-surface-muted"
         >
           U
@@ -951,7 +1045,10 @@ export default function Composer({
         <button
           type="button"
           title="取り消し線（~~で囲みます）"
-          onClick={() => wrapSelection('~~', '~~')}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            wrapSelection('~~', '~~')
+          }}
           className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"
         >
           S
@@ -959,7 +1056,10 @@ export default function Composer({
         <button
           type="button"
           title="リンク（テキストとURLを指定して挿入します）"
-          onClick={toggleLinkPopover}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            toggleLinkPopover()
+          }}
           className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] hover:bg-surface-muted ${
             linkOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
@@ -969,7 +1069,10 @@ export default function Composer({
         <button
           type="button"
           title="コード（複数行を選択するとコードブロックになります）"
-          onClick={wrapCode}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            wrapCode()
+          }}
           className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
         >
           {'</>'}
@@ -977,7 +1080,10 @@ export default function Composer({
         <button
           type="button"
           title="箇条書き（行頭に「- 」を付けます）"
-          onClick={insertBulletList}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            insertBulletList()
+          }}
           className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
         >
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -988,41 +1094,21 @@ export default function Composer({
           </svg>
         </button>
       </div>
-      <div className="relative">
-        {/* バグ修正（ユーザーからの報告「スレッドの入力欄で長文を打つと、右端のスクロールバーと
-            被って文字が見切れる場所がある」）: textareaは10行（MAX_ROWS）を超えると内部で
-            縦スクロール可能になり、Windows版Chrome/Edgeの既定スクロールバー（オーバーレイ式では
-            なく領域を占有するクラシックなスクロールバー）が表示された分だけ、実際の文字が使える
-            幅（clientWidth）が狭くなる。一方、背後のハイライト用div（このoverlay、実際に目に
-            見えているテキスト本体）はスクロールを持たない`overflow-hidden`のため幅が変わらず、
-            スクロールバーの分だけ余分に右へ文字を描画してしまい、textarea側のネイティブ
-            スクロールバーの下に隠れて見切れていた。`scrollbar-gutter: stable`を両要素に付け、
-            スクロールバーが実際に表示されるかどうかに関わらず常に同じ幅のガター（余白）を
-            確保することで、両者の実効幅を常に一致させる（スクロールバーの実ピクセル幅はOS・
-            ブラウザ依存のため、固定pxのpadding調整ではなくこのCSSプロパティで解決する） */}
-        <div
-          ref={highlightRef}
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-[13px] text-ink [scrollbar-gutter:stable]"
-        >
-          {highlightNodes}
-          {'​'}
-        </div>
-        <textarea
-          ref={textareaRef}
-          value={body}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onScroll={(e) => {
-            if (highlightRef.current) highlightRef.current.scrollTop = e.currentTarget.scrollTop
-          }}
-          placeholder={placeholder}
-          rows={MIN_ROWS}
-          maxLength={4000}
-          className="relative w-full resize-none break-words border-none bg-transparent text-[13px] text-transparent caret-ink outline-none placeholder:text-ink-subtle [scrollbar-gutter:stable]"
-        />
-      </div>
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
+        aria-label={placeholder}
+        data-placeholder={placeholder}
+        onInput={handleInput}
+        onCompositionEnd={handleCompositionEnd}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        onClick={handleEditorClick}
+        className="composer-editable relative w-full whitespace-pre-wrap break-words text-[13px] text-ink outline-none [scrollbar-gutter:stable]"
+      />
       {(attachments.length > 0 || uploading) && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {attachments.map((a, i) => (
@@ -1076,7 +1162,10 @@ export default function Composer({
         <button
           type="button"
           title="絵文字を挿入"
-          onClick={toggleEmojiPopover}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            toggleEmojiPopover()
+          }}
           className={`flex h-7 w-7 items-center justify-center rounded-md ${
             emojiOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle hover:bg-surface-muted'
           }`}
@@ -1092,7 +1181,10 @@ export default function Composer({
           <button
             type="button"
             title="メンション候補を表示"
-            onClick={insertMentionTrigger}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              insertMentionTrigger()
+            }}
             className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
           >
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -1105,7 +1197,10 @@ export default function Composer({
           <button
             type="button"
             title="送信日時を指定"
-            onClick={toggleSchedulePopover}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              toggleSchedulePopover()
+            }}
             className={`ml-auto flex h-7 w-7 items-center justify-center rounded-md ${
               scheduleOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle hover:bg-surface-muted'
             }`}
@@ -1119,7 +1214,7 @@ export default function Composer({
         <button
           type="button"
           title="Ctrl+Enter（Macは⌘+Enter）でも送信できます"
-          disabled={sending || uploading || !body.trim()}
+          disabled={sending || uploading || !hasContent}
           onClick={send}
           className={`rounded-[7px] bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40 ${
             canSchedule ? '' : 'ml-auto'

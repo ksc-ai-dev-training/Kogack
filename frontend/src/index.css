@@ -99,3 +99,13 @@ button:disabled,
 .ai-typing-dot {
   animation: ai-typing-blink 1.2s infinite ease-in-out;
 }
+
+/* 投稿欄（Composer.tsx）のcontentEditableなプレースホルダ（2026-09-18、textarea+オーバーレイ
+   方式からの書き換え）。ネイティブの<textarea placeholder>に相当するものがcontentEditableには
+   無いため、論理的に空のとき（DOMに子ノードが1つも無いとき。Composer.tsx側が迷子の空ノードを
+   残さないよう徹底する）だけ:emptyで判定してdata-placeholder属性の内容を表示する。 */
+.composer-editable:empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+}
