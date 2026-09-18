@@ -864,6 +864,10 @@ export default function Composer({
       )}
       {emojiOpen && (
         <div className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[280px] w-[314px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+          {/* 既存（Unicode）の絵文字とカスタム絵文字を見出しで分けて表示する（ユーザーからの
+              明示的な要望「既存の絵文字と、新しく作った絵文字を分けて表示させたい」）。col-span-8の
+              見出し行を挟むと、8列グリッドの自動配置により後続タイルが自然に次の行から始まる */}
+          <div className="col-span-8 px-1 pt-0.5 text-[10.5px] font-semibold text-ink-subtle">絵文字</div>
           {EMOJI_LIST.map((emoji, i) => (
             <button
               key={`${emoji}-${i}`}
@@ -877,6 +881,9 @@ export default function Composer({
               {emoji}
             </button>
           ))}
+          <div className="col-span-8 mt-1 border-t border-line px-1 pt-1.5 text-[10.5px] font-semibold text-ink-subtle">
+            カスタム絵文字
+          </div>
           {customEmoji.map((e) => (
             <button
               key={e.id}
