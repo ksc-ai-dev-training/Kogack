@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 def _message_out(
     row, blocks: list[dict] | None = None, attachments: list[dict] | None = None,
-    reactions: list[dict] | None = None,
+    reactions: list[dict] | None = None, poll: dict | None = None,
 ) -> dict:
     return {
         "id": str(row["id"]),
@@ -54,6 +54,10 @@ def _message_out(
         # 絵文字リアクション（ユーザーからの明示的な要望）。channels.py/dms.pyの_message_outと
         # 同じ形（emoji・count・reacted_by_me・user_names）
         "reactions": reactions or [],
+        # アンケート（ユーザーからの明示的な要望、T-29・polls.py）。channels.py/dms.pyと同じ形。
+        # スレッド返信（A-14）はアンケートを作成できない（V1スコープ外）ため、list_thread・
+        # post_replyの呼び出しでは常にNoneのまま渡さない（=既定値None）
+        "poll": poll,
         "created_at": row["created_at"].isoformat(),
         # channels.py/dms.pyの_message_outと型を揃えるため（useThreadは全件再取得のみで
         # sinceカーソルには使わないが、Message型のフィールドとしては必須にしている）
@@ -150,6 +154,12 @@ async def edit_message(message_id: int, body: EditMessageRequest, user: CurrentU
         raise HTTPException(404, detail="見つかりません")
     if row["sender_user_id"] != user.id:
         raise HTTPException(403, detail="権限がありません")
+
+    # アンケート（T-29 polls）の元になっている発言は編集対象外（V1スコープ外。質問文だけを
+    # 書き換えられると選択肢との整合が取れなくなるため、締め切り以外の変更は許可しない設計判断）
+    is_poll = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM polls WHERE message_id = $1)", message_id)
+    if is_poll:
+        raise HTTPException(400, detail="アンケートの本文は編集できません")
 
     async with pool.acquire() as conn, conn.transaction():
         updated = await conn.fetchrow(

@@ -15,8 +15,9 @@ import { EMOJI_LIST } from './Composer'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import type {
   AiRequestOut, AttachmentPayload, CitationPayload, CustomEmoji, MentionSourceMember, Message, MessageAttachment,
-  MessageReaction,
+  MessageReaction, Poll,
 } from '../types'
+import { votePoll, closePoll } from '../lib/api'
 
 // カスタム絵文字のショートコード（`:name:`）と、実際の画像URLへの解決（ユーザーからの明示的な
 // 要望「Slackみたいにリアクションスタンプを自分で作成できる機能」、2026-09-17）。リアクション
@@ -1295,6 +1296,72 @@ export function ReactionPills({
   )
 }
 
+// アンケート（T-29。ユーザーからの明示的な要望「チャットアプリに新しくアンケート機能を付けて
+// ほしい」、2026-09-18）。単一選択・投票者は他の参加者にも見える（画面上はvoter_namesを
+// ホバーで表示）・参加者なら誰でも投票可・締め切りは作成者本人またはadminのみ。質問文は
+// メッセージ本文（m.body）にそのまま入っているため、通常の本文描画（renderMessageBody）の
+// 代わりにこのカードで表示する（呼び出し元がpollを持つ発言のときだけ切り替える）。
+export function PollCard({
+  poll, question, isClosable, onVote, onClose, voting, closing,
+}: {
+  poll: Poll
+  question: string
+  isClosable: boolean
+  onVote: (optionId: string) => void
+  onClose: () => void
+  voting: boolean
+  closing: boolean
+}) {
+  const closed = poll.closed_at !== null
+  return (
+    <div className="mt-0.5 max-w-[420px] rounded-lg border border-line bg-surface p-3">
+      <div className="text-[13.5px] font-semibold text-ink">📊 {question}</div>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {poll.options.map((opt) => {
+          const pct = poll.total_votes > 0 ? Math.round((opt.vote_count / poll.total_votes) * 100) : 0
+          const mine = poll.my_option_id === opt.id
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              disabled={closed || voting}
+              onClick={() => onVote(opt.id)}
+              title={opt.voter_names.length > 0 ? opt.voter_names.join('、') : undefined}
+              className={`relative overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-[12.5px] disabled:cursor-default ${
+                mine ? 'border-accent-600 bg-accent-100' : 'border-line-strong bg-surface hover:bg-surface-subtle'
+              }`}
+            >
+              <span className="absolute inset-y-0 left-0 bg-accent-100" style={{ width: `${pct}%` }} aria-hidden />
+              <span className="relative flex items-center justify-between gap-2">
+                <span className="text-ink">
+                  {mine ? '✓ ' : ''}
+                  {opt.label}
+                </span>
+                <span className="shrink-0 text-ink-subtle">
+                  {opt.vote_count}票（{pct}%）
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-between text-[11px] text-ink-subtle">
+        <span>{closed ? '締め切り済み' : `計${poll.total_votes}票`}</span>
+        {isClosable && !closed && (
+          <button
+            type="button"
+            disabled={closing}
+            onClick={onClose}
+            className="font-semibold text-ink-muted hover:text-danger-text disabled:opacity-50"
+          >
+            {closing ? '締め切り中…' : 'アンケートを締め切る'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // S-03・S-04共通の発言一覧（詳細設計書 画面設計11.3節）。スクロールコンテナは呼び出し元が持つ
 // （S-04のthread-bodyは元発言・件数・返信一覧をひとつのスクロール領域として扱うため）。
 // onOpenThreadを渡すと「N件の返信」導線とホバー時の「返信」ボタンを表示する（S-04スレッド表示への導線）。
@@ -1307,6 +1374,7 @@ export default function MessageList({
   onDeleted,
   onReactionToggled,
   onEdited,
+  onPollUpdated,
   showDaySeparators = true,
   members,
   unreadDividerMessageId,
@@ -1328,6 +1396,10 @@ export default function MessageList({
    * が成功した直後、呼び出し元にその場での反映を任せるためのコールバック（onDeleted等と同じ
    * パターン）。渡さない場合は次のポーリングで自然に反映される */
   onEdited?: (updated: Message) => void
+  /** アンケート（T-29）の投票・締め切りAPIの直後、呼び出し元（useMessages.updateMessagePoll等）
+   * にその場での反映を任せるためのコールバック（onReactionToggledと同じパターン）。渡さない
+   * 場合は次のポーリングで自然に反映される */
+  onPollUpdated?: (messageId: string, poll: Message['poll']) => void
   /** S-04スレッド返信欄では表示しない（画面モックアップに合わせる。既定はtrue） */
   showDaySeparators?: boolean
   /** F-41 @メンションの表示名解決に使う（チャンネル参加者一覧。DM会話では渡さない） */
@@ -1571,6 +1643,33 @@ export default function MessageList({
       onReactionToggled?.(messageId, res.reactions)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'リアクションに失敗しました', 'error')
+    }
+  }
+
+  // アンケート（T-29）の投票・締め切り。votePoll/closePollはいずれも更新後のpoll payloadを
+  // 返すため、それをそのままonPollUpdatedへ渡してその場反映する（toggleReactionと同じ考え方）
+  const [pollVoting, setPollVoting] = useState<string | null>(null)
+  const [pollClosing, setPollClosing] = useState<string | null>(null)
+  const votePollOption = async (messageId: string, pollId: string, optionId: string) => {
+    setPollVoting(pollId)
+    try {
+      const poll = await votePoll(pollId, optionId)
+      onPollUpdated?.(messageId, poll)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '投票に失敗しました', 'error')
+    } finally {
+      setPollVoting(null)
+    }
+  }
+  const closePollFor = async (messageId: string, pollId: string) => {
+    setPollClosing(pollId)
+    try {
+      const poll = await closePoll(pollId)
+      onPollUpdated?.(messageId, poll)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '締め切りに失敗しました', 'error')
+    } finally {
+      setPollClosing(null)
     }
   }
 
@@ -1898,6 +1997,16 @@ export default function MessageList({
                       ■ {cancelling === m.id ? '中断中…' : '中断'}
                     </button>
                   </div>
+                ) : m.poll ? (
+                  <PollCard
+                    poll={m.poll}
+                    question={m.body}
+                    isClosable={m.sender_user_id === me?.id || me?.role === 'admin'}
+                    onVote={(optionId) => votePollOption(m.id, m.poll!.id, optionId)}
+                    onClose={() => closePollFor(m.id, m.poll!.id)}
+                    voting={pollVoting === m.poll.id}
+                    closing={pollClosing === m.poll.id}
+                  />
                 ) : (
                   <div
                     className={`mt-0.5 whitespace-pre-wrap break-words text-ink ${

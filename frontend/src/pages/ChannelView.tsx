@@ -5,7 +5,7 @@ import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useMessages } from '../hooks/useMessages'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
-import { apiFetch, ApiError } from '../lib/api'
+import { apiFetch, ApiError, createPoll } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer, { type MentionCandidate } from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
@@ -59,7 +59,7 @@ export default function ChannelView() {
   const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-    updateMessageReactions, updateMessage, hasOlder, loadingOlder, loadOlder,
+    updateMessageReactions, updateMessage, updateMessagePoll, hasOlder, loadingOlder, loadOlder,
   } = useMessages(channelId ? `/api/channels/${channelId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(
     channelId,
@@ -325,6 +325,7 @@ export default function ChannelView() {
             onDeleted={removeMessage}
             onReactionToggled={updateMessageReactions}
             onEdited={updateMessage}
+            onPollUpdated={updateMessagePoll}
             members={members}
             unreadDividerMessageId={unreadDividerMessageId}
             aiPersonaName={channel?.ai_persona_name}
@@ -353,6 +354,11 @@ export default function ChannelView() {
                 method: 'POST',
                 body: JSON.stringify({ body, mentions, attachments }),
               })
+              await mutateMessages()
+            }}
+            onCreatePoll={async (question, options) => {
+              if (!channelId) return
+              await createPoll(`/api/channels/${channelId}`, question, options)
               await mutateMessages()
             }}
           />

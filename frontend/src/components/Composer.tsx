@@ -4,6 +4,7 @@ import { apiFetch, uploadAttachment } from '../lib/api'
 import { getDraft, setDraft } from '../lib/drafts'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
+import { CreatePollModal } from './CreatePollModal'
 import { useToast } from './Toast'
 import {
   domToPlainText,
@@ -157,6 +158,7 @@ export default function Composer({
   aiPersonaName: _aiPersonaName,
   scheduleTarget,
   draftKey,
+  onCreatePoll,
 }: {
   placeholder: string
   onSend: (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => Promise<void>
@@ -173,6 +175,10 @@ export default function Composer({
    * 未指定時は下書きを保存・復元しない。呼び出し元は会話が変わるたびComposerをkey propで
    * 再マウントする実装（2026-09-14）のため、このpropもそのたびに新しい値で初期状態から始まる */
   draftKey?: string
+  /** アンケート作成（ユーザーからの明示的な要望「アンケート機能を付けてほしい」、2026-09-18）。
+   * 指定された場合のみ投稿欄に📊ボタンを表示する。V1スコープはチャンネル・DM本体の投稿のみ
+   * （ThreadPanel.tsxはこのpropを渡さず、スレッド返信からの作成は対象外のまま）。 */
+  onCreatePoll?: (question: string, options: string[]) => Promise<void>
 }) {
   const [sending, setSending] = useState(false)
   const [hasContent, setHasContent] = useState(false)
@@ -183,6 +189,7 @@ export default function Composer({
   const [activeIndex, setActiveIndex] = useState(0)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [showAddEmojiModal, setShowAddEmojiModal] = useState(false)
+  const [showPollModal, setShowPollModal] = useState(false)
   const { customEmoji, isLoading: customEmojiLoading, mutate: mutateCustomEmoji } = useCustomEmoji()
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
@@ -983,6 +990,14 @@ export default function Composer({
           }}
         />
       )}
+      {showPollModal && onCreatePoll && (
+        <CreatePollModal
+          onClose={() => setShowPollModal(false)}
+          onCreate={async (question, options) => {
+            await onCreatePoll(question, options)
+          }}
+        />
+      )}
       {scheduleOpen && (
         <div className="absolute bottom-full right-0 z-40 mb-2 w-[260px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
           <div className="mb-2 text-[12.5px] font-bold text-ink">送信日時を指定</div>
@@ -1260,6 +1275,21 @@ export default function Composer({
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
               <circle cx="10" cy="10" r="7.2" stroke="currentColor" strokeWidth="1.5" />
               <path d="M13 10a3 3 0 1 1-1-2.2M13 10v1.3a1.7 1.7 0 0 0 3.4 0V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+        {onCreatePoll && (
+          <button
+            type="button"
+            title="アンケートを作成"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setShowPollModal(true)
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M5 15V9M10 15V5M15 15v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
           </button>
         )}

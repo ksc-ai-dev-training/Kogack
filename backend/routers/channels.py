@@ -18,6 +18,7 @@ from auth_helpers import (
 )
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
+from polls import PollInput, create_poll_message, fetch_polls_grouped
 from reactions import fetch_reactions_grouped
 from services import ai_agent, doc_permissions, push_sender, trigger_matcher
 
@@ -542,7 +543,7 @@ async def mark_channel_read(channel_id: int, user: CurrentUser = Depends(require
 
 def _message_out(
     row, blocks: list[dict] | None = None, attachments: list[dict] | None = None,
-    reactions: list[dict] | None = None,
+    reactions: list[dict] | None = None, poll: dict | None = None,
 ) -> dict:
     return {
         "id": str(row["id"]),
@@ -572,6 +573,9 @@ def _message_out(
         # 絵文字リアクション（ユーザーからの明示的な要望「Slackのように発言一つ一つに対して
         # 絵文字でリアクションできるようにしたい」、T-26 message_reactions・reactions.py）
         "reactions": reactions or [],
+        # アンケート（ユーザーからの明示的な要望「アンケート機能を付けてほしい」、T-29 polls・
+        # polls.py）。アンケートを持たない発言ではNone（フロントはpollの有無で通常発言と区別する）
+        "poll": poll,
         "created_at": row["created_at"].isoformat(),
         # sinceポーリングの差分取得はupdated_atで判定する（下記list_messages参照）。フロントの
         # useMessagesがカーソル追跡に使う
@@ -677,10 +681,11 @@ async def list_messages(
     blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
     attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
     reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
+    polls_by_message = await fetch_polls_grouped(pool, [r["id"] for r in rows], user.id)
     items = [
         _message_out(
             r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
-            reactions_by_message.get(r["id"]),
+            reactions_by_message.get(r["id"]), polls_by_message.get(r["id"]),
         )
         for r in rows
     ]
@@ -728,6 +733,31 @@ async def post_message(
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
         blocks,
         attachments,
+    )
+
+
+@router.post("/{channel_id}/polls", status_code=201)
+async def create_poll(
+    channel_id: int, body: PollInput, user: CurrentUser = Depends(require_channel_member),
+):
+    """新規: アンケート機能（ユーザーからの明示的な要望「チャットアプリに新しくアンケート機能を
+    付けてほしい」、2026-09-18。着手前にAskUserQuestionで作成方法・投票方式・匿名性・作成権限を
+    確認し、投稿欄のボタンから・単一選択のみ・投票者は他の参加者に見える・参加者なら誰でも作成可、
+    という仕様で合意した）。質問文をmessages.bodyへ保存した新規発言として投稿する（通常の
+    post_messageと同様、参加者であることのみを要求。メンション・添付ファイル・AIメンション検知・
+    自動応答トリガーは対象外——V1のスコープはアンケートの作成と投票のみ）。デスクトップ通知②は
+    post_messageと同じくfire-and-forgetで送る（blocksはメンションを持たないため空リスト）。"""
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        message_row, poll_payload = await create_poll_message(
+            conn, channel_id=channel_id, dm_id=None, sender_user_id=user.id, poll=body,
+        )
+    asyncio.create_task(
+        push_sender.notify_channel_message(channel_id, user.id, user.name, body.question, [], f"/channels/{channel_id}")
+    )
+    return _message_out(
+        {**dict(message_row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
+        poll=poll_payload,
     )
 
 

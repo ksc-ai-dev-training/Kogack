@@ -4,7 +4,7 @@ import { useDms } from '../hooks/useDms'
 import { useMessages } from '../hooks/useMessages'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
-import { apiFetch } from '../lib/api'
+import { apiFetch, createPoll } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
@@ -33,7 +33,7 @@ export default function DmView() {
   const anchorMessageId = highlightId ? (threadId ?? highlightId) : undefined
   const {
     messages, mutate: mutateMessages, bumpThreadReplyCount, removeMessage, decrementThreadReplyCount,
-    updateMessageReactions, updateMessage, hasOlder, loadingOlder, loadOlder,
+    updateMessageReactions, updateMessage, updateMessagePoll, hasOlder, loadingOlder, loadOlder,
   } = useMessages(dmId ? `/api/dms/${dmId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(dmId, dm?.unread_count, messages, me?.id)
   const listRef = useRef<HTMLDivElement>(null)
@@ -190,6 +190,7 @@ export default function DmView() {
             onDeleted={removeMessage}
             onReactionToggled={updateMessageReactions}
             onEdited={updateMessage}
+            onPollUpdated={updateMessagePoll}
             unreadDividerMessageId={unreadDividerMessageId}
             highlightMessageId={highlightId}
           />
@@ -210,6 +211,11 @@ export default function DmView() {
                 method: 'POST',
                 body: JSON.stringify({ body, mentions, attachments }),
               })
+              await mutateMessages()
+            }}
+            onCreatePoll={async (question, options) => {
+              if (!dmId) return
+              await createPoll(`/api/dms/${dmId}`, question, options)
               await mutateMessages()
             }}
           />

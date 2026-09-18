@@ -814,6 +814,49 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_emoji_name_lower ON custom_emoji (LOWER(name));
 ALTER TABLE custom_emoji ENABLE ROW LEVEL SECURITY;
+
+-- T-29 polls / poll_options / poll_votes: アンケート機能（ユーザーからの明示的な要望「アンケート
+-- 機能を付けてほしい」、2026-09-18）。着手前にAskUserQuestionで4点確認し、(1)作成方法は投稿欄の
+-- ボタンから、(2)投票方式は単一選択のみ、(3)誰が何に投票したかは他の参加者から見える（既存の
+-- 絵文字リアクションと同じ考え方）、(4)作成できるのは参加者なら誰でも、という仕様で合意した。
+-- アンケートは「特殊な発言」として実装する（message_attachments/message_reactionsと同じ
+-- 「messages.idに紐づく付随データ」パターンを踏襲し、messages側には新しい列を持たせず常に
+-- 子テーブルから親を指す向きに統一）。message削除（A-12）でON DELETE CASCADEにより自動的に
+-- 連動削除される（新たな削除ロジックの実装が不要）。質問文はpolls側に重複して持たず、常に
+-- messages.bodyを唯一の情報源にする（アンケートも通常の発言と同じくmessages行を1件持ち、
+-- その本文＝質問文になる。横断検索・メンション等の既存機能もこの発言に対して自然に機能する）。
+-- 単一選択のみのためpoll_votesはPRIMARY KEY (poll_id, user_id)で「1人1票」をDBレベルで保証し、
+-- 投票のやり直しはON CONFLICT DO UPDATEで既存の票を新しい選択肢へ上書きするだけで実現する
+-- （削除→再挿入の2ステップより単純）。V1のスコープはチャンネル・DM本体の投稿のみ（スレッド
+-- 返信からの新規作成は対象外。F-41メンション等がまず本体のみ実装し、後日ユーザーの要望で
+-- スレッドにも拡張したのと同じ順序を踏襲する判断）。
+CREATE TABLE IF NOT EXISTS polls (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    message_id  BIGINT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    created_by  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    closed_at   TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE polls ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS poll_options (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    poll_id     BIGINT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+    label       TEXT NOT NULL,
+    sort_order  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_poll_options_poll_id ON poll_options (poll_id);
+ALTER TABLE poll_options ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+    poll_id     BIGINT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+    option_id   BIGINT NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    voted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (poll_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_votes_option_id ON poll_votes (option_id);
+ALTER TABLE poll_votes ENABLE ROW LEVEL SECURITY;
 """
 
 

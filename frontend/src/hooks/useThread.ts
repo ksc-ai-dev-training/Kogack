@@ -57,5 +57,17 @@ export function useThread(messageId: string | null) {
     mutate({ items: state.current.items, has_more: false }, { revalidate: false })
   }
 
-  return { replies: data?.items ?? ([] as Message[]), error, isLoading, mutate, updateReplyReactions, updateReplyMessage }
+  // アンケート（T-29）の投票・締め切りのその場反映（updateReplyReactionsと同じ考え方）
+  const updateReplyPoll = (targetMessageId: string, poll: Message['poll']) => {
+    if (!state.current) return
+    state.current.items = state.current.items.map((m) =>
+      m.id === targetMessageId ? { ...m, poll } : m,
+    )
+    mutate({ items: state.current.items, has_more: false }, { revalidate: false })
+  }
+
+  return {
+    replies: data?.items ?? ([] as Message[]), error, isLoading, mutate,
+    updateReplyReactions, updateReplyMessage, updateReplyPoll,
+  }
 }

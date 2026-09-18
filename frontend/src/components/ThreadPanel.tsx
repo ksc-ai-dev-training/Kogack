@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useThread } from '../hooks/useThread'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
-import { apiFetch } from '../lib/api'
+import { useMe } from '../hooks/useMe'
+import { apiFetch, votePoll, closePoll } from '../lib/api'
 import MessageList, {
-  Avatar, EmojiGridPopover, ReactionPills, ReactionQuickButtons, formatTime, isEmojiOnlyBody, renderMessageBody,
+  Avatar, EmojiGridPopover, PollCard, ReactionPills, ReactionQuickButtons, formatTime, isEmojiOnlyBody,
+  renderMessageBody,
 } from './MessageList'
 import Composer, { type MentionCandidate } from './Composer'
 import ProfileCard from './ProfileCard'
@@ -72,8 +74,9 @@ export default function ThreadPanel({
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
 }) {
-  const { replies, mutate: mutateReplies, updateReplyReactions, updateReplyMessage } = useThread(messageId)
+  const { replies, mutate: mutateReplies, updateReplyReactions, updateReplyMessage, updateReplyPoll } = useThread(messageId)
   const { customEmoji } = useCustomEmoji()
+  const { me } = useMe()
   const bodyRef = useRef<HTMLDivElement>(null)
 
   // パネル幅のドラッグリサイズ。ドラッグ開始時のマウスX座標・幅をdragStartRefに記録し、
@@ -151,6 +154,34 @@ export default function ThreadPanel({
       })
     } catch (e) {
       toast(e instanceof Error ? e.message : 'リアクションに失敗しました', 'error')
+    }
+  }
+
+  // 元発言のアンケート（T-29）。toggleParentReactionと同じく楽観的更新はせず（この元発言は
+  // ChannelView/DmView側のmessages一覧の一部をpropsで受け取っているだけでその場更新の手段が
+  // 無いため）、次のポーリングで自然に反映されるのを待つ
+  const [parentPollVoting, setParentPollVoting] = useState(false)
+  const [parentPollClosing, setParentPollClosing] = useState(false)
+  const voteParentPoll = async (optionId: string) => {
+    if (!parentMessage?.poll) return
+    setParentPollVoting(true)
+    try {
+      await votePoll(parentMessage.poll.id, optionId)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '投票に失敗しました', 'error')
+    } finally {
+      setParentPollVoting(false)
+    }
+  }
+  const closeParentPoll = async () => {
+    if (!parentMessage?.poll) return
+    setParentPollClosing(true)
+    try {
+      await closePoll(parentMessage.poll.id)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '締め切りに失敗しました', 'error')
+    } finally {
+      setParentPollClosing(false)
     }
   }
 
@@ -268,20 +299,32 @@ export default function ThreadPanel({
                 </span>
                 <span className="text-[11px] text-ink-subtle">{formatTime(parentMessage.created_at)}</span>
               </div>
-              <div
-                className={`whitespace-pre-wrap break-words text-ink ${
-                  isEmojiOnlyBody(parentMessage.body, customEmoji) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
-                }`}
-              >
-                {renderMessageBody(
-                  parentMessage.body,
-                  parentMessage.blocks,
-                  members,
-                  aiPersonaName,
-                  customEmoji,
-                  isEmojiOnlyBody(parentMessage.body, customEmoji),
-                )}
-              </div>
+              {parentMessage.poll ? (
+                <PollCard
+                  poll={parentMessage.poll}
+                  question={parentMessage.body}
+                  isClosable={parentMessage.sender_user_id === me?.id || me?.role === 'admin'}
+                  onVote={voteParentPoll}
+                  onClose={closeParentPoll}
+                  voting={parentPollVoting}
+                  closing={parentPollClosing}
+                />
+              ) : (
+                <div
+                  className={`whitespace-pre-wrap break-words text-ink ${
+                    isEmojiOnlyBody(parentMessage.body, customEmoji) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
+                  }`}
+                >
+                  {renderMessageBody(
+                    parentMessage.body,
+                    parentMessage.blocks,
+                    members,
+                    aiPersonaName,
+                    customEmoji,
+                    isEmojiOnlyBody(parentMessage.body, customEmoji),
+                  )}
+                </div>
+              )}
               {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (
                 // F-30（MessageList.tsxと同じ）。元発言はMessageListを経由せずここで個別に描画しているため
                 // 別途対応が必要（AI発言に人間がスレッド返信した場合、元発言側にも表示する）
@@ -346,6 +389,7 @@ export default function ThreadPanel({
           }}
           onReactionToggled={updateReplyReactions}
           onEdited={updateReplyMessage}
+          onPollUpdated={updateReplyPoll}
         />
 
         <p className="mx-4 mb-3 mt-1 rounded-md border border-line bg-surface-subtle px-2.5 py-2 text-[11px] leading-relaxed text-ink-subtle">

@@ -171,6 +171,29 @@ export interface MessageReaction {
   user_names: string[]
 }
 
+/** T-29 polls/poll_options（A-75と同名の投票トグルではなく専用のvote/close API）。
+ * ユーザーからの明示的な要望「チャットアプリに新しくアンケート機能を付けてほしい」、
+ * 2026-09-18。単一選択のみ・投票者は他の参加者に見える・参加者なら誰でも作成可、という
+ * 仕様。質問文自体はMessage.bodyにそのまま入っている（pollは投票用の構造化データのみ持つ）。 */
+export interface PollOption {
+  id: string
+  label: string
+  vote_count: number
+  /** 誰が投票したか（ユーザーが選んだ「見える」設定。リアクションのuser_namesと同じ形） */
+  voter_names: string[]
+}
+
+export interface Poll {
+  id: string
+  created_by: string | null
+  /** nullなら投票受付中。締め切られるとvote APIは400になる */
+  closed_at: string | null
+  total_votes: number
+  /** 自分が投票済みの選択肢id（未投票ならnull） */
+  my_option_id: string | null
+  options: PollOption[]
+}
+
 export interface Message {
   id: string
   channel_id?: string | null
@@ -201,6 +224,8 @@ export interface Message {
   /** 絵文字リアクション（ユーザーからの明示的な要望「Slackのように発言一つ一つに対して絵文字で
    * リアクションできるようにしたい」、A-75）。0件なら空配列 */
   reactions?: MessageReaction[]
+  /** アンケート（T-29、A-75投票トグルとは別の専用API）。アンケートを持たない発言ではnull */
+  poll?: Poll | null
   created_at: string
   /** sinceポーリングの差分取得カーソルに使う（useMessages）。AI応答の本文確定はUPDATEのみで
    * created_atが変わらないため、このフィールドで「更新された」ことを検知する（2026-09-04バグ修正） */

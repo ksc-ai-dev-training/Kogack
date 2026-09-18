@@ -11,6 +11,7 @@ from attachments import AttachmentInput, fetch_attachments_grouped, insert_attac
 from auth_helpers import CurrentUser, require_auth, require_dm_member
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
+from polls import PollInput, create_poll_message, fetch_polls_grouped
 from reactions import fetch_reactions_grouped
 from services import push_sender
 
@@ -183,7 +184,7 @@ async def update_dm_notif_mode(
 
 def _message_out(
     row, blocks: list[dict] | None = None, attachments: list[dict] | None = None,
-    reactions: list[dict] | None = None,
+    reactions: list[dict] | None = None, poll: dict | None = None,
 ) -> dict:
     return {
         "id": str(row["id"]),
@@ -212,6 +213,8 @@ def _message_out(
         "attachments": attachments or [],
         # 絵文字リアクション（ユーザーからの明示的な要望、T-26・reactions.py）。channels.pyと同じ形
         "reactions": reactions or [],
+        # アンケート（ユーザーからの明示的な要望、T-29・polls.py）。channels.pyと同じ形
+        "poll": poll,
         "created_at": row["created_at"].isoformat(),
         # channels.pyと同じ理由でsinceポーリングの差分取得判定に使う（下記list_messages参照）
         "updated_at": row["updated_at"].isoformat(),
@@ -279,11 +282,12 @@ async def list_messages(
         blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
         reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
+        polls_by_message = await fetch_polls_grouped(pool, [r["id"] for r in rows], user.id)
         return {
             "items": [
                 _message_out(
                     r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
-                    reactions_by_message.get(r["id"]),
+                    reactions_by_message.get(r["id"]), polls_by_message.get(r["id"]),
                 )
                 for r in rows
             ],
@@ -296,11 +300,12 @@ async def list_messages(
         blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
         reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
+        polls_by_message = await fetch_polls_grouped(pool, [r["id"] for r in rows], user.id)
         return {
             "items": [
                 _message_out(
                     r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
-                    reactions_by_message.get(r["id"]),
+                    reactions_by_message.get(r["id"]), polls_by_message.get(r["id"]),
                 )
                 for r in rows
             ],
@@ -318,11 +323,12 @@ async def list_messages(
         blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
         reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
+        polls_by_message = await fetch_polls_grouped(pool, [r["id"] for r in rows], user.id)
         return {
             "items": [
                 _message_out(
                     r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
-                    reactions_by_message.get(r["id"]),
+                    reactions_by_message.get(r["id"]), polls_by_message.get(r["id"]),
                 )
                 for r in rows
             ],
@@ -337,11 +343,12 @@ async def list_messages(
     blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
     attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
     reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
+    polls_by_message = await fetch_polls_grouped(pool, [r["id"] for r in rows], user.id)
     return {
         "items": [
             _message_out(
                 r, blocks_by_message.get(r["id"]), attachments_by_message.get(r["id"]),
-                reactions_by_message.get(r["id"]),
+                reactions_by_message.get(r["id"]), polls_by_message.get(r["id"]),
             )
             for r in reversed(rows)
         ],
@@ -381,4 +388,22 @@ async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser =
         {**dict(row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
         blocks,
         attachments,
+    )
+
+
+@router.post("/{dm_id}/polls", status_code=201)
+async def create_poll(dm_id: int, body: PollInput, user: CurrentUser = Depends(require_dm_member)):
+    """新規: アンケート機能（channels.create_pollと同じ、ユーザーからの明示的な要望「チャットアプリに
+    新しくアンケート機能を付けてほしい」、2026-09-18）。DMでも参加者であれば誰でも作成できる。"""
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        message_row, poll_payload = await create_poll_message(
+            conn, channel_id=None, dm_id=dm_id, sender_user_id=user.id, poll=body,
+        )
+    asyncio.create_task(
+        push_sender.notify_dm_message(dm_id, user.id, user.name, body.question, [], f"/dms/{dm_id}")
+    )
+    return _message_out(
+        {**dict(message_row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
+        poll=poll_payload,
     )

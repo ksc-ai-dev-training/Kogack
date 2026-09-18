@@ -166,6 +166,14 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
     mutate(state.current.messages, { revalidate: false })
   }
 
+  // アンケート（T-29、A-75と同様の考え方）の投票・締め切りをその場反映する。vote/close両APIとも
+  // 更新後のpoll payloadをレスポンスに含めるため、それをそのまま反映するだけでよい
+  const updateMessagePoll = (messageId: string, poll: Message['poll']) => {
+    if (!state.current) return
+    state.current.messages = state.current.messages.map((m) => (m.id === messageId ? { ...m, poll } : m))
+    mutate(state.current.messages, { revalidate: false })
+  }
+
   // 「もっと古いメッセージを読み込む」（ユーザーからの明示的な要望、2026-09-15）。現在読み込み済みの
   // 一番古い発言のcreated_atを基準に、それより前の発言をlimit件取得してその手前へ追加する
   // （A-10/A-18のbeforeパラメータ）。sinceによる新着ポーリングとは独立した末端（古い方）の操作
@@ -196,6 +204,7 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
   return {
     messages: data ?? [], error, isLoading, mutate,
     bumpThreadReplyCount, removeMessage, decrementThreadReplyCount, updateMessageReactions, updateMessage,
+    updateMessagePoll,
     hasOlder, loadingOlder, loadOlder,
   }
 }

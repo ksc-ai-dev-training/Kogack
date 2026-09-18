@@ -133,3 +133,27 @@ export async function createCustomEmoji(name: string, imageUrl: string): Promise
     body: JSON.stringify({ name, image_url: imageUrl }),
   })
 }
+
+// アンケート機能（ユーザーからの明示的な要望「チャットアプリに新しくアンケート機能を付けて
+// ほしい」、2026-09-18）。作成はチャンネル・DMそれぞれの投稿系エンドポイントを叩く（アンケートは
+// 「新規発言として投稿する」操作のため）ので、basePathを受け取る形にした（useMessages.tsの
+// basePath方式と同じ考え方）。投票・締め切りはpoll_idを直接指定する独立エンドポイント。
+export async function createPoll(
+  basePath: string, question: string, options: string[],
+): Promise<import('../types').Message> {
+  return apiFetch(`${basePath}/polls`, {
+    method: 'POST',
+    body: JSON.stringify({ question, options: options.map((label) => ({ label })) }),
+  })
+}
+
+export async function votePoll(pollId: string, optionId: string): Promise<import('../types').Poll> {
+  return apiFetch(`/api/polls/${pollId}/vote`, {
+    method: 'POST',
+    body: JSON.stringify({ option_id: optionId }),
+  })
+}
+
+export async function closePoll(pollId: string): Promise<import('../types').Poll> {
+  return apiFetch(`/api/polls/${pollId}/close`, { method: 'POST' })
+}
