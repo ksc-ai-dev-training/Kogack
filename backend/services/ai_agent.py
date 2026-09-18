@@ -317,15 +317,34 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
 # 部分一致から、実際に依頼として使われる限られた活用パターン（て形・「お願い」）への一致へ絞った。
 _SUMMARIZE_REQUEST_PATTERNS = ("要約して", "要約をお願い", "要約お願い")
 
+# バグ修正（2026-09-18、AIの操作マニュアル理解度を体系的に検証する中で発見）: 「要約するには」を
+# 除外しただけでは不十分で、「要約してもらう方法を教えてください」「要約してもらうにはどうすれば
+# いいですか」のように、て形の「要約して」自体は含みつつ「もらう／くれる」に続けて「方法」「には」で
+# 方法を尋ねる構文全体がある場合も、実際には要約の実行依頼ではなく機能の使い方を尋ねる質問である
+# （実際にこの言い回しへ実機で問い合わせたところ、要約が意図せず実行され、その生成過程の断片が
+# そのまま返信されてしまう不具合を確認した）。パターン一致した直後（最大12文字）に
+# 「(もらう|くれる|もらえる)?(には|方法)」という方法・手段を尋ねる続きが来る場合は除外する。
+_SUMMARY_METHOD_QUESTION_RE = re.compile(r"^(?:もらう|くれる|もらえる)?(?:には|方法)")
+
 
 def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
     """本文からメンション記法を取り除いたうえで、実際に要約を依頼する表現（_SUMMARIZE_REQUEST_PATTERNS）
     が含まれるかだけを見る、detect_mentionと同じ素朴な文字列一致（LLMの判断に依存しない）。
     「まとめて」等のより曖昧な言い回しは日常会話（雑談の「まとめ」等）との誤検知が多いため対象外とし、
     比較的一意な「要約」という語に絞ったうえで、さらに依頼を表す活用（て形・お願い）のみに限定する
-    （「要約するには」のような方法を尋ねる質問を誤って要約実行と扱わないため）"""
+    （「要約するには」のような方法を尋ねる質問を誤って要約実行と扱わないため）。さらに、て形に
+    一致した直後が「もらう方法」「もらうには」のように方法・手段を尋ねる続きになっている場合も
+    除外する（_SUMMARY_METHOD_QUESTION_RE、上記コメント参照）"""
     text = body.replace(f"@{persona_name}", "")
-    return any(pattern in text for pattern in _SUMMARIZE_REQUEST_PATTERNS)
+    for pattern in _SUMMARIZE_REQUEST_PATTERNS:
+        idx = text.find(pattern)
+        if idx == -1:
+            continue
+        tail = text[idx + len(pattern): idx + len(pattern) + 12]
+        if _SUMMARY_METHOD_QUESTION_RE.match(tail):
+            continue
+        return True
+    return False
 
 
 # 要約の対象期間指定（「今月分の要約して」「直近10日間分の要約して」）への対応（ユーザーからの
