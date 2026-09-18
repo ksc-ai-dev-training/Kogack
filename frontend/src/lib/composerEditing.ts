@@ -474,3 +474,138 @@ export function normalizeInvariants(root: HTMLElement): void {
   removeStrayEmptyBr(root)
   root.normalize()
 }
+
+// 書式のライブプレビュー（ユーザーからの明示的な要望「太字とか下線とかに変更する機能があるが、
+// メッセージ送信後だけでなく、入力している段階でどのような見た目になるのか見られるようにしたい」）。
+// 2026-09-10の書式ツールバー実装時点では「入力のたびにスタイル付きノードをDOMツリー全体で
+// 差分再構築する処理は自前contentEditable実装で最もバグりやすい」という理由でスコープ外に
+// していた（Composer.tsx冒頭のメンションに関する同種の判断と同じ理由）が、書式プレビューは
+// メンションと異なり「本文中の任意の位置に既に存在する記法パターンを検出する」性質そのものが
+// 本質的に全文スキャンを要する問題であるため、差分更新ではなく「常に全体を作り直す」設計にして
+// リスクを抑えた: 呼ばれるたびに(1)自分が過去に挿入した書式ラッパー要素だけを全て解除して
+// プレーンな状態に戻し（原子絵文字img・メンションspanはノードごと移動するだけで再生成しない）、
+// (2) MessageList.tsx（送信後の表示）と全く同じ正規表現・優先度（コード＞太字/斜体/下線/取消線）で
+// 完成した記法パターンだけを検出し、(3) 該当範囲をRange.extractContents()で抽出→スタイル付き
+// 要素で包んで戻す。マーカー文字（**・_・++・~~）はテキストとして残したまま範囲全体を
+// スタイルする（Slackのように確定後だけマーカーを消す方式は、隠す/戻すためのオフセット管理が
+// 追加で必要になり複雑さ・リスクが増すため見送った、シンプルな設計判断）。@メンション・URL
+// 自動リンク・名前付きリンクは対象外のまま（メンションは既存の「挿入時点のみハイライト」方式を
+// 維持し継続的な全文再スキャンをしない設計を崩さない。リンクは専用ポップアップで確定前に
+// テキスト/URLが見えるため「入力中にどう見えるか分からない」という今回の要望の対象外と判断）。
+// 箇条書き（行頭「- 」）も対象外（行頭に「- 」という記法自体が既に見た目として自己説明的であり、
+// スタイル変化の予測が必要な太字・斜体・下線・取消線・コードとは性質が異なるため）。
+//
+// unwrap→rewrapは文字の追加・削除を一切行わない（ラッパー要素の付け外しのみ）ため、
+// domToPlainText(root)が返すプレーンテキストの長さ・内容は一切変化しない。したがって
+// getSelectionOffsets/setSelectionOffsetsが使う「プレーンテキストオフセット」は
+// unwrap前後で同じ意味を保ち続け、呼び出し前に保存したオフセットをそのまま呼び出し後に
+// 復元するだけでカーソル位置を正しく保てる（新しいオフセット変換ロジックを発明する必要が無い）。
+
+const LIVE_FORMAT_ATTR = 'data-live-format'
+
+// MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEX/BOLD_REGEX/ITALIC_REGEX/UNDERLINE_REGEX/
+// STRIKE_REGEXと全く同じ定義（送信後の見た目と入力中のプレビューを一致させるため）
+const LIVE_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
+const LIVE_INLINE_CODE_REGEX = /`([^`\n]+)`/g
+const LIVE_BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
+const LIVE_STRIKE_REGEX = /~~([\s\S]+?)~~/g
+const LIVE_ITALIC_REGEX = /_([\s\S]+?)_/g
+const LIVE_UNDERLINE_REGEX = /\+\+([\s\S]+?)\+\+/g
+
+interface LiveFormatCandidate {
+  start: number
+  end: number
+  priority: number
+  tagName: string
+  kind: string
+  className: string
+}
+
+const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-code-text'
+
+/** MessageList.tsxのrenderInlineSegmentと同じ優先度付き重なり解決（コード＞太字/斜体/下線/取消線）。
+ * 送信後の表示と異なりメンション・URL・名前付きリンクは対象外（上記コメント参照）。 */
+function collectLiveFormatCandidates(text: string): LiveFormatCandidate[] {
+  const candidates: LiveFormatCandidate[] = []
+  for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 0, tagName: 'code', kind: 'code-block', className: CODE_CLASSNAME })
+  }
+  for (const m of text.matchAll(LIVE_INLINE_CODE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 0, tagName: 'code', kind: 'code', className: CODE_CLASSNAME })
+  }
+  for (const m of text.matchAll(LIVE_BOLD_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 'strong', kind: 'bold', className: 'font-bold' })
+  }
+  for (const m of text.matchAll(LIVE_ITALIC_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 'em', kind: 'italic', className: 'italic' })
+  }
+  for (const m of text.matchAll(LIVE_UNDERLINE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 'u', kind: 'underline', className: 'underline' })
+  }
+  for (const m of text.matchAll(LIVE_STRIKE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 's', kind: 'strike', className: 'line-through' })
+  }
+  candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
+  const accepted: LiveFormatCandidate[] = []
+  for (const c of candidates) {
+    if (accepted.some((a) => c.start < a.end && a.start < c.end)) continue
+    accepted.push(c)
+  }
+  accepted.sort((a, b) => a.start - b.start)
+  return accepted
+}
+
+/** [start,end)をタグ名・クラスで包む（deleteRangeReturningCollapsedと異なり中身は破棄せず
+ * Range.extractContents()で保持したまま新しい親要素へ移す。原子絵文字img・メンションspanが
+ * 範囲内にあっても、ノードとして移動するだけで再生成しないため既存の属性・イベント紐付けは
+ * 保たれる）。 */
+function wrapRangeInElement(root: HTMLElement, start: number, end: number, tagName: string, className: string, kind: string): void {
+  if (start >= end) return
+  const startPos = resolveOffset(root, start)
+  const endPos = resolveOffset(root, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+  const wrapper = document.createElement(tagName)
+  wrapper.setAttribute(LIVE_FORMAT_ATTR, kind)
+  wrapper.className = className
+  wrapper.appendChild(fragment)
+  range.insertNode(wrapper)
+}
+
+/** 過去にsyncLiveFormattingが挿入した書式ラッパー要素だけを解除し、中身（テキストノード・
+ * 原子絵文字img・メンションspan）をその場に残す（`unwrap`＝親を消して子をその位置へ展開する
+ * 標準的なDOM操作。子ノードの中身自体は一切変更しない）。 */
+function unwrapLiveFormatting(root: HTMLElement): void {
+  const wrappers = root.querySelectorAll(`[${LIVE_FORMAT_ATTR}]`)
+  wrappers.forEach((wrapper) => {
+    const parent = wrapper.parentNode
+    if (!parent) return
+    while (wrapper.firstChild) parent.insertBefore(wrapper.firstChild, wrapper)
+    parent.removeChild(wrapper)
+  })
+}
+
+/** 書式のライブプレビューを最新化する。ネイティブ入力・IME確定・ツールバー操作・メンション/
+ * 絵文字挿入・貼り付け・下書き復元など、本文が変わりうるあらゆる箇所の後に呼ぶ想定
+ * （Composer.tsxのrefreshEditorHousekeeping、実質すべての変更経路を1箇所に集約している）。
+ * 呼ぶたびに全体を作り直す設計のため冪等（何度呼んでも同じ結果になる）。 */
+export function syncLiveFormatting(root: HTMLElement): void {
+  const preserved = getSelectionOffsets(root)
+  unwrapLiveFormatting(root)
+  root.normalize()
+  const text = domToPlainText(root)
+  const matches = collectLiveFormatCandidates(text)
+  for (const m of matches) {
+    wrapRangeInElement(root, m.start, m.end, m.tagName, m.className, m.kind)
+  }
+  root.normalize()
+  if (preserved) setSelectionOffsets(root, preserved.start, preserved.end)
+}

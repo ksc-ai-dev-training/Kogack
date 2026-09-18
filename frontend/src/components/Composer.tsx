@@ -22,6 +22,7 @@ import {
   ensureTrailingNewlineCaretMarker,
   removeCaretMarkerFromDom,
   scrollCaretIntoView,
+  syncLiveFormatting,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
@@ -271,8 +272,11 @@ export default function Composer({
       const draft = getDraft(draftKey)
       if (draft.body) root.replaceChildren(deserializeFromText(draft.body, customEmoji))
     }
-    setHasContent(domToPlainText(root).trim().length > 0)
-    resizeEditor()
+    // setHasContent+resizeEditorを直接呼ぶのではなくrefreshEditorHousekeeping経由にする
+    // （バグ修正: 直接呼んでいた当時はここが書式のライブプレビュー同期を経由せず、復元直後の
+    // 下書きに「**太字**」等が含まれていてもリロード直後は装飾なしのプレーンテキストのまま
+    // 表示され、次の1文字入力まで反映されない不具合があった。実機Playwrightで発見・修正）
+    refreshEditorHousekeeping()
     // マウント時に1回だけ実行する（draftKey・customEmojiは意図的に依存から外している。
     // customEmojiが後から読み込まれた場合の追いかけ変換は下のuseEffectで別途行う）
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -295,8 +299,7 @@ export default function Composer({
     const currentText = domToPlainText(root)
     if (!currentText) return
     root.replaceChildren(deserializeFromText(currentText, customEmoji))
-    setHasContent(domToPlainText(root).trim().length > 0)
-    resizeEditor()
+    refreshEditorHousekeeping()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customEmojiLoading])
 
@@ -315,9 +318,15 @@ export default function Composer({
 
   // 純粋な「見た目・下書き反映の更新」だけを行う（hasUserEditedRefは変更しない）。マウント時の
   // 下書き復元・customEmoji読み込み後の追いかけ変換など、利用者の操作に起因しないDOM変更から呼ぶ。
+  // 本文が変わりうる経路（ネイティブ入力・ツールバー操作・メンション/絵文字挿入・貼り付け・
+  // 下書き復元・追いかけ変換）がすべてこの関数を通るため、書式のライブプレビュー
+  // （ユーザーからの明示的な要望「太字とか下線とかを入力している段階で見られるようにしたい」）の
+  // 同期もここ1箇所に集約する。resizeEditor（scrollCaretIntoViewを内包）より前に呼ぶことで、
+  // ライブプレビュー適用後の最終的なキャレット位置を基準にスクロール追従が計算されるようにする。
   const refreshEditorHousekeeping = () => {
     const root = editorRef.current
     if (!root) return
+    syncLiveFormatting(root)
     setHasContent(domToPlainText(root).trim().length > 0)
     setContentVersion((v) => v + 1)
     resizeEditor()
