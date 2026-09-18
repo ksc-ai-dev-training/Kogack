@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ApiError, createCustomEmoji, uploadIcon } from '../lib/api'
 import { useOverlayClose } from '../hooks/useOverlayClose'
@@ -20,6 +20,16 @@ export function AddCustomEmojiModal({ onClose, onCreated }: { onClose: () => voi
   const [name, setName] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 選択したファイルのプレビュー用Object URL（ProfileEditModal.tsxと同じパターン。プレビュー生成は
+  // レンダー中に行い、破棄だけをuseEffectのクリーンアップに任せる）
+  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
 
   const submit = async () => {
     if (!name.trim()) {
@@ -60,11 +70,30 @@ export function AddCustomEmojiModal({ onClose, onCreated }: { onClose: () => voi
         />
         <label className="mb-1 block text-[11.5px] font-semibold text-ink-muted">画像（JPEG・PNG・WebP、5MBまで）</label>
         <input
+          ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="mb-4 w-full text-[12.5px] text-ink"
+          className="hidden"
         />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="mb-2 rounded-md bg-accent-600 px-3 py-1.5 text-[12.5px] font-semibold text-white"
+        >
+          画像をアップロード
+        </button>
+        <div className="mb-4">
+          {file ? (
+            <div className="flex items-center gap-2 rounded-md border border-line bg-surface-subtle px-2.5 py-1.5">
+              <img src={previewUrl ?? undefined} alt="" className="h-6 w-6 flex-none rounded object-cover" />
+              <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-ink">{file.name}</span>
+              <span className="flex-none text-[10.5px] text-ink-subtle">{(file.size / 1024).toFixed(0)}KB</span>
+            </div>
+          ) : (
+            <span className="text-[11px] text-ink-subtle">まだ選択されていません</span>
+          )}
+        </div>
         <div className="flex justify-end gap-2">
           <button
             type="button"
