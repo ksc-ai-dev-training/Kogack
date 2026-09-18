@@ -204,6 +204,7 @@ export default function Composer({
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const sendingRef = useRef(false)
+  const emojiPopoverRef = useRef<HTMLDivElement>(null)
   // 下書き復元直後、まだcustomEmojiの読み込み（非同期SWR）が完了していない場合に:name:が
   // プレーンテキストのまま残る問題への対処（詳細はcustomEmojiのuseEffect参照）。利用者が
   // 既に編集を始めていたら追いかけ変換で上書きしないためのフラグ。afterMutate()（ユーザー
@@ -676,6 +677,39 @@ export default function Composer({
     setEmojiOpen((v) => !v)
   }
 
+  // ユーザーからの明示的な要望「絵文字ピッカーを開いた状態で、ピッカー外の部分をクリックすると
+  // 閉じるようにしてほしい」。MessageList.tsxのEmojiGridPopoverと同じ「document全体のmousedownを
+  // 監視し、ピッカー自身のref外へのクリックなら閉じる」パターンを踏襲する（開いている間だけ
+  // リスナーを登録し、それ以外は登録しない）。絵文字追加モーダル（document.bodyへの別ポータル、
+  // ピッカーのref外）を開いている間はこのモーダル内クリックを誤って「外側」と判定しないよう除外する。
+  //
+  // 実機Playwright検証で、開いた直後に自分自身が即座に閉じてしまう不具合を発見した。原因は
+  // トグルボタン自体がonMouseDown（contentEditableのフォーカスを失わせないため）で開いており、
+  // このポップオーバーを開いた瞬間の再レンダー・エフェクト実行が、EmojiGridPopover（トグルが
+  // onClickのため無関係）と異なり、まだ完全にバブリングし終えていない「同一のmousedown」の
+  // 続きの中で（Reactの同期的なdiscrete更新フラッシュにより）行われてしまうこと——ここで
+  // documentへリスナーを登録すると、登録した時点でまだdocumentに到達していない進行中の同じ
+  // イベントの続きを自分自身が受け取ってしまい、「ボタンの外側（=ボタン自身は絵文字ピッカー
+  // divの外）がクリックされた」と誤判定して即座に閉じていた。setTimeout(0)でリスナー登録を
+  // 次のタスクへ遅延させ、開くきっかけとなったmousedownイベント自体の完全な完了後に初めて
+  // 有効化することで解消した。
+  useEffect(() => {
+    if (!emojiOpen) return
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (showAddEmojiModal) return
+      if (emojiPopoverRef.current && !emojiPopoverRef.current.contains(e.target as Node)) {
+        setEmojiOpen(false)
+      }
+    }
+    const timer = window.setTimeout(() => {
+      document.addEventListener('mousedown', onDocMouseDown)
+    }, 0)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('mousedown', onDocMouseDown)
+    }
+  }, [emojiOpen, showAddEmojiModal])
+
   // バグ調査（ユーザーからの報告「たまにAIが二回応答するときがある」）: 本番DBを実際に調査した結果、
   // AI側の重複ではなく、同一の人間の発言そのものが数百ミリ秒の間に最大6回連続で投稿されており、
   // それぞれが独立してAI応答を起動していたことが判明した（各AI応答は互いに独立した正常な処理で、
@@ -863,7 +897,9 @@ export default function Composer({
         </div>
       )}
       {emojiOpen && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[280px] w-[314px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+        <div
+          ref={emojiPopoverRef}
+          className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[280px] w-[314px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
           {/* 既存（Unicode）の絵文字とカスタム絵文字を見出しで分けて表示する（ユーザーからの
               明示的な要望「既存の絵文字と、新しく作った絵文字を分けて表示させたい」）。col-span-8の
               見出し行を挟むと、8列グリッドの自動配置により後続タイルが自然に次の行から始まる */}
