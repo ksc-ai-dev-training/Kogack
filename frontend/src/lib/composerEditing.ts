@@ -60,10 +60,76 @@ function createMentionSpan(displayText: string): HTMLSpanElement {
   return span
 }
 
+// バグ修正（ユーザーからの報告「Enterを押して11行目以降になると、改行するとカーソルがいる行が
+// 画面に見えなくなる」を調査中に発見）: 本文の末尾がテキストノード内の孤立した"\n"で終わる
+// （＝Enterキーで新しい行を作った直後、まだ何も入力していない状態）とき、そのすぐ後ろに何の
+// 実体も無いと、ブラウザはその位置のRange.getClientRects()を空の矩形として返す（実機で
+// {top:0,left:0,width:0,height:0}を確認済み）。これにより2つの不具合が同時に起きる:
+// (1) 次に入力した文字が期待した新しい行ではなく直前の行の末尾に挿入されてしまう（実機で
+// "a"+Enter+"b"の入力が"ab\n"になってしまうことを確認済み。何行も改行を続けるとEnterのたびに
+// 交互に発生し、結果的に「1行増えるたびにスクロールしないとカーソルが見えない」という
+// 報告そのものの原因にもなっていた——空の矩形のためスクロール追従の基準座標も計算できない）。
+// 空のspan要素等、幅を持たない要素を後ろに置くだけでは同じく空の矩形のままで効果が無いことを
+// 実機検証で確認済みで、実際に計測対象となる「見えない1文字」（U+200B ゼロ幅スペース）を
+// 置いて初めてブラウザが実在の行として認識することを確認した（詳細はensureTrailingNewlineCaretMarker
+// 参照）。このマーカーは本文の一部として扱わない：domToPlainTextの戻り値・保存される下書き・
+// 送信されるメッセージ本文のいずれにも含まれない（下記CARET_MARKERの用途を参照）。
+// MessageList.tsxのEMOJI_ZWJ/EMOJI_VARIATION_SELECTORと同じくString.fromCharCodeで生成する
+// （ソースコード上に実際の見えない文字を直接埋め込むと、エディタ・diff上で気づかれにくく
+// 事故のもとになるため）
+const CARET_MARKER = String.fromCharCode(0x200b) // ゼロ幅スペース（U+200B）
+
+function stripCaretMarker(text: string): string {
+  return text.includes(CARET_MARKER) ? text.split(CARET_MARKER).join('') : text
+}
+
+/** 本文の末尾が改行で終わっている場合にのみ、その直後へCARET_MARKERを1文字追加する
+ * （既存のマーカーは先に取り除いてから再判定するため、複数回呼んでも安全＝冪等）。
+ * Composer.tsxのEnterキー処理（通常の改行のみ。「\n- 」で始まる箇条書き継続は末尾に実在の
+ * 文字列が続くためこの問題自体が起きず対象外）から、\n挿入の直後に呼ぶ。 */
+export function ensureTrailingNewlineCaretMarker(root: HTMLElement): void {
+  removeCaretMarkerFromDom(root)
+  const last = root.lastChild
+  if (last && last.nodeType === Node.TEXT_NODE && (last as Text).data.endsWith('\n')) {
+    ;(last as Text).data += CARET_MARKER
+  }
+}
+
+/** CARET_MARKERをDOMから取り除く（位置を問わず全テキストノードから）。ネイティブな入力
+ * イベントのたびに呼び、前回のEnterで置いたマーカーが不要になった時点（＝実際に次の文字が
+ * 入力された時点）で速やかに片付ける。
+ *
+ * バグ修正（実機Playwright検証で発見）: 当初はText.dataへ直接代入するだけの実装だったが、
+ * 現在の選択範囲（キャレット）がまさにそのテキストノードを指している状態でText.dataへ
+ * 直接代入すると、ブラウザがそのSelectionのanchorOffset/focusOffsetを0へリセットしてしまう
+ * ことを実機で確認した（Range.deleteContents()等のRange APIを介さない生のdata書き換えは、
+ * 生きたSelectionの境界点を安全に追従調整しない）。これにより「aを入力→Enter→bを入力→
+ * 再びEnter」を連続で行うと、2回目のEnterが正しい位置（"a\nb"の末尾）ではなく本文の先頭に
+ * 改行を挿入してしまう不具合が実際に発生した。対処として、削除の前後で選択範囲を
+ * 自前のオフセットベースAPI（getSelectionOffsets/setSelectionOffsets）で明示的に保存・
+ * 復元する（マーカーが実際に含まれる場合のみ、かつrootの外に選択が無い場合のみ）。 */
+export function removeCaretMarkerFromDom(root: HTMLElement): void {
+  if (!root.textContent || !root.textContent.includes(CARET_MARKER)) return
+  const preserved = getSelectionOffsets(root)
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = node as Text
+      if (t.data.includes(CARET_MARKER)) t.data = stripCaretMarker(t.data)
+      return
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    for (const child of Array.from(node.childNodes)) walk(child)
+  }
+  for (const child of Array.from(root.childNodes)) walk(child)
+  if (preserved) setSelectionOffsets(root, preserved.start, preserved.end)
+}
+
 /** シリアライズ: DOM→プレーンテキスト。テキストノードはそのまま、原子絵文字imgは`:name:`へ、
  * メンションspanは中身のテキストをそのまま透過する（spanは装飾のみで実体はプレーンテキストの
  * ため、activeMentionsInの`text.includes(...)`判定は従来どおりこの出力に対して機能する）。
- * 想定外の<br>が紛れ込んだ場合（外部リッチ貼り付けの取りこぼし等への保険）も改行として扱う。 */
+ * 想定外の<br>が紛れ込んだ場合（外部リッチ貼り付けの取りこぼし等への保険）も改行として扱う。
+ * CARET_MARKER（上記）はどの位置にあっても出力から除外する（利用者が実際に入力した文字では
+ * ないため、送信・下書き保存・文字数カウントのいずれにも含めない）。 */
 export function domToPlainText(root: Node): string {
   let text = ''
   const walk = (node: Node) => {
@@ -83,7 +149,7 @@ export function domToPlainText(root: Node): string {
     for (const child of Array.from(node.childNodes)) walk(child)
   }
   for (const child of Array.from(root.childNodes)) walk(child)
-  return text
+  return stripCaretMarker(text)
 }
 
 /** テキストを絵文字ショートコード解釈ありでDocumentFragmentへ変換する。下書き復元と、
@@ -302,6 +368,31 @@ export function insertTextAfterNode(node: Node, text: string): void {
   if (!sel) return
   sel.removeAllRanges()
   sel.addRange(range)
+}
+
+/** カーソル（現在の選択範囲の先頭）が入力欄の可視領域内に収まるよう、必要な分だけ
+ * el.scrollTopを調整する（textareaがブラウザ標準で行っていた「キャレット追従スクロール」を
+ * contentEditableで自前実装したもの）。バグ修正（ユーザーからの報告「Enterを押して11行目
+ * 以降になると、改行するたびに下の行が見えなくなりスクロールが必要」）: MAX_ROWS超過後は
+ * el自体がoverflow-y:autoでスクロール可能になるが、単に高さを再計算するだけでは新しく
+ * 増えた行がスクロール範囲の外に隠れたままになる。選択範囲がel内に無い、またはキャレットの
+ * 矩形が計測できない（CARET_MARKER導入前は末尾の孤立した改行で空の矩形になっていた既知の
+ * 不具合、上記参照）場合は何もしない。 */
+export function scrollCaretIntoView(el: HTMLElement): void {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return
+  const range = sel.getRangeAt(0)
+  if (!el.contains(range.startContainer)) return
+  const caretRange = range.cloneRange()
+  caretRange.collapse(true)
+  const rect = caretRange.getClientRects()[0]
+  if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.left === 0)) return
+  const elRect = el.getBoundingClientRect()
+  if (rect.bottom > elRect.bottom) {
+    el.scrollTop += rect.bottom - elRect.bottom
+  } else if (rect.top < elRect.top) {
+    el.scrollTop -= elRect.top - rect.top
+  }
 }
 
 /** [start,end)を原子絵文字ノードで置き換える。ライブショートコード変換・絵文字ピッカー選択の

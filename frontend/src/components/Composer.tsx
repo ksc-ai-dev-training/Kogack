@@ -18,6 +18,9 @@ import {
   enforceMaxLength,
   removeStrayEmptyBr,
   normalizeInvariants,
+  ensureTrailingNewlineCaretMarker,
+  removeCaretMarkerFromDom,
+  scrollCaretIntoView,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
@@ -225,6 +228,15 @@ export default function Composer({
   // タイミング問題を気にしなくてよくなり単純化した）。resizeでel.style.height='auto'にすると
   // 一瞬scrollTopがリセットされる既知の挙動（過去のバグ修正コメント参照）は変わらず存在するため、
   // 保存→復元は引き続き必要。
+  //
+  // バグ修正（ユーザーからの報告「Enterを押して11行目以降になると、改行するたびに下の行が
+  // 画面に見えなくなり、一行増えるたびにスクロールして表示させなければならない」）: 上記の
+  // prevScrollTop保存→復元は「リサイズ自体で起きる望まない位置ずれ」を防ぐためのものだが、
+  // これをそのまま復元するだけでは、新しく増えた行（キャレットの位置）がスクロール範囲の
+  // 外に隠れたままになってしまう。scrollCaretIntoView（composerEditing.ts）でキャレットの
+  // 実際の位置を確認し、必要な分だけさらにスクロールを追従させる（textareaがブラウザ標準で
+  // 行っていた「キャレット追従スクロール」の自前実装）。11行目以降がスクロールになること
+  // 自体は既存の仕様のまま維持する（MAX_ROWSは変更しない）。
   const resizeEditor = () => {
     const el = editorRef.current
     if (!el) return
@@ -239,6 +251,7 @@ export default function Composer({
     el.style.height = `${next}px`
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
     el.scrollTop = prevScrollTop
+    scrollCaretIntoView(el)
   }
 
   // マウント時1回だけ下書きを復元する（Composerは会話が変わるたびkey propで再マウントされる
@@ -331,6 +344,10 @@ export default function Composer({
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
     const root = editorRef.current
     if (!root) return
+    // 前回のEnterキー処理が置いたCARET_MARKER（composerEditing.ts参照）が残っていれば、
+    // 実際に次の文字が入力されたこの時点で速やかに片付ける（domToPlainTextは呼び出しの
+    // たびに除外するため安全ではあるが、DOM上に残したままにしない）
+    removeCaretMarkerFromDom(root)
     const native = e.nativeEvent as InputEvent
     if (native.inputType === 'historyUndo' || native.inputType === 'historyRedo') {
       normalizeInvariants(root)
@@ -837,7 +854,17 @@ export default function Composer({
           return
         }
       }
-      if (offs) replaceRangeWithText(root, offs.start, offs.end, '\n')
+      if (offs) {
+        const pos = replaceRangeWithText(root, offs.start, offs.end, '\n')
+        // バグ修正（ユーザーからの報告、composerEditing.tsのensureTrailingNewlineCaretMarker
+        // コメント参照）: この\nが今まさに本文の末尾になった場合、ブラウザがその直後の
+        // キャレット位置を正しく計測できず、次に入力した文字が新しい行ではなく直前の行の
+        // 末尾に挿入されてしまう不具合があった。挿入直後にマーカーを置き直し、カーソル位置も
+        // 明示的に再設定する（replaceRangeWithText自身も内部でカーソルを設定するが、直後の
+        // DOM変更でその設定が古くなるため、確定した本文オフセットposを使って再設定する）
+        ensureTrailingNewlineCaretMarker(root)
+        setSelectionOffsets(root, pos)
+      }
       afterMutate()
     }
   }
