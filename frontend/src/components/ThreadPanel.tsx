@@ -270,10 +270,17 @@ export default function ThreadPanel({
               </div>
               <div
                 className={`whitespace-pre-wrap break-words text-ink ${
-                  isEmojiOnlyBody(parentMessage.body) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
+                  isEmojiOnlyBody(parentMessage.body, customEmoji) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
                 }`}
               >
-                {renderMessageBody(parentMessage.body, parentMessage.blocks, members, aiPersonaName, customEmoji)}
+                {renderMessageBody(
+                  parentMessage.body,
+                  parentMessage.blocks,
+                  members,
+                  aiPersonaName,
+                  customEmoji,
+                  isEmojiOnlyBody(parentMessage.body, customEmoji),
+                )}
               </div>
               {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (
                 // F-30（MessageList.tsxと同じ）。元発言はMessageListを経由せずここで個別に描画しているため

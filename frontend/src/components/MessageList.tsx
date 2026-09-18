@@ -60,6 +60,11 @@ function formatDaySeparator(iso: string) {
 // かえって読みにくくなるため、EMOJI_ONLY_MAX_COUNT件を超える場合は対象外（通常サイズのまま）にする。
 // 既知の限界: 数字＋U+FE0F＋U+20E3（囲み文字）で構成されるキーキャップ絵文字（1️⃣等）は数字が
 // \p{Extended_Pictographic}に含まれないため判定対象外になる（この用途では稀なケースとして許容）
+// カスタム絵文字（`:name:`、2026-09-17実装）も既存のUnicode絵文字と同じ扱いにする（ユーザーからの
+// 明示的な要望「カスタム絵文字も既存のスタンプと同じようにスタンプだけで送信した場合に大きく
+// 表示されてほしい」、2026-09-18）。登録済みの`:name:`だけを一旦本文から取り除いてから残りを
+// 既存の判定にかけ、取り除いた件数を絵文字数へ合算する（未登録の`:foo:`はそのまま文字列として
+// 残り、通常の絵文字判定に混じって不一致となるため対象外のまま）
 const EMOJI_ZWJ = String.fromCharCode(0x200d) // ゼロ幅結合子（🙇‍♂️等の結合絵文字に使われる）
 const EMOJI_VARIATION_SELECTOR = String.fromCharCode(0xfe0f) // 異体字セレクタ（❤️等に使われる）
 const EMOJI_ONLY_REGEX = new RegExp(
@@ -69,11 +74,24 @@ const EMOJI_ONLY_REGEX = new RegExp(
 const EMOJI_COUNT_REGEX = /\p{Extended_Pictographic}/gu
 const EMOJI_ONLY_MAX_COUNT = 10
 
-export function isEmojiOnlyBody(text: string): boolean {
+export function isEmojiOnlyBody(text: string, customEmoji: CustomEmoji[] = []): boolean {
   const trimmed = text.trim()
-  if (!trimmed || !EMOJI_ONLY_REGEX.test(trimmed)) return false
-  const count = (trimmed.match(EMOJI_COUNT_REGEX) ?? []).length
-  return count > 0 && count <= EMOJI_ONLY_MAX_COUNT
+  if (!trimmed) return false
+  let customCount = 0
+  let withoutCustom = trimmed
+  if (customEmoji.length > 0) {
+    const names = new Set(customEmoji.map((e) => e.name.toLowerCase()))
+    withoutCustom = trimmed.replace(/:([a-zA-Z0-9_+-]{2,24}):/g, (whole, name: string) => {
+      if (!names.has(name.toLowerCase())) return whole
+      customCount += 1
+      return ''
+    })
+  }
+  const remaining = withoutCustom.trim()
+  if (remaining !== '' && !EMOJI_ONLY_REGEX.test(remaining)) return false
+  const unicodeCount = (remaining.match(EMOJI_COUNT_REGEX) ?? []).length
+  const total = unicodeCount + customCount
+  return total > 0 && total <= EMOJI_ONLY_MAX_COUNT
 }
 
 function DaySeparator({ label }: { label: string }) {
@@ -225,6 +243,7 @@ function renderInlineSegment(
   aiPersonaName: string | undefined,
   keyPrefix: string,
   customEmoji: CustomEmoji[],
+  jumbo = false,
 ): ReactNode[] {
   type Candidate = { start: number; end: number; priority: number; render: (key: string) => ReactNode }
   const candidates: Candidate[] = []
@@ -347,7 +366,11 @@ function renderInlineSegment(
             src={emoji.image_url}
             alt={m[0]}
             title={m[0]}
-            className="-mb-[4px] inline-block h-[22px] w-[22px] object-contain align-text-bottom"
+            className={
+              jumbo
+                ? '-mb-[9px] inline-block h-[52px] w-[52px] object-contain align-text-bottom'
+                : '-mb-[4px] inline-block h-[22px] w-[22px] object-contain align-text-bottom'
+            }
           />
         ),
       })
@@ -420,6 +443,7 @@ export function renderMessageBody(
   members?: MentionSourceMember[],
   aiPersonaName?: string,
   customEmoji: CustomEmoji[] = [],
+  jumbo = false,
 ): ReactNode {
   const mentions = (blocks ?? []).filter(
     (b): b is { block_type: 'mention'; payload: { target_user_id?: string; display_name_snapshot?: string; kind?: string }; sort_order: number } =>
@@ -461,14 +485,14 @@ export function renderMessageBody(
           <ul key={`list-${segIdx}-${lsIdx}`} className="my-1 list-disc space-y-0.5 pl-5">
             {ls.items.map((item, ii) => (
               <li key={ii}>
-                {renderInlineSegment(item, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}-li${ii}`, customEmoji)}
+                {renderInlineSegment(item, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}-li${ii}`, customEmoji, jumbo)}
               </li>
             ))}
           </ul>,
         )
       } else {
         nodes.push(
-          ...renderInlineSegment(ls.content, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}`, customEmoji),
+          ...renderInlineSegment(ls.content, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}`, customEmoji, jumbo),
         )
       }
     })
@@ -1877,10 +1901,10 @@ export default function MessageList({
                 ) : (
                   <div
                     className={`mt-0.5 whitespace-pre-wrap break-words text-ink ${
-                      isEmojiOnlyBody(m.body) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
+                      isEmojiOnlyBody(m.body, customEmoji) ? 'text-[32px] leading-snug' : 'text-[13.5px] leading-[1.75]'
                     }`}
                   >
-                    {renderMessageBody(m.body, m.blocks, members, aiPersonaName, customEmoji)}
+                    {renderMessageBody(m.body, m.blocks, members, aiPersonaName, customEmoji, isEmojiOnlyBody(m.body, customEmoji))}
                   </div>
                 )}
                 {m.sender_type === 'ai' && m.generation_status !== 'generating' && (
