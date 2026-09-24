@@ -905,15 +905,7 @@ export function syncLiveFormatting(root: HTMLElement): void {
 // あとから適用する編集のオフセットへ影響しない（既存のwrapSelectionが「終端側を先に、
 // 始端側を後に」処理しているのと同じ考え方）。
 
-// closingSequence/openingSequenceをexportしている理由（ユーザーからの報告「太字ボタンを押して
-// 何も入力しないまま2回Deleteを押すと画面に**が見えてしまう」）: 何も入力していない空の
-// マーカー対（例:「**|**」、|はカーソル）でBackspace/Deleteを押すと、閉じ／開きマーカーの
-// どちらか一方（隠しマーカーspanはcontentEditable=falseで原子的に扱われる）だけがネイティブに
-// 1回で削除されてしまい、残った側が「対になる相手を失った単独の**」としてunwrapLiveFormatting
-// 後の正規表現に一致しなくなり、隠されずそのまま可視の文字列として残ってしまう。この事故を
-// Composer.tsx側のhandleKeyDownで「空のactiveFormatsに対するBackspace/Deleteはマーカー対全体を
-// 1回の編集でまとめて削除する」形であらかじめ防ぐために、この2関数をエクスポートする。
-export function closingSequence(formats: ToggleFormatKind[]): string {
+function closingSequence(formats: ToggleFormatKind[]): string {
   return formats
     .slice()
     .reverse()
@@ -921,7 +913,7 @@ export function closingSequence(formats: ToggleFormatKind[]): string {
     .join('')
 }
 
-export function openingSequence(formats: ToggleFormatKind[]): string {
+function openingSequence(formats: ToggleFormatKind[]): string {
   return formats.map((f) => TOGGLE_FORMAT_MARKERS[f].prefix).join('')
 }
 
@@ -1051,4 +1043,78 @@ export function toggleFormatOnSelection(
     selectionStart: start + prefix.length,
     selectionEnd: end + prefix.length,
   }
+}
+
+// バグ修正（ユーザーからの報告「書式を変更してメッセージを打ち込んだ後、そのメッセージを
+// Deleteキーで一文字ずつ消していくと、書式付きの文字の手前で記号（**）が見えてしまう」）:
+// 上のtoggleFormatAtCursorの「何も入力しないまま同じボタンを押して解除」ケース（＝カーソンが
+// 開き・閉じマーカーのちょうど中間にある空の状態）は既にhandleKeyDown側の専用チェックで対応済み
+// だったが、今回の報告は別のカーソル位置——「**あああ**あああ」のようにいったん書式を解除して
+// 続けて普通の文字を打った後、末尾からBackspace/Deleteで戻ってきて閉じマーカーの直後（＝隠し
+// マーカーspanの直後）に到達したケース。隠しマーカーspanはcontentEditable=falseの原子ノード
+// なので、ネイティブなBackspace/Deleteはそこに隣接した瞬間、マーカー全体を1回の操作で丸ごと
+// 消してしまう。開き・閉じの片方だけ無くなると、残った側は正規表現で対になる相手を見つけられず
+// 隠されないまま「**」がそのまま可視化されてしまう。
+//
+// 対策: マーカーspanの直後（Backspace）・直前（Delete）にカーソルがあるときは、ネイティブの
+// 削除に任せず、マーカー自体ではなくその書式の「中身」の末尾/先頭の1文字を代わりに削除する
+// （中身が空なら開き・閉じマーカーを対でまとめて削除し、書式ごと無くす——これは実質的に
+// toggleFormatAtCursorの空マーカー解除と同じ結果になる）。マーカーspanは常に書式ラッパー要素
+// （<strong>/<em>/<u>/<s>、LIVE_FORMAT_ATTR付き）のfirstChild（開き）またはlastChild（閉じ）
+// として存在するという不変条件（wrapLiveMatch参照）を使い、正規表現の再解釈ではなく実際のDOM
+// から直接それぞれのオフセット範囲を求める（入れ子になった書式でも、その入れ子を組み立てた
+// DOM構造をそのまま信用できるため、ネストの深さを問わず正しく動く）。
+//
+// 引用（quote、LIVE_FORMAT_ATTR="quote"）の「> 」マーカーは対になる閉じマーカーが存在しない
+// 単独のマーカーのため、この問題自体が起きない（丸ごと消えても「対を失った記号」が残らず、
+// 単にその行が引用でなくなるだけで正しい）。よってこの関数の対象外とする。
+function computeElementOffset(root: HTMLElement, el: Element): { start: number; end: number } {
+  const parent = el.parentNode as Node
+  const idx = indexOfChild(el)
+  const start = domPositionToOffset(root, parent, idx)
+  return { start, end: start + textLength(el) }
+}
+
+export type DeleteDirection = 'backward' | 'forward'
+
+/** Backspace（'backward'）・Delete（'forward'）キーの押下時、カーソルが書式の隠しマーカーspanに
+ * 隣接していて、ネイティブの削除に任せると対になる相手を失ったマーカーが可視化されてしまう場合に、
+ * 代わりに削除すべきプレーンテキストの範囲を返す。該当しなければnull（呼び出し元はpreventDefault
+ * せずネイティブの挙動にそのまま任せてよい）。 */
+export function computeMarkerAwareDeletion(root: HTMLElement, direction: DeleteDirection): { start: number; end: number } | null {
+  const offs = getSelectionOffsets(root)
+  if (!offs || offs.start !== offs.end) return null
+  const cursor = offs.start
+  const markers = Array.from(root.querySelectorAll<HTMLElement>(`[${LIVE_FORMAT_MARKER_ATTR}]`))
+  for (const marker of markers) {
+    const wrapper = marker.parentElement
+    if (!wrapper) continue
+    const kind = wrapper.getAttribute(LIVE_FORMAT_ATTR) as ToggleFormatKind | 'quote' | null
+    if (!kind || kind === 'quote') continue
+    const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+    const wrapperRange = computeElementOffset(root, wrapper)
+    const contentStart = wrapperRange.start + prefix.length
+    const contentEnd = wrapperRange.end - suffix.length
+    // 中身が空（開き・閉じマーカーが隣接しているだけ）の書式は、カーソルがその間にありさえすれば
+    // Backspace/Deleteどちらでも書式ごと削除する。React側のactiveFormats（ボタンの押下状態）に
+    // 依存させない——書式を解除するボタンを押した後に空のまま放置される経路（例:
+    // 太字ボタンで空マーカーを開始→もう一度押して解除→何も打たずにBackspace）でも同じ事故が
+    // 起きるため、DOM上の実際のマーカー配置だけを根拠に判定する（同じ書式の2つのマーカーに
+    // ついてこの判定を2回行うことになるが、結果は同じなので害はない）。
+    if (contentStart === contentEnd && cursor === contentStart) {
+      return { start: wrapperRange.start, end: wrapperRange.end }
+    }
+    const isClosing = wrapper.lastChild === marker
+    const isOpening = wrapper.firstChild === marker
+    const { start: markerStart, end: markerEnd } = computeElementOffset(root, marker)
+    const hit =
+      (direction === 'backward' && isClosing && markerEnd === cursor) ||
+      (direction === 'forward' && isOpening && markerStart === cursor)
+    if (!hit) continue
+    if (contentEnd > contentStart) {
+      return direction === 'backward' ? { start: contentEnd - 1, end: contentEnd } : { start: contentStart, end: contentStart + 1 }
+    }
+    return { start: wrapperRange.start, end: wrapperRange.end }
+  }
+  return null
 }
