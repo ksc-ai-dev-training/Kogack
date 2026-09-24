@@ -503,9 +503,14 @@ export function normalizeInvariants(root: HTMLElement): void {
 // ままだが、投稿欄のライブプレビューだけは入れ子を再帰的に解決する（applyNestedFormats）。
 // コードブロック・インラインコードはマーカー隠しの対象外（フェンス自体が複数行にまたがる・
 // 中身をさらに解釈しないという既存の性質のため、マーカーを含めた範囲全体をそのままスタイル
-// する）。@メンション・URL自動リンク・名前付きリンク・箇条書き（行頭「- 」）・引用（行頭「> 」）も
-// 対象外のまま（メンションは挿入時点のみハイライトする既存方式を維持、リンクは専用ポップアップで
-// 確定前に見えるため対象外、箇条書き・引用は記法自体が既に見た目として自己説明的なため）。
+// する）。@メンション・URL自動リンク・名前付きリンク・箇条書き（行頭「- 」）は対象外のまま
+// （メンションは挿入時点のみハイライトする既存方式を維持、リンクは専用ポップアップで確定前に
+// 見えるため対象外、箇条書きは記法自体が既に見た目として自己説明的なため）。
+//
+// 引用（行頭「> 」）はユーザーからの追加要望「>を入力した時点で、送った後に出てくる灰色の線
+// みたいなものを表示させるようにしたい」を受けて対象に含めた（下記collectQuoteRanges/
+// wrapQuoteRange）。行単位のブロック構造という点で他の（文字位置ベースの）書式とは性質が
+// 異なるため、syncLiveFormatting内で別立てのパスとして処理する。
 //
 // ユーザーからの追加要望「太字、斜体、下線、取り消し線に関しては、ボタンが押されている間はその
 // 記法になり、もう一度ボタンを押すと解除される、というような仕組みにしてほしい（Wordみたいな
@@ -695,6 +700,102 @@ function unwrapLiveFormatting(root: HTMLElement): void {
   })
 }
 
+// 引用のライブプレビュー（ユーザーからの明示的な要望「>を入力した時点で、送った後に出てくる
+// 灰色の線みたいなものを表示させるようにしたい」）。太字・斜体・下線・取り消し線と異なり、
+// 引用は「行頭に閉じマーカーの無いプレフィックス（「> 」）が続く」という行単位のブロック構造
+// のため、collectLiveMatches（文字列内の任意位置に対する開始・終了マーカーのペア）とは別に
+// 専用の処理を用意する。MessageList.tsxのsplitLineBlocksと同じ考え方（連続する「> 」行を
+// 1つの引用ブロックとしてまとめる）で範囲を検出し、その範囲全体をMessageList.tsxの送信後表示と
+// 全く同じクラス（QUOTE_BLOCKQUOTE_CLASSNAME）の<blockquote>で包む。各行の「> 」マーカー自体は
+// 太字等と同じ「実テキストとして残しつつ隠す」方式にし、マーカーを除いた本文にはさらに
+// 太字・斜体等のインライン書式が効くよう再帰的に解決する（引用の中でも装飾が効く、送信後の
+// 表示と同じ仕様）。
+const QUOTE_BLOCKQUOTE_CLASSNAME = 'my-1 border-l-[3px] border-line-strong py-0.5 pl-2.5 text-ink-muted'
+const QUOTE_LINE_REGEX = /^> (.+)$/
+
+interface QuoteRange {
+  start: number
+  end: number
+}
+
+/** 連続する「> 」行を1つの範囲としてまとめて返す（コードブロックの範囲内は対象外——git diff風の
+ * 「> 」行がコードブロックの中身に含まれていても引用として誤解釈しないようにするため）。 */
+function collectQuoteRanges(text: string, excludeRanges: { start: number; end: number }[]): QuoteRange[] {
+  const ranges: QuoteRange[] = []
+  let lineStart = 0
+  let blockStart: number | null = null
+  const closeBlock = (lineEndExclusive: number) => {
+    if (blockStart === null) return
+    const start = blockStart
+    const end = lineEndExclusive
+    blockStart = null
+    if (!excludeRanges.some((r) => start < r.end && r.start < end)) {
+      ranges.push({ start, end })
+    }
+  }
+  for (const line of text.split('\n')) {
+    if (QUOTE_LINE_REGEX.test(line)) {
+      if (blockStart === null) blockStart = lineStart
+    } else {
+      closeBlock(lineStart === 0 ? 0 : lineStart - 1)
+    }
+    lineStart += line.length + 1
+  }
+  closeBlock(text.length)
+  return ranges
+}
+
+/** [start,end)を隠しマーカー用spanで包むだけの汎用ヘルパー（wrapLiveMatchのマーカー抽出と
+ * 異なり、範囲全体をそのままspanで囲む——引用の「> 」は行の途中ではなく必ず行頭にあり、
+ * 抽出の左右非対称を気にする必要が無いため、より単純なこちらで足りる）。 */
+function wrapRangeInHiddenSpan(container: Node, start: number, end: number): void {
+  if (start >= end) return
+  const startPos = resolveOffset(container, start)
+  const endPos = resolveOffset(container, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+  const span = document.createElement('span')
+  span.setAttribute(LIVE_FORMAT_MARKER_ATTR, 'true')
+  span.className = HIDDEN_MARKER_CLASSNAME
+  span.appendChild(fragment)
+  range.insertNode(span)
+}
+
+/** 引用範囲を<blockquote>で包み、各行の「> 」マーカーを隠したうえで、残った本文へさらに
+ * 太字等のインライン書式を再帰的に適用する。 */
+function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
+  const { start, end } = quoteRange
+  if (start >= end) return
+  const startPos = resolveOffset(root, start)
+  const endPos = resolveOffset(root, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+
+  // fragmentは（collectQuoteRangesの定義上）「> 」で始まる行だけで構成されているはずなので、
+  // 各行の先頭2文字の位置を求めて隠す。wrapRangeInHiddenSpanは文字数を変えないため、複数行分の
+  // オフセットをまとめて計算してから順に処理しても後続のオフセットはずれない。
+  const innerText = domToPlainText(fragment)
+  const markerOffsets: number[] = []
+  let pos = 0
+  for (const line of innerText.split('\n')) {
+    markerOffsets.push(pos)
+    pos += line.length + 1
+  }
+  for (const off of markerOffsets) wrapRangeInHiddenSpan(fragment, off, off + 2)
+
+  applyNestedFormats(fragment)
+
+  const wrapper = document.createElement('blockquote')
+  wrapper.setAttribute(LIVE_FORMAT_ATTR, 'quote')
+  wrapper.className = QUOTE_BLOCKQUOTE_CLASSNAME
+  wrapper.appendChild(fragment)
+  range.insertNode(wrapper)
+}
+
 /** 書式のライブプレビューを最新化する。ネイティブ入力・IME確定・ツールバー操作・メンション/
  * 絵文字挿入・貼り付け・下書き復元など、本文が変わりうるあらゆる箇所の後に呼ぶ想定
  * （Composer.tsxのrefreshEditorHousekeeping、実質すべての変更経路を1箇所に集約している）。
@@ -706,8 +807,28 @@ export function syncLiveFormatting(root: HTMLElement): void {
   unwrapLiveFormatting(root)
   root.normalize()
   const text = domToPlainText(root)
-  const matches = collectLiveMatches(text)
+
+  // コードブロックの範囲を先に確保し、引用の判定がコードブロックの中身まで誤って
+  // 解釈しないようにする（例: ```の中にgit diff風の「> 」行がある場合）。
+  const codeBlockRanges: { start: number; end: number }[] = []
+  for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
+    const start = m.index ?? 0
+    codeBlockRanges.push({ start, end: start + m[0].length })
+  }
+
+  // 引用（行頭「> 」の連続行）を先に処理する。行単位のブロック構造のため、文字位置ベースの
+  // collectLiveMatchesとは別立てで扱う。
+  const quoteRanges = collectQuoteRanges(text, codeBlockRanges)
+  for (const q of quoteRanges) wrapQuoteRange(root, q)
+
+  // 太字・斜体・下線・取り消し線・コードのインライン装飾を、引用ブロックが既に消費した範囲を
+  // 除いた部分に適用する（引用ブロックの内部はwrapQuoteRangeが自分で再帰的に処理済みのため、
+  // ここで重複して処理しない）。
+  const matches = collectLiveMatches(text).filter(
+    (m) => !quoteRanges.some((q) => m.start < q.end && q.start < m.end),
+  )
   for (const m of matches) wrapLiveMatch(root, m)
+
   root.normalize()
   if (preserved) setSelectionOffsets(root, preserved.start, preserved.end)
 }
