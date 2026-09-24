@@ -583,7 +583,12 @@ const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 
 // font-size:1pxだけでは文字色が地の色のまま極小の実体として描画され、うっすら点のように見えて
 // しまっていた。text-transparentで文字色も透明にし、矩形の大きさ（≠0でキャレット計算には使える）
 // はそのまま保ちつつ視覚的には完全に消す。
-const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-none text-transparent'
+// バグ修正（ユーザーからの報告「下線と取り消し線で小さい点みたいな記号が見える」）: 下線・
+// 取り消し線は親要素（<u>/<s>）のtext-decoration（下線・打ち消し線）が子のマーカーspanにも
+// そのまま貫通して描画される。文字色を透明にしても、極小フォントサイズの上に装飾線だけが
+// 乗った状態は小さな点として視認できてしまっていたため、マーカーspan自身にno-underline
+// （text-decoration-line:none）を明示し、装飾線がマーカー部分には一切描画されないようにする。
+const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-none text-transparent no-underline'
 
 // MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義（コードは対象外のまま）。
 // 太字・斜体・下線・取り消し線は、書式トグルボタンが「まだ何も入力していない空のマーカー対」を
