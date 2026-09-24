@@ -8,6 +8,7 @@ import { CreatePollModal } from './CreatePollModal'
 import { useToast } from './Toast'
 import {
   domToPlainText,
+  domToMarkdown,
   deserializeFromText,
   getSelectionOffsets,
   setSelectionOffsets,
@@ -23,12 +24,10 @@ import {
   removeCaretMarkerFromDom,
   scrollCaretIntoView,
   syncLiveFormatting,
-  toggleFormatAtCursor,
-  toggleFormatOnSelection,
+  wrapRangeInFormats,
+  toggleFormatAtCursorDom,
+  toggleFormatOnSelectionDom,
   isCursorInsideActiveFormats,
-  computeMarkerAwareDeletion,
-  openingSequence,
-  closingSequence,
   type ToggleFormatKind,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
@@ -321,7 +320,13 @@ export default function Composer({
     if (hasUserEditedRef.current) return
     const root = editorRef.current
     if (!root || !draftKey) return
-    const currentText = domToPlainText(root)
+    // バグ修正（実機Playwright検証で発見）: ここは「現在のDOMをテキストとして読み直し、
+    // 絵文字ショートコード解釈ありで再構築する」処理のため、domToPlainTextではなく
+    // domToMarkdownを使う必要がある——domToPlainTextは太字・斜体・下線・取り消し線の
+    // 実要素を素通りしてプレーンテキストへ変換する（マーカー文字を含まない）ため、これで
+    // 再構築すると、直前のマウント時useLayoutEffectがsyncLiveFormattingで正しく構造化した
+    // <strong>等がここで消え、装飾の無いプレーンテキストへ戻ってしまっていた。
+    const currentText = domToMarkdown(root)
     if (!currentText) return
     root.replaceChildren(deserializeFromText(currentText, customEmoji))
     refreshEditorHousekeeping()
@@ -338,7 +343,7 @@ export default function Composer({
     if (!draftKey) return
     const root = editorRef.current
     if (!root) return
-    setDraft(draftKey, domToPlainText(root), mentions)
+    setDraft(draftKey, domToMarkdown(root), mentions)
   }, [draftKey, mentions, contentVersion])
 
   // 純粋な「見た目・下書き反映の更新」だけを行う（hasUserEditedRefは変更しない）。マウント時の
@@ -369,16 +374,15 @@ export default function Composer({
   }
 
   // pendingFormats（ボタンは押されているがまだ本文に挿入していない書式）を、実際に入力された
-  // 文字の周りへ初めてマーカーとして挿入する（上のpendingFormats宣言のコメント参照）。
-  // ネイティブ入力・IME確定・貼り付けのいずれの経路でも、「本文が前回の同期後より何文字
-  // 増えたか」をprevPlainTextLengthRefとの差分で判定する（Backspace/Delete等の削除系は
-  // 自前でpreventDefaultして別経路で処理しているため、この関数が呼ばれる時点では純粋な
-  // 追加だけを想定してよい）。増えていなければ何もしない（null相当）。増えた分（カーソンの
-  // 直前insertedCount文字）だけを開始・終了マーカーで囲み、pendingFormatsをそのまま
-  // activeFormatsへ引き継ぐ（既に開いているactiveFormatsがある場合はその内側に自然に
-  // 入れ子になる——マーカーの挿入はプレーンテキストのオフセットだけで行うため、ネストの
-  // 深さに関わらずそのまま機能する）。呼び出し元はこの直後に必ずafterMutateを呼ぶこと
-  // （syncLiveFormattingが実際にマーカーを隠す処理をここでは行わないため）。
+  // 文字の周りへ初めて実DOM要素としてラップする（上のpendingFormats宣言のコメント参照。
+  // マーカー文字は一切経由しない）。ネイティブ入力・IME確定・貼り付けのいずれの経路でも、
+  // 「本文が前回の同期後より何文字増えたか」をprevPlainTextLengthRefとの差分で判定する
+  // （Backspace/Delete等の削除系はこの差分が0以下になるため自然に無視される）。増えていなければ
+  // 何もしない。増えた分（カーソル直前insertedCount文字）だけをwrapRangeInFormatsで直接
+  // ラップし、pendingFormatsをそのままactiveFormatsへ引き継ぐ（既に開いているactiveFormatsが
+  // ある場合はその内側に自然に入れ子になる——ラップはプレーンテキストのオフセットだけで
+  // 行うため、ネストの深さに関わらずそのまま機能する）。呼び出し元はこの直後に必ず
+  // afterMutateを呼ぶこと。
   const materializePendingFormats = (root: HTMLDivElement) => {
     if (pendingFormats.length === 0) return
     const currentLength = domToPlainText(root).length
@@ -387,11 +391,8 @@ export default function Composer({
     const cursor = getSelectionOffsets(root)?.start
     if (cursor === undefined || cursor < insertedCount) return
     const insertStart = cursor - insertedCount
-    const suffix = closingSequence(pendingFormats)
-    const prefix = openingSequence(pendingFormats)
-    replaceRangeWithText(root, cursor, cursor, suffix)
-    replaceRangeWithText(root, insertStart, insertStart, prefix)
-    setSelectionOffsets(root, insertStart + prefix.length + insertedCount)
+    wrapRangeInFormats(root, insertStart, cursor, pendingFormats)
+    setSelectionOffsets(root, cursor)
     setActiveFormats((prev) => [...prev, ...pendingFormats])
     setPendingFormats([])
   }
@@ -415,8 +416,7 @@ export default function Composer({
         if (prev.length === 0) return prev
         const cursor = getSelectionOffsets(root)?.start
         if (cursor === undefined) return prev
-        const text = domToPlainText(root)
-        return isCursorInsideActiveFormats(text, cursor, prev) ? prev : []
+        return isCursorInsideActiveFormats(root, cursor, prev) ? prev : []
       })
     }
     document.addEventListener('selectionchange', onSelectionChange)
@@ -508,6 +508,11 @@ export default function Composer({
       const end = offs?.end ?? start
       replaceRangeWithText(root, start, end, emoji)
     }
+    // バグ修正: 太字等をボタンで開いた（pendingFormats、まだ何も入力していない）直後に
+    // 絵文字ピッカーから挿入すると、この呼び出しが無いとpendingFormatsが消費されずボタンが
+    // 押されたまま取り残されてしまっていた（handlePasteは既にこの呼び出しを持っていたが、
+    // insertEmojiには無かった抜け漏れ）。
+    materializePendingFormats(root)
     setEmojiOpen(false)
     afterMutate()
   }
@@ -548,7 +553,7 @@ export default function Composer({
 
   const confirmSchedule = async () => {
     const root = editorRef.current
-    const text = (root ? domToPlainText(root) : '').trim()
+    const text = (root ? domToMarkdown(root) : '').trim()
     if (!text) {
       toast('本文を入力してください', 'error')
       return
@@ -631,19 +636,17 @@ export default function Composer({
   // 選択範囲が無い場合: ユーザーからの追加報告「記法のボタン押すと一文字分見えない何かが
   // 入力されるのやめてほしい」を受け、まだ本文に無い書式をこれから有効化する場合は本文へ
   // 一切触れず、pendingFormats（上記宣言のコメント参照）の切り替えだけで済ませる。既に
-  // activeFormats（＝実際にマーカーが本文にある）に含まれる書式を解除する場合のみ、実在する
-  // マーカーを操作するcomposerEditing.tsのtoggleFormatAtCursorを呼ぶ。
+  // activeFormats（＝実際にDOM構造として本文にある）に含まれる書式を解除する場合のみ、
+  // composerEditing.tsのtoggleFormatAtCursorDomを呼ぶ。
   const toggleFormatButton = (kind: ToggleFormatKind) => {
     const root = editorRef.current
     if (!root) return
     const offs = getSelectionOffsets(root)
-    const text = domToPlainText(root)
-    const total = text.length
+    const total = domToPlainText(root).length
     const start = offs?.start ?? total
     const end = offs?.end ?? start
     if (start !== end) {
-      const result = toggleFormatOnSelection(text, start, end, kind)
-      for (const e of result.edits) replaceRangeWithText(root, e.start, e.end, e.text)
+      const result = toggleFormatOnSelectionDom(root, start, end, kind)
       setSelectionOffsets(root, result.selectionStart, result.selectionEnd)
       setPendingFormats([])
       setPickerQuery(null)
@@ -657,9 +660,7 @@ export default function Composer({
       setPickerQuery(null)
       return
     }
-    const result = toggleFormatAtCursor(text, start, activeFormats, kind)
-    for (const e of result.edits) replaceRangeWithText(root, e.start, e.end, e.text)
-    setSelectionOffsets(root, result.cursor)
+    const result = toggleFormatAtCursorDom(root, start, activeFormats, kind)
     setActiveFormats(result.activeFormats)
     if (result.newlyPending.length > 0) {
       setPendingFormats((prev) => Array.from(new Set([...prev, ...result.newlyPending])))
@@ -930,7 +931,7 @@ export default function Composer({
     if (sendingRef.current) return
     const root = editorRef.current
     if (!root) return
-    const text = domToPlainText(root).trim()
+    const text = domToMarkdown(root).trim()
     if (!text) return
     sendingRef.current = true
     setSending(true)
@@ -976,32 +977,6 @@ export default function Composer({
     // ブラウザのネイティブなIME処理にそのまま委ねる（Planサブエージェントの設計精査で
     // 指摘された、この種の実装で最も起きやすい不具合クラスへの対処）。
     if ((e.nativeEvent as KeyboardEvent).isComposing) return
-
-    // バグ修正（ユーザーからの報告「太字ボタンを押して何も入力しないまま2回Deleteを押すと
-    // 画面に**が見えてしまう」「書式を解除して続けて普通の文字を打った後、Deleteキーで
-    // 消していくと書式付きの文字の手前で**が見えてしまう」）: 隠しマーカーspan
-    // （contentEditable=falseの原子ノード）にカーソルが隣接した状態でBackspace/Deleteを
-    // 押すと、ネイティブの削除は開き・閉じマーカーの片方だけを1回の操作で丸ごと消してしまう。
-    // 対になる相手を失った側は以後unwrapLiveFormatting後の正規表現に一致しなくなり、
-    // 隠されずそのまま可視の「**」等として残ってしまっていた。computeMarkerAwareDeletion
-    // （composerEditing.ts）がDOM上の実際のマーカー配置だけを根拠に該当を判定し（React側の
-    // activeFormatsというボタンの押下状態には依存しない——書式を解除した後や空のまま放置
-    // された後でも同じ事故が起きるため）、マーカーそのものではなく書式の中身の1文字（中身が
-    // 空なら開き・閉じマーカーを対でまとめて）を代わりに削除すべき範囲を返す（該当しなければ
-    // null＝ネイティブの挙動にそのまま任せてよい）。
-    if (e.key === 'Backspace' || e.key === 'Delete') {
-      const root = editorRef.current
-      if (root) {
-        const range = computeMarkerAwareDeletion(root, e.key === 'Backspace' ? 'backward' : 'forward')
-        if (range) {
-          e.preventDefault()
-          replaceRangeWithText(root, range.start, range.end, '')
-          setSelectionOffsets(root, range.start)
-          afterMutate()
-          return
-        }
-      }
-    }
 
     if (emojiOpen && e.key === 'Escape') {
       setEmojiOpen(false)

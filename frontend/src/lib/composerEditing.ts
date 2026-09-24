@@ -103,6 +103,21 @@ function stripCaretMarker(text: string): string {
   return text.includes(CARET_MARKER) ? text.split(CARET_MARKER).join('') : text
 }
 
+// consumeRawMarkdownSyntax（本ファイル後方の書式セクション参照）が、手打ちの生Markdown記号
+// （**等）を実要素へ破壊的に変換する間、選択範囲（カーソル）の位置を追跡するための目印文字。
+// CARET_MARKER（U+200B）とは別の文字を使う——Enterキーで置かれた既存のCARET_MARKERが同じ
+// タイミング（Enter直後のafterMutate→refreshEditorHousekeeping→syncLiveFormatting→
+// consumeRawMarkdownSyntaxという1本の呼び出し経路）で本文中に残っている場合があり、同じ文字を
+// 目印に使うと「Enterが置いた本来のマーカー」と「この関数が今回だけ使う目印」を区別できなくなる
+// ため。選択が折りたたまれている（カーソルのみ）場合はSELECTION_START_MARKERのみを使う。
+const SELECTION_START_MARKER = String.fromCharCode(0x2063) // INVISIBLE SEPARATOR（U+2063）
+const SELECTION_END_MARKER = String.fromCharCode(0x2064) // INVISIBLE PLUS（U+2064）
+
+function stripSelectionMarkers(text: string): string {
+  if (!text.includes(SELECTION_START_MARKER) && !text.includes(SELECTION_END_MARKER)) return text
+  return text.split(SELECTION_START_MARKER).join('').split(SELECTION_END_MARKER).join('')
+}
+
 /** 本文の末尾が改行で終わっている場合にのみ、その直後へCARET_MARKERを1文字追加する
  * （既存のマーカーは先に取り除いてから再判定するため、複数回呼んでも安全＝冪等）。
  * Composer.tsxのEnterキー処理（通常の改行のみ。「\n- 」で始まる箇条書き継続は末尾に実在の
@@ -170,6 +185,37 @@ export function domToPlainText(root: Node): string {
   }
   for (const child of Array.from(root.childNodes)) walk(child)
   return stripCaretMarker(text)
+}
+
+/** シリアライズ: DOM→送信用Markdown文字列。domToPlainTextと同じ走査だが、太字・斜体・下線・
+ * 取り消し線を表す実要素（`data-toggle-format`属性、下記参照）に出会ったら、その中身を再帰的に
+ * シリアライズしてからMarkdown記号（`**`・`_`・`++`・`~~`）で包む。これらの書式は本文・DOMに
+ * マーカー文字を一切持たない実構造（<strong>/<em>/<u>/<s>）として表現されるため（ユーザーからの
+ * 要望「押下状態で見た目が切り替わる方式にしたい。記号が裏で入力されるのをやめてほしい」への
+ * 対応、詳細は本ファイル後方の書式セクションの冒頭コメント参照）、送信・下書き保存の直前だけ
+ * この関数でMarkdown記号を生成する。
+ * 中身が空文字の場合は何も出力しない（`****`等の未解釈記号が送信され、受信側でMessageList.tsxの
+ * 正規表現（1文字以上必須）が一致せず記号がそのまま可視化されてしまうのを防ぐ——中身が空になった
+ * ラッパーはremoveEmptyToggleFormatWrappersで随時掃除される想定だが、念のためここでも二重に守る）。
+ * 引用（<blockquote data-live-format="quote">）・コード（<code data-live-format="code">）・
+ * その中の隠しマーカーspanは非対応要素として素通りし、domToPlainTextと同じく生の"> "/バック
+ * ティック文字列がそのまま出力される（この2つは今回の変更の対象外のまま）。 */
+export function domToMarkdown(root: Node): string {
+  const walk = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return (node as Text).data
+    if (node.nodeType !== Node.ELEMENT_NODE) return ''
+    if (isEmojiNode(node)) return `:${node.getAttribute(EMOJI_ATTR)}:`
+    if ((node as Element).tagName === 'BR') return '\n'
+    const inner = Array.from(node.childNodes).map(walk).join('')
+    const kind = (node as Element).getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR) as ToggleFormatKind | null
+    if (kind && inner) {
+      const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+      return prefix + inner + suffix
+    }
+    return inner
+  }
+  const text = Array.from(root.childNodes).map(walk).join('')
+  return stripCaretMarker(stripSelectionMarkers(text))
 }
 
 /** テキストを絵文字ショートコード解釈ありでDocumentFragmentへ変換する。下書き復元と、
@@ -329,6 +375,22 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
   return found === -1 ? total : found
 }
 
+// バグ修正（実機Playwright検証で発見。ユーザーからの報告「太字を解除した直後に入力した文字が
+// まだ太字のまま」「内側でない書式を解除した直後に入力した文字が古い入れ子構造の中に迷い込む」
+// の根本原因）: setSelectionOffsets/deleteRangeReturningCollapsedは範囲クランプの基準として
+// domToPlainText(root).lengthを使っていたが、これはCARET_MARKER（改行キャレット問題向けの
+// 見えない追跡文字、上記参照）を除外した文字数になる。一方、getSelectionOffsetsが使う
+// domPositionToOffset（実DOMを走査してオフセットを求める）はCARET_MARKERを除外せずに数える。
+// この不一致のため、toggleFormatAtCursorDom（書式セクション参照）がCARET_MARKERを退出点の
+// 目印として要素の直後へ挿入し、そこへ正しくSelectionを置いても、直後に必ず走る
+// syncLiveFormattingの選択保存・復元（getSelectionOffsets→setSelectionOffsets）が「マーカーの
+// 直後」というオフセットをdomToPlainText(root).length基準で1つ短く切り詰めてしまい、
+// マーカーの手前（＝閉じたはずの要素の内側）へ巻き戻ってしまっていた。範囲クランプの基準は
+// domPositionToOffsetと同じ数え方（CARET_MARKERを除外しない）で統一する必要がある。 */
+function rawDomLength(root: HTMLElement): number {
+  return domPositionToOffset(root, root, root.childNodes.length)
+}
+
 /** 現在の選択範囲をプレーンテキストオフセットのペアとして取得する。rootの外に選択がある場合はnull。 */
 export function getSelectionOffsets(root: HTMLElement): { start: number; end: number } | null {
   const sel = window.getSelection()
@@ -342,7 +404,7 @@ export function getSelectionOffsets(root: HTMLElement): { start: number; end: nu
 
 /** プレーンテキストオフセットのペアから選択範囲を設定する。 */
 export function setSelectionOffsets(root: HTMLElement, start: number, end: number = start) {
-  const total = domToPlainText(root).length
+  const total = rawDomLength(root)
   const lo = Math.max(0, Math.min(Math.min(start, end), total))
   const hi = Math.max(0, Math.min(Math.max(start, end), total))
   const startPos = resolveOffset(root, lo)
@@ -361,7 +423,7 @@ export function setSelectionOffsets(root: HTMLElement, start: number, end: numbe
  * オフセットベースに選択を再構築すること（normalize()の前後でRangeオブジェクトを跨いで
  * 保持しないというPlanサブエージェントの指摘どおりの手順を徹底するため、offsetも一緒に返す）。 */
 function deleteRangeReturningCollapsed(root: HTMLElement, start: number, end: number): { range: Range; offset: number } {
-  const total = domToPlainText(root).length
+  const total = rawDomLength(root)
   const lo = Math.max(0, Math.min(Math.min(start, end), total))
   const hi = Math.max(0, Math.min(Math.max(start, end), total))
   const startPos = resolveOffset(root, lo)
@@ -528,51 +590,41 @@ export function normalizeInvariants(root: HTMLElement): void {
   root.normalize()
 }
 
-// 書式のライブプレビュー（太字・斜体・下線・取り消し線）。ユーザーからの明示的な要望「入力して
-// いる段階で送信した後の表示と同じようにしたい。記号で囲むような表示をなくしたい」を受け、
-// 2026-09-10（ツールバー実装）・2026-09-18（マーカー文字を残したまま範囲全体をスタイルするだけの
-// 初回ライブプレビュー）に続く見直し。今回はマーカー文字（**・_・++・~~）を常に完全に隠す
-// （送信後の実際の見た目と一致させる）方式に一本化した——それ以前に検討した「カーソルが触れて
-// いるときだけマーカーを表示する」Typora風の設計は、ユーザーが今回求めているのはボタンによる
-// 明示的なモード切替であり、マーカーを手で見て編集する前提そのものが不要になるため、あえて
-// 採用しなかった。マーカー文字はdomToPlainTextとの往復性を保つため実際のテキストとして残すが、
-// 常にfont-size:1px相当の極小サイズにして視覚的に消す（display:noneにすると幅0の要素になり
-// Range.getClientRects()が空の矩形を返しキャレット配置に使えなくなる、というensureTrailing
-// NewlineCaretMarkerの教訓と同じ理由で避けた）。
+// 書式（太字・斜体・下線・取り消し線）。ユーザーからの要望の変遷:
+// 2026-09-10 ツールバー実装 → 2026-09-18 マーカー文字を残したまま範囲全体をスタイルするだけの
+// 初回ライブプレビュー → 2026-09-24 マーカー文字を常に完全に隠す方式（送信後の見た目と一致させる）
+// → 今回、「押下状態で見た目が切り替わる（送信時と入力時の見た目が同じになるようにする）方式に
+// したい」「記法のボタンを押すと一文字分見えない何かが入力されるのをやめてほしい」という要望を
+// 受けての全面再設計。
 //
-// 太字/斜体/下線/取り消し線は入れ子になりうる（下記toggleFormatAtCursorが「太字の中に斜体」の
-// ような組み合わせを作れるため）。MessageList.tsx（送信後の表示）は入れ子に対応しない簡易実装の
-// ままだが、投稿欄のライブプレビューだけは入れ子を再帰的に解決する（applyNestedFormats）。
-// コードブロック・インラインコードはマーカー隠しの対象外（フェンス自体が複数行にまたがる・
-// 中身をさらに解釈しないという既存の性質のため、マーカーを含めた範囲全体をそのままスタイル
-// する）。@メンション・URL自動リンク・名前付きリンク・箇条書き（行頭「- 」）は対象外のまま
-// （メンションは挿入時点のみハイライトする既存方式を維持、リンクは専用ポップアップで確定前に
-// 見えるため対象外、箇条書きは記法自体が既に見た目として自己説明的なため）。
+// 従来はマーカー文字（**・_・++・~~）を本文の実テキストとして持ち、font-size:1px・
+// color:transparentの隠しspanで視覚的に消していた（domToPlainTextとの往復性のため）。この方式は
+// 「本文には常にMarkdownが実在し、隠しているだけ」という前提のため、Backspace/Deleteが隠し
+// マーカーを対で消せず片方だけ残る、境界位置で記号が可視化される等の不具合を繰り返し生んだ
+// （このファイルのgit履歴・過去のバグ修正コメント参照）。
 //
-// 引用（行頭「> 」）はユーザーからの追加要望「>を入力した時点で、送った後に出てくる灰色の線
-// みたいなものを表示させるようにしたい」を受けて対象に含めた（下記collectQuoteRanges/
-// wrapQuoteRange）。行単位のブロック構造という点で他の（文字位置ベースの）書式とは性質が
-// 異なるため、syncLiveFormatting内で別立てのパスとして処理する。
+// 新方式: 太字・斜体・下線・取り消し線は、マーカー文字を一切持たない実DOM構造
+// （<strong>/<em>/<u>/<s>、TOGGLE_FORMAT_ELEMENT_ATTR="<kind>"）として表現する。Markdown記号は
+// 送信・下書き保存の直前にdomToMarkdown（domToPlainTextの直後に定義）がDOM構造から生成する。
+// 引用（「> 」）・コード（`` ` ``/```` ``` ````）は今回の対象外で、従来どおりLIVE_FORMAT_ATTR/
+// LIVE_FORMAT_MARKER_ATTRの隠しマーカー方式を維持する（引用・コードは対になる終端マーカーが
+// 無い、または中身をさらに解釈しないため、太字等と同じ不具合が起きないか、そもそも隠す対象では
+// ないため）。箇条書き（「- 」）はそもそも隠しマーカー機構を持たず生テキストのまま変更不要。
 //
-// ユーザーからの追加要望「太字、斜体、下線、取り消し線に関しては、ボタンが押されている間はその
-// 記法になり、もう一度ボタンを押すと解除される、というような仕組みにしてほしい（Wordみたいな
-// 感じ）」を受け、書式トグルボタン（Composer.tsxのtoggleFormatButton）は選択範囲が無い場合、
-// その場で（内容が空のまま）開始・終了マーカーを即座に挿入し、カーソルをその間に置く。以後の
-// 通常の入力はブラウザのネイティブな「カーソル位置への文字挿入」がその2つのマーカーの間へ
-// 自然に入っていくだけで済むため、「まだ確定していない書式領域」を別途追跡する必要が無い
-// （普通にMarkdownを手打ちするのと全く同じ仕組みで、Enter・メンション挿入・絵文字挿入・
-// 箇条書き/引用トグル等どんな変更経路を通っても自動的に機能する）。複数の書式を組み合わせる
-// 場合は内側へ入れ子にし、1つだけ解除する場合、それが最も内側（最後に有効化したもの）なら
-// カーソルをその終端マーカーの直後へ移すだけでよい。内側でない書式を解除する場合は、既存の
-// 終端マーカー列全体の直後までカーソルを進めて（＝そこまでの内容を正しく閉じて）から、残りの
-// 書式だけの新しい空マーカー対を改めて挿入し直す（詳細はtoggleFormatAtCursor参照）。
+// ボタン押下時のツールバー入力は2段階（Composer.tsx側）:
+//  - pendingFormats: ボタンを押しただけ・まだ何も入力していない状態（本文・DOMに一切触れない）。
+//  - activeFormats: 実際にマーカー文字を持たない<strong>等の実要素が既に本文に存在する状態。
+// 実際に文字が入力された瞬間、Composer.tsxのmaterializePendingFormatsがwrapRangeInFormats
+// （下記）でその場に直接ラップし、pendingFormats→activeFormatsへ引き継ぐ。
 //
-// ボタンの押下状態（activeFormats、Composer.tsx側のReact state）はカーソル位置に対する見た目
-// 上のヒントに過ぎず、テキスト自体は常にその場で完全なMarkdownとして存在する（保留中の
-// 未確定状態は無い）ため、送信・下書き保存等の前に特別な「確定」処理を挟む必要が無い。
-// selectionchangeでカーソルが現在のactiveFormatsの終端マーカー列の直前から外れたことを
-// 検知したら、ボタンの見た目だけを元に戻す（isCursorInsideActiveFormats、テキストは
-// 一切変更しない）。
+// 手打ちで生Markdown（**word**等）を直接入力した場合も、送信後の見た目と食い違わないよう
+// （このMarkdown方言にエスケープ機構が一切無いため、放置すると入力中は記号のまま・送信後は
+// 書式が効くというWYSIWYG不一致が起きる）、今までと同様に検出するが、隠すのではなくマーカー
+// 文字を削除して実要素へ変換する（consumeRawMarkdownSyntax、破壊的変換）。
+//
+// 太字/斜体/下線/取り消し線は入れ子になりうる。MessageList.tsx（送信後の表示）と同じ再帰的
+// ネスト解決を、DOM構造（toggleFormatAtCursorDom・wrapRangeInFormats）とテキスト検出
+// （consumeRawMarkdownSyntax）の両方で行う。
 
 const LIVE_FORMAT_ATTR = 'data-live-format'
 const LIVE_FORMAT_MARKER_ATTR = 'data-live-format-marker'
@@ -590,17 +642,9 @@ const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 
 // （text-decoration-line:none）を明示し、装飾線がマーカー部分には一切描画されないようにする。
 const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-none text-transparent no-underline'
 
-// MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義（コードは対象外のまま）。
-// 太字・斜体・下線・取り消し線は、書式トグルボタンが「まだ何も入力していない空のマーカー対」を
-// 挿入した瞬間から隠したいため、MessageList.tsx側（1文字以上を要求する`[\s\S]+?`）とは異なり
-// `[\s\S]*?`（0文字以上）で完成パターンとみなす。送信後の実際の解釈（MessageList.tsx）は
-// 変更していない。
+// MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義（コードは今回の対象外のまま）。
 const LIVE_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
 const LIVE_INLINE_CODE_REGEX = /`([^`\n]+)`/g
-const LIVE_BOLD_REGEX = /\*\*([\s\S]*?)\*\*/g
-const LIVE_ITALIC_REGEX = /_([\s\S]*?)_/g
-const LIVE_UNDERLINE_REGEX = /\+\+([\s\S]*?)\+\+/g
-const LIVE_STRIKE_REGEX = /~~([\s\S]*?)~~/g
 
 export type ToggleFormatKind = 'bold' | 'italic' | 'underline' | 'strike'
 
@@ -618,6 +662,24 @@ const FORMAT_ELEMENT: Record<ToggleFormatKind, { tagName: string; className: str
   strike: { tagName: 's', className: 'line-through' },
 }
 
+/** 太字・斜体・下線・取り消し線を表す実要素であることを示す属性（値はToggleFormatKind）。
+ * LIVE_FORMAT_ATTR（引用・コード専用、隠しマーカー方式のまま）とは意図的に別属性にしている——
+ * unwrapLiveFormattingがsyncLiveFormattingのたびに「テキストから再構築した」引用・コードの
+ * ラッパーだけを毎回解体・再構築するのに対し、この属性の要素は文字が入力された時点で直接
+ * 構築される実体そのもの（テキストパターンから毎回導出されるものではない）ため、
+ * unwrapLiveFormattingのセレクタに一切引っかからないようにする必要があるため。 */
+const TOGGLE_FORMAT_ELEMENT_ATTR = 'data-toggle-format'
+
+// MessageList.tsxのBOLD_REGEX/ITALIC_REGEX/UNDERLINE_REGEX/STRIKE_REGEXと同じ定義（1文字以上
+// 必須）。手打ちの生Markdown（consumeRawMarkdownSyntax）を検出するためのもので、送信後の
+// 実際の解釈と完全に一致させる（かつてのLIVE_*_REGEXは「ボタンで開いた空のマーカー対」を
+// 隠すための0文字以上版だったが、その仕組み自体が無くなったため1文字以上必須の実際の仕様に
+// 統一した）。
+const RAW_BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
+const RAW_ITALIC_REGEX = /_([\s\S]+?)_/g
+const RAW_UNDERLINE_REGEX = /\+\+([\s\S]+?)\+\+/g
+const RAW_STRIKE_REGEX = /~~([\s\S]+?)~~/g
+
 interface LiveMatch {
   start: number
   end: number
@@ -625,7 +687,9 @@ interface LiveMatch {
   kind: 'code' | ToggleFormatKind
 }
 
-/** MessageList.tsxのrenderInlineSegmentと同じ優先度付き重なり解決（コード＞太字/斜体/下線/取消線）。 */
+/** MessageList.tsxのrenderInlineSegmentと同じ優先度付き重なり解決。太字・斜体・下線・取り消し線が
+ * 実DOM構造へ移行したため、ここではコードの検出のみを行う（syncLiveFormatting・wrapQuoteRangeの
+ * 引用内コード検出から使う）。 */
 function collectLiveMatches(text: string): LiveMatch[] {
   const candidates: LiveMatch[] = []
   for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
@@ -636,19 +700,44 @@ function collectLiveMatches(text: string): LiveMatch[] {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
   }
-  for (const m of text.matchAll(LIVE_BOLD_REGEX)) {
+  candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
+  const accepted: LiveMatch[] = []
+  for (const c of candidates) {
+    if (accepted.some((a) => c.start < a.end && a.start < c.end)) continue
+    accepted.push(c)
+  }
+  accepted.sort((a, b) => a.start - b.start)
+  return accepted
+}
+
+/** collectLiveMatchesと同じ優先度付き重なり解決だが、太字・斜体・下線・取り消し線
+ * （RAW_*_REGEX、1文字以上必須）も候補に含める。コードは重なり判定の優先度としてのみ使い
+ * （コードの中の見かけ上の**等を誤って書式と解釈しないようにするため）、返り値からは除外する
+ * （コードの隠し変換自体はsyncLiveFormatting/wrapLiveMatch側が別途担当するため）。
+ * consumeRawMarkdownSyntaxから使う。 */
+function collectRawMarkdownMatches(text: string): LiveMatch[] {
+  const candidates: LiveMatch[] = []
+  for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
+  }
+  for (const m of text.matchAll(LIVE_INLINE_CODE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
+  }
+  for (const m of text.matchAll(RAW_BOLD_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'bold' })
   }
-  for (const m of text.matchAll(LIVE_ITALIC_REGEX)) {
+  for (const m of text.matchAll(RAW_ITALIC_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'italic' })
   }
-  for (const m of text.matchAll(LIVE_UNDERLINE_REGEX)) {
+  for (const m of text.matchAll(RAW_UNDERLINE_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'underline' })
   }
-  for (const m of text.matchAll(LIVE_STRIKE_REGEX)) {
+  for (const m of text.matchAll(RAW_STRIKE_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'strike' })
   }
@@ -659,7 +748,7 @@ function collectLiveMatches(text: string): LiveMatch[] {
     accepted.push(c)
   }
   accepted.sort((a, b) => a.start - b.start)
-  return accepted
+  return accepted.filter((m) => m.kind !== 'code')
 }
 
 /** fragmentの先頭または末尾からcount文字を切り出し、隠しマーカー用のspanへ包んで返す。
@@ -697,12 +786,13 @@ function extractHiddenMarker(fragment: DocumentFragment, count: number, fromEnd:
   return span
 }
 
-/** [start,end)を指定した種別で包む。containerはHTMLElement（エディタ本体）・DocumentFragment
- * （入れ子処理中の中間結果）のどちらでもよい（Range APIはどちらに対しても同じように機能する）。
- * 太字/斜体/下線/取り消し線はさらに中身を再帰的に処理し、入れ子になった別の書式（例: 太字の中の
- * 斜体）も同様にマーカーを隠して正しくスタイルする。 */
+/** [start,end)をコード（インラインコード/コードブロック）として包む。containerはHTMLElement
+ * （エディタ本体）・DocumentFragment（入れ子処理中の中間結果）のどちらでもよい（Range APIは
+ * どちらに対しても同じように機能する）。太字・斜体・下線・取り消し線は実DOM構造へ移行したため
+ * （本ファイル前方の書式セクションの冒頭コメント参照）、collectLiveMatchesが返すmatchは常に
+ * kind==='code'になる。 */
 function wrapLiveMatch(container: Node, match: LiveMatch): void {
-  const { start, end, kind } = match
+  const { start, end } = match
   if (start >= end) return
   const startPos = resolveOffset(container, start)
   const endPos = resolveOffset(container, end)
@@ -710,43 +800,17 @@ function wrapLiveMatch(container: Node, match: LiveMatch): void {
   range.setStart(startPos.node, startPos.offset)
   range.setEnd(endPos.node, endPos.offset)
   const fragment = range.extractContents()
-
-  if (kind === 'code') {
-    const wrapper = document.createElement('code')
-    wrapper.setAttribute(LIVE_FORMAT_ATTR, kind)
-    wrapper.className = CODE_CLASSNAME
-    wrapper.appendChild(fragment)
-    range.insertNode(wrapper)
-    return
-  }
-
-  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
-  const leading = extractHiddenMarker(fragment, prefix.length, false)
-  const trailing = leading ? extractHiddenMarker(fragment, suffix.length, true) : null
-  const def = FORMAT_ELEMENT[kind]
-  const wrapper = document.createElement(def.tagName)
-  wrapper.setAttribute(LIVE_FORMAT_ATTR, kind)
-  wrapper.className = def.className
-
-  if (!leading || !trailing) {
-    // 想定外の構造（切り出し失敗）。マーカーを隠さず範囲全体をそのままスタイルするだけに
-    // フォールバックする（見た目は多少崩れても編集不能にはしないための保険）。
-    wrapper.appendChild(fragment)
-    range.insertNode(wrapper)
-    return
-  }
-
-  applyNestedFormats(fragment)
-  wrapper.appendChild(leading)
+  const wrapper = document.createElement('code')
+  wrapper.setAttribute(LIVE_FORMAT_ATTR, 'code')
+  wrapper.className = CODE_CLASSNAME
   wrapper.appendChild(fragment)
-  wrapper.appendChild(trailing)
   range.insertNode(wrapper)
 }
 
-/** fragment（既にトップレベルの1マッチぶんとして抽出済みの中身）の中に、さらに別の書式が
- * 入れ子になっていないかを調べ、あれば再帰的にwrapLiveMatchを適用する。要素で包む操作自体は
- * 文字数を変化させないため、複数のネストしたマッチを順番に処理しても後続のオフセットは
- * ずれない。 */
+/** fragment（引用範囲として抽出済みの中身）の中に、さらにコードが入れ子になっていないかを
+ * 調べ、あれば適用する（太字等は今回の対象外——引用中の太字等はconsumeRawMarkdownSyntaxが
+ * 文書全体に対して既に構造化済みのため、ここで重複して処理する必要が無い）。要素で包む操作
+ * 自体は文字数を変化させないため、オフセットはずれない。 */
 function applyNestedFormats(fragment: DocumentFragment): void {
   const innerText = domToPlainText(fragment)
   if (!innerText) return
@@ -754,16 +818,25 @@ function applyNestedFormats(fragment: DocumentFragment): void {
   for (const m of nested) wrapLiveMatch(fragment, m)
 }
 
-/** 過去にsyncLiveFormattingが挿入した書式ラッパー要素・隠しマーカー用spanを解除し、中身
- * （テキストノード・原子絵文字img・メンションspan）をその場に残す。 */
-function unwrapLiveFormatting(root: HTMLElement): void {
-  const wrappers = root.querySelectorAll(`[${LIVE_FORMAT_ATTR}], [${LIVE_FORMAT_MARKER_ATTR}]`)
+/** selectorに一致する要素を解除し、中身（テキストノード・原子絵文字img・メンションspan等）を
+ * その場に残す（再parent化）。unwrapLiveFormatting・toggleFormatOnSelectionDomの両方から
+ * 使う共通ロジック。 */
+function unwrapMatching(root: Node, selector: string): void {
+  const wrappers = (root as Element).querySelectorAll(selector)
   wrappers.forEach((wrapper) => {
     const parent = wrapper.parentNode
     if (!parent) return
     while (wrapper.firstChild) parent.insertBefore(wrapper.firstChild, wrapper)
     parent.removeChild(wrapper)
   })
+}
+
+/** 過去にsyncLiveFormattingが挿入した引用・コードのラッパー要素・隠しマーカー用spanを解除し、
+ * 中身をその場に残す。太字・斜体・下線・取り消し線（TOGGLE_FORMAT_ELEMENT_ATTR）はテキスト
+ * パターンから毎回導出される存在ではなく実体そのものなので、このセレクタには一切引っかからず
+ * 触れない（本ファイル前方の書式セクションの冒頭コメント参照）。 */
+function unwrapLiveFormatting(root: HTMLElement): void {
+  unwrapMatching(root, `[${LIVE_FORMAT_ATTR}], [${LIVE_FORMAT_MARKER_ATTR}]`)
 }
 
 // 引用のライブプレビュー（ユーザーからの明示的な要望「>を入力した時点で、送った後に出てくる
@@ -865,16 +938,81 @@ function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
   range.insertNode(wrapper)
 }
 
+/** 太字・斜体・下線・取り消し線の実要素（TOGGLE_FORMAT_ELEMENT_ATTR）のうち、中身が空文字に
+ * なったもの（Backspace/Deleteで最後の1文字を消しきった等）を取り除く。ブラウザはBackspace等で
+ * 最後の文字を消しても空の<strong></strong>を自動では片付けないため、消さずに放置すると
+ * domToMarkdownが（安全策として空なら記号を出さないとはいえ）無駄な空要素を持ち続け、また
+ * toggleFormatAtCursorDom等の判定を複雑にする。中身が空の要素を消しても文字数は変化しない
+ * ため、カーソル位置の保存・復元は不要（呼び出し元のsyncLiveFormattingが行う保存・復元の
+ * 範囲外で安全に呼べる）。 */
+function removeEmptyToggleFormatWrappers(root: HTMLElement): void {
+  const wrappers = root.querySelectorAll(`[${TOGGLE_FORMAT_ELEMENT_ATTR}]`)
+  wrappers.forEach((el) => {
+    if (textLength(el) === 0) el.remove()
+  })
+}
+
 /** 書式のライブプレビューを最新化する。ネイティブ入力・IME確定・ツールバー操作・メンション/
  * 絵文字挿入・貼り付け・下書き復元など、本文が変わりうるあらゆる箇所の後に呼ぶ想定
  * （Composer.tsxのrefreshEditorHousekeeping、実質すべての変更経路を1箇所に集約している）。
- * 呼ぶたびに全体を作り直す設計のため冪等（何度呼んでも同じ結果になる）。マーカーの表示・
- * 非表示はカーソル位置に依存しない（常に隠す）ため、選択範囲の変化だけでこの関数を
- * 再度呼ぶ必要は無い。 */
+ * 呼ぶたびに全体を作り直す設計のため冪等（何度呼んでも同じ結果になる）。
+ *
+ * 太字・斜体・下線・取り消し線（実DOM構造、TOGGLE_FORMAT_ELEMENT_ATTR）はunwrapLiveFormatting
+ * では一切触れず、consumeRawMarkdownSyntaxが手打ちの生Markdownだけを検出して実要素へ変換する
+ * （詳細は本ファイル前方の書式セクションの冒頭コメント参照）。引用・コードは従来どおり
+ * unwrap→テキストから再構築する。 */
 export function syncLiveFormatting(root: HTMLElement): void {
-  const preserved = getSelectionOffsets(root)
   unwrapLiveFormatting(root)
   root.normalize()
+  removeEmptyToggleFormatWrappers(root)
+
+  // バグ修正（実機Playwright検証で発見。ユーザーからの報告「引用の中で手打ちの**bold**が
+  // 閉じた直後、続けて打った文字までbold扱いになってしまう」）: 選択範囲の保存・復元を
+  // consumeRawMarkdownSyntax単独の中に閉じ込めていた頃は、そこでは正しく復元できても、
+  // 直後にこの関数自身が行う「引用・コードのwrap処理をまたぐための」別の数値オフセットの
+  // 保存・復元がもう一度走り、そちらが「閉じたばかりの実要素の直後」という境界を数値
+  // オフセットのround-tripだけで復元しようとして同じ問題（resolveOffsetが手前の要素の内側に
+  // 留まる位置を返すバイアス、toggleFormatAtCursorDomのコメント参照）を再発させていた。
+  // 目印文字（SELECTION_START_MARKER/SELECTION_END_MARKER）の挿入・復元をこの関数1箇所に
+  // 一本化し、consumeRawMarkdownSyntax・引用・コードのwrap処理すべてをその内側で行うことで、
+  // 数値オフセットのround-tripを最後の1回（restoreSelectionFromMarkers、ノード参照を直接
+  // 使うため境界のあいまいさが無い）だけに絞る。
+  const preserved = getSelectionOffsets(root)
+  const hasRange = !!preserved && preserved.start !== preserved.end
+  // 目印文字を使った保存・復元は、実際に生Markdownの変換が起きる場合（＝consumeRawMarkdownSyntax
+  // が本文を書き換え、要素境界のあいまいさが生じ得る場合）だけに限定する。何も変換が起きない
+  // 大多数のキーストローク（引用・コードのwrapだけ、あるいは何もwrapしない）では、この目印文字を
+  // 挿入すると、それが後述のrestoreSelectionFromMarkersでCARET_MARKERへ置き換えられて本文に
+  // 残ってしまい（次に実際の文字が入力されるまで消えない）、不要な副作用になる。変換が起きない
+  // 場合は元の単純な数値オフセットの保存・復元で十分（引用・コードのwrapだけなら要素境界の
+  // あいまいさの問題は実際には起きないため——このタイミングで新しく実要素が生まれるのは
+  // consumeRawMarkdownSyntaxが変換したときだけ）。
+  const rawMatches = collectRawMarkdownMatches(domToPlainText(root))
+  const useMarkerBasedRestore = !!preserved && rawMatches.length > 0
+
+  if (useMarkerBasedRestore && preserved) {
+    const snap = (x: number): number => {
+      for (const m of rawMatches) {
+        const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[m.kind as ToggleFormatKind]
+        if (x > m.start && x < m.start + prefix.length) return m.start + prefix.length
+        if (x > m.end - suffix.length && x < m.end) return m.end - suffix.length
+      }
+      return x
+    }
+    const start = snap(preserved.start)
+    const end = snap(preserved.end)
+    // 終端側を先に挿入してから始端側を挿入する（始端側の挿入が終端側のオフセットへ影響
+    // しない順序にする）
+    if (start === end) {
+      replaceRangeWithText(root, start, start, SELECTION_START_MARKER)
+    } else {
+      replaceRangeWithText(root, end, end, SELECTION_END_MARKER)
+      replaceRangeWithText(root, start, start, SELECTION_START_MARKER)
+    }
+  }
+
+  consumeRawMarkdownSyntax(root)
+
   const text = domToPlainText(root)
 
   // コードブロックの範囲を先に確保し、引用の判定がコードブロックの中身まで誤って
@@ -890,189 +1028,25 @@ export function syncLiveFormatting(root: HTMLElement): void {
   const quoteRanges = collectQuoteRanges(text, codeBlockRanges)
   for (const q of quoteRanges) wrapQuoteRange(root, q)
 
-  // 太字・斜体・下線・取り消し線・コードのインライン装飾を、引用ブロックが既に消費した範囲を
-  // 除いた部分に適用する（引用ブロックの内部はwrapQuoteRangeが自分で再帰的に処理済みのため、
-  // ここで重複して処理しない）。
+  // コードのインライン装飾を、引用ブロックが既に消費した範囲を除いた部分に適用する（引用
+  // ブロックの内部はwrapQuoteRangeが自分で再帰的に処理済みのため、ここで重複して処理しない）。
   const matches = collectLiveMatches(text).filter(
     (m) => !quoteRanges.some((q) => m.start < q.end && q.start < m.end),
   )
   for (const m of matches) wrapLiveMatch(root, m)
 
   root.normalize()
-  if (preserved) setSelectionOffsets(root, preserved.start, preserved.end)
-}
-
-// 書式トグルボタン（太字・斜体・下線・取り消し線、ユーザーからの明示的な要望）。以下は
-// DOM操作を伴わない純粋関数で、実際のテキスト書き換え・カーソル移動はComposer.tsx側が
-// TextEdit（{start,end,text}、既存のreplaceRangeWithTextへそのまま渡せる形）を順番に
-// 適用することで行う。edits配列は常に「高いオフセット→低いオフセット」の順（後の要素ほど
-// 前方）に並んでおり、この順で素直にreplaceRangeWithTextを呼べば、先に適用した編集が
-// あとから適用する編集のオフセットへ影響しない（既存のwrapSelectionが「終端側を先に、
-// 始端側を後に」処理しているのと同じ考え方）。
-
-// exportしている理由: Composer.tsx側のmaterializePendingFormats（pendingFormatsに保留していた
-// 書式を、実際に入力された文字の周りへ初めてマーカーとして挿入する処理）が、この2関数と全く
-// 同じ「複数書式を入れ子の順番で開始・終了マーカー文字列に変換する」ロジックを必要とするため。
-export function closingSequence(formats: ToggleFormatKind[]): string {
-  return formats
-    .slice()
-    .reverse()
-    .map((f) => TOGGLE_FORMAT_MARKERS[f].suffix)
-    .join('')
-}
-
-export function openingSequence(formats: ToggleFormatKind[]): string {
-  return formats.map((f) => TOGGLE_FORMAT_MARKERS[f].prefix).join('')
-}
-
-/** カーソル（選択なし）が現在activeFormatsの終端マーカー列の直前に位置しているか
- * （＝ボタンの押下状態がまだ有効かどうか）を判定する。selectionchangeで使う。 */
-export function isCursorInsideActiveFormats(text: string, cursor: number, activeFormats: ToggleFormatKind[]): boolean {
-  if (activeFormats.length === 0) return false
-  const seq = closingSequence(activeFormats)
-  return text.slice(cursor, cursor + seq.length) === seq
-}
-
-export interface TextEdit {
-  start: number
-  end: number
-  text: string
-}
-
-export interface ToggleFormatAtCursorResult {
-  /** 高いオフセット→低いオフセットの順（0〜1件）。空配列ならテキストの変更は不要。 */
-  edits: TextEdit[]
-  cursor: number
-  activeFormats: ToggleFormatKind[]
-  /** 内側でない書式を解除した結果、残りの書式を保留（pendingFormats）へ回す必要がある場合に
-   * 含める（下記コメント参照）。それ以外は常に空配列。 */
-  newlyPending: ToggleFormatKind[]
-}
-
-// バグ修正（ユーザーからの報告「記法のボタン押すと一文字分見えない何かが入力されるのやめて
-// ほしい」）: 以前はボタンを押した瞬間、まだ何も入力していなくても開始・終了マーカーの対を
-// その場のテキストへ即座に挿入していた（文字色を透明にして隠していても、実際にはDOM/本文に
-// 「空だが実在する」書式が存在している状態だった）。今回、実際に文字が入力されるまでは本文へ
-// 一切触れない方式に変更した——ボタンを押した直後は見た目の押下状態（Composer.tsxの
-// pendingFormats、DOMには一切触れない）だけを切り替え、次に実際に文字が入力された瞬間に
-// Composer.tsx側のmaterializePendingFormatsが初めて開始・終了マーカーをその場に挿入する
-// （挿入時点で既に中身が伴っているため、「空のまま」というマーカーが本文に存在する瞬間が
-// 無くなる）。
-//
-// この関数（toggleFormatAtCursor）は、そのため「既にactiveFormats（＝実際にマーカーが
-// その場に存在する、既に文字が入力済みの書式）に含まれる書式をもう一度押して解除する」場合
-// にのみ呼ばれる（Composer.tsxのtoggleFormatButton参照。まだ何も入力されていない新しい書式を
-// 押しただけの場合はこの関数を呼ばず、pendingFormatsの切り替えだけで済ませる）。
-export function toggleFormatAtCursor(
-  text: string,
-  cursor: number,
-  activeFormats: ToggleFormatKind[],
-  kind: ToggleFormatKind,
-): ToggleFormatAtCursorResult {
-  const cursorValid = isCursorInsideActiveFormats(text, cursor, activeFormats)
-
-  if (!cursorValid) {
-    // カーソルが既にズレている状態で同じボタンをもう一度押した場合。テキストには一切触れず、
-    // 記憶からその書式だけを取り除く（ボタンの見た目を正すだけ）。
-    return { edits: [], cursor, activeFormats: activeFormats.filter((f) => f !== kind), newlyPending: [] }
-  }
-
-  const idx = activeFormats.indexOf(kind)
-  const isInnermost = idx === activeFormats.length - 1
-  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
-
-  if (isInnermost) {
-    const isEmpty = text.slice(Math.max(0, cursor - prefix.length), cursor) === prefix
-    if (isEmpty) {
-      // 何も入力しないまま同じボタンをもう一度押して解除した場合は、空のマーカー対を丸ごと
-      // 削除する（本文に空の**が残らないようにする。これは既に本物として存在するマーカーの
-      // 削除であり、上記のバグ修正とは無関係——computeMarkerAwareDeletionのBackspace/Delete
-      // 経由で中身を全て消しきった後にも同じ空の状態に到達しうるため、この分岐自体は必要）
-      return {
-        edits: [{ start: cursor - prefix.length, end: cursor + suffix.length, text: '' }],
-        cursor: cursor - prefix.length,
-        activeFormats: activeFormats.slice(0, -1),
-        newlyPending: [],
-      }
-    }
-    // 最も内側の書式を解除: 自分自身の終端マーカーの直後までカーソルを進めるだけでよい
-    // （残りの書式の終端マーカー列はそのまま後ろに続いている）
-    return { edits: [], cursor: cursor + suffix.length, activeFormats: activeFormats.slice(0, -1), newlyPending: [] }
-  }
-
-  // 内側でない書式を解除: 現在有効な全書式の終端マーカー列全体の直後までカーソルを進めて
-  // （＝そこまでに入力した内容を正しく閉じて）残りをすべて閉じる。残りの書式（例: bold+underline）
-  // は、その場に空のマーカー対を再度挿入するのではなくnewlyPendingとして返し、実際に次の文字が
-  // 入力されたときにComposer.tsx側のmaterializePendingFormatsが改めてその場に挿入する
-  // （上記のバグ修正と同じ理由——ここでeditsを空のままにしているのはそのため）。
-  const fullClosing = closingSequence(activeFormats)
-  const afterClosing = cursor + fullClosing.length
-  const remaining = activeFormats.filter((f) => f !== kind)
-  return { edits: [], cursor: afterClosing, activeFormats: [], newlyPending: remaining }
-}
-
-export interface ToggleFormatOnSelectionResult {
-  /** 常に2件、高いオフセット→低いオフセットの順。 */
-  edits: TextEdit[]
-  selectionStart: number
-  selectionEnd: number
-}
-
-/** 選択範囲がある状態で書式トグルボタンを押した結果を計算する（選択範囲の直前・直後に既に
- * ちょうどそのマーカーが付いていれば外す、無ければ付けるトグル動作）。戻り値の選択範囲は
- * 常にcontent部分（マーカーを除く）を指す。 */
-export function toggleFormatOnSelection(
-  text: string,
-  start: number,
-  end: number,
-  kind: ToggleFormatKind,
-): ToggleFormatOnSelectionResult {
-  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
-  const hasPrefix = text.slice(Math.max(0, start - prefix.length), start) === prefix
-  const hasSuffix = text.slice(end, end + suffix.length) === suffix
-  if (hasPrefix && hasSuffix) {
-    return {
-      edits: [
-        { start: end, end: end + suffix.length, text: '' },
-        { start: start - prefix.length, end: start, text: '' },
-      ],
-      selectionStart: start - prefix.length,
-      selectionEnd: end - prefix.length,
-    }
-  }
-  return {
-    edits: [
-      { start: end, end, text: suffix },
-      { start, end: start, text: prefix },
-    ],
-    selectionStart: start + prefix.length,
-    selectionEnd: end + prefix.length,
+  if (useMarkerBasedRestore) {
+    const restored = restoreSelectionFromMarkers(root, hasRange)
+    if (!restored) stripSelectionMarkersFromDom(root)
+  } else if (preserved) {
+    setSelectionOffsets(root, preserved.start, preserved.end)
   }
 }
 
-// バグ修正（ユーザーからの報告「書式を変更してメッセージを打ち込んだ後、そのメッセージを
-// Deleteキーで一文字ずつ消していくと、書式付きの文字の手前で記号（**）が見えてしまう」）:
-// 上のtoggleFormatAtCursorの「何も入力しないまま同じボタンを押して解除」ケース（＝カーソンが
-// 開き・閉じマーカーのちょうど中間にある空の状態）は既にhandleKeyDown側の専用チェックで対応済み
-// だったが、今回の報告は別のカーソル位置——「**あああ**あああ」のようにいったん書式を解除して
-// 続けて普通の文字を打った後、末尾からBackspace/Deleteで戻ってきて閉じマーカーの直後（＝隠し
-// マーカーspanの直後）に到達したケース。隠しマーカーspanはcontentEditable=falseの原子ノード
-// なので、ネイティブなBackspace/Deleteはそこに隣接した瞬間、マーカー全体を1回の操作で丸ごと
-// 消してしまう。開き・閉じの片方だけ無くなると、残った側は正規表現で対になる相手を見つけられず
-// 隠されないまま「**」がそのまま可視化されてしまう。
-//
-// 対策: マーカーspanの直後（Backspace）・直前（Delete）にカーソルがあるときは、ネイティブの
-// 削除に任せず、マーカー自体ではなくその書式の「中身」の末尾/先頭の1文字を代わりに削除する
-// （中身が空なら開き・閉じマーカーを対でまとめて削除し、書式ごと無くす——これは実質的に
-// toggleFormatAtCursorの空マーカー解除と同じ結果になる）。マーカーspanは常に書式ラッパー要素
-// （<strong>/<em>/<u>/<s>、LIVE_FORMAT_ATTR付き）のfirstChild（開き）またはlastChild（閉じ）
-// として存在するという不変条件（wrapLiveMatch参照）を使い、正規表現の再解釈ではなく実際のDOM
-// から直接それぞれのオフセット範囲を求める（入れ子になった書式でも、その入れ子を組み立てた
-// DOM構造をそのまま信用できるため、ネストの深さを問わず正しく動く）。
-//
-// 引用（quote、LIVE_FORMAT_ATTR="quote"）の「> 」マーカーは対になる閉じマーカーが存在しない
-// 単独のマーカーのため、この問題自体が起きない（丸ごと消えても「対を失った記号」が残らず、
-// 単にその行が引用でなくなるだけで正しい）。よってこの関数の対象外とする。
+// 書式トグルボタン（太字・斜体・下線・取り消し線、ユーザーからの明示的な要望）。以下はDOM
+// 構造を直接組み立てる関数群（本ファイル前方の書式セクションの冒頭コメント参照）。
+
 function computeElementOffset(root: HTMLElement, el: Element): { start: number; end: number } {
   const parent = el.parentNode as Node
   const idx = indexOfChild(el)
@@ -1080,60 +1054,349 @@ function computeElementOffset(root: HTMLElement, el: Element): { start: number; 
   return { start, end: start + textLength(el) }
 }
 
-export type DeleteDirection = 'backward' | 'forward'
+/** contentを指定した書式の並び（外側→内側の順）でネストしたDOM要素として包んだ結果を返す
+ * （DOMには挿入しない、呼び出し元がinsertNode/insertBefore等で配置する）。formatsが空なら
+ * contentをそのまま返す。 */
+function buildFormattedNode(content: Node, formats: ToggleFormatKind[]): Node {
+  let result = content
+  for (const kind of [...formats].reverse()) {
+    const def = FORMAT_ELEMENT[kind]
+    const wrapper = document.createElement(def.tagName)
+    wrapper.className = def.className
+    wrapper.setAttribute(TOGGLE_FORMAT_ELEMENT_ATTR, kind)
+    wrapper.appendChild(result)
+    result = wrapper
+  }
+  return result
+}
 
-/** Backspace（'backward'）・Delete（'forward'）キーの押下時、カーソルが書式の隠しマーカーspanに
- * 隣接していて、ネイティブの削除に任せると対になる相手を失ったマーカーが可視化されてしまう場合に、
- * 代わりに削除すべきプレーンテキストの範囲を返す。該当しなければnull（呼び出し元はpreventDefault
- * せずネイティブの挙動にそのまま任せてよい）。 */
-export function computeMarkerAwareDeletion(root: HTMLElement, direction: DeleteDirection): { start: number; end: number } | null {
-  const offs = getSelectionOffsets(root)
-  if (!offs || offs.start !== offs.end) return null
-  const cursor = offs.start
-  const markers = Array.from(root.querySelectorAll<HTMLElement>(`[${LIVE_FORMAT_MARKER_ATTR}]`))
-  for (const marker of markers) {
-    const wrapper = marker.parentElement
-    if (!wrapper) continue
-    const kind = wrapper.getAttribute(LIVE_FORMAT_ATTR) as ToggleFormatKind | 'quote' | null
-    if (!kind || kind === 'quote') continue
-    const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
-    const wrapperRange = computeElementOffset(root, wrapper)
-    const contentStart = wrapperRange.start + prefix.length
-    const contentEnd = wrapperRange.end - suffix.length
-    // 中身が空（開き・閉じマーカーが隣接しているだけ）の書式は、カーソルがその間にありさえすれば
-    // Backspace/Deleteどちらでも書式ごと削除する。React側のactiveFormats（ボタンの押下状態）に
-    // 依存させない——書式を解除するボタンを押した後に空のまま放置される経路（例:
-    // 太字ボタンで空マーカーを開始→もう一度押して解除→何も打たずにBackspace）でも同じ事故が
-    // 起きるため、DOM上の実際のマーカー配置だけを根拠に判定する（同じ書式の2つのマーカーに
-    // ついてこの判定を2回行うことになるが、結果は同じなので害はない）。
-    if (contentStart === contentEnd && cursor === contentStart) {
-      return { start: wrapperRange.start, end: wrapperRange.end }
+/** [start,end)を指定した書式の並び（外側→内側の順、Composer.tsx側のpendingFormats/
+ * activeFormats配列と同じ規約）でネストした実DOM要素として直接ラップする。マーカー文字は
+ * 一切経由しない。Composer.tsxのmaterializePendingFormats（ボタンで保留していた書式を、実際に
+ * 入力された文字の周りへ初めて構造化する処理）から使う。rootはHTMLElement・DocumentFragment
+ * のどちらでもよい。 */
+export function wrapRangeInFormats(root: Node, start: number, end: number, formats: ToggleFormatKind[]): void {
+  if (start >= end || formats.length === 0) return
+  const startPos = resolveOffset(root, start)
+  const endPos = resolveOffset(root, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+  range.insertNode(buildFormattedNode(fragment, formats))
+}
+
+/** カーソル位置（プレーンテキストオフセット）を包む太字・斜体・下線・取り消し線の実要素を、
+ * 内側から外側の順で返す（配列[0]が最も内側）。resolveOffsetでDOM位置を求め、そこから
+ * parentElementをrootまで遡ってTOGGLE_FORMAT_ELEMENT_ATTR付きの要素だけを集める。 */
+function getFormatElementChainAt(root: HTMLElement, cursor: number): HTMLElement[] {
+  const pos = resolveOffset(root, cursor)
+  let node: HTMLElement | null =
+    pos.node.nodeType === Node.TEXT_NODE ? ((pos.node as Text).parentElement as HTMLElement | null) : (pos.node as HTMLElement)
+  const chain: HTMLElement[] = []
+  while (node && node !== root) {
+    if (node.hasAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)) chain.push(node)
+    node = node.parentElement
+  }
+  return chain
+}
+
+function getFormatChainAt(root: HTMLElement, cursor: number): ToggleFormatKind[] {
+  return getFormatElementChainAt(root, cursor).map((el) => el.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR) as ToggleFormatKind)
+}
+
+/** カーソル（選択なし）が現在activeFormatsの実要素チェーンの内部に位置しているか
+ * （＝ボタンの押下状態がまだ有効かどうか）を判定する。selectionchangeとtoggleFormatAtCursorDom
+ * の両方から使う。太字等が実DOM構造になったため、テキストの部分文字列比較ではなくDOM構造を
+ * 直接調べる（偶然一致する文字列に惑わされない、より正確な判定になる）。 */
+export function isCursorInsideActiveFormats(root: HTMLElement, cursor: number, activeFormats: ToggleFormatKind[]): boolean {
+  if (activeFormats.length === 0) return false
+  const chain = getFormatChainAt(root, cursor)
+  if (chain.length !== activeFormats.length) return false
+  for (let i = 0; i < chain.length; i++) {
+    if (chain[i] !== activeFormats[activeFormats.length - 1 - i]) return false
+  }
+  return true
+}
+
+export interface ToggleFormatAtCursorDomResult {
+  activeFormats: ToggleFormatKind[]
+  /** 内側でない書式を解除した結果、残りの書式を保留（pendingFormats）へ回す必要がある場合に
+   * 含める。それ以外は常に空配列。 */
+  newlyPending: ToggleFormatKind[]
+}
+
+// この関数は「既にactiveFormats（＝実際に構造化済み、既に文字が入力済みの書式）に含まれる
+// 書式をもう一度押して解除する」場合にのみ呼ばれる（Composer.tsxのtoggleFormatButton参照。
+// まだ何も入力されていない新しい書式を押しただけの場合はこの関数を呼ばず、pendingFormatsの
+// 切り替えだけで済ませる）。
+//
+// 退出点の作り方に既存のinsertTextAfterNode（本ファイル前方、メンションspanの境界問題向けに
+// 実装済み）を使う理由: 数値オフセットをそのままsetSelectionOffsetsへ渡すだけでは不十分——
+// resolveOffsetは「その位置より後に何も実体が無い」場合、要素の内側に留まる位置（例:
+// {node: strong, offset: strong.childNodes.length}）を返す（lastPositionフォールバック）。
+// これは通常は望ましい挙動だが、「書式を閉じた直後にカーソルを置く」場面では逆に危険で、
+// 文書の絶対末尾で太字を解除した直後に何も実体を挿入しないと、次にタイプした文字がまだ
+// <strong>の内側（＝その位置より後に何も無い）に入力されてしまう。
+//
+// バグ修正（実機Playwright検証で発見）: insertTextAfterNode(node, '')のように空文字列を
+// 渡すと、挿入される退出点用のテキストノードは中身が空のまま残る。この直後に必ず呼ばれる
+// afterMutate→refreshEditorHousekeeping→syncLiveFormattingの冒頭のroot.normalize()が
+// 「空のテキストノードを除去する」仕様（Node.normalize()の定義どおり）のため、退出点その
+// ものがユーザーが次の文字を打つ前に消えてしまい、Selectionが要素の内側（上記の危険な
+// フォールバック位置）へ巻き戻ってしまっていた（実際に「太字を解除した直後に入力した文字が
+// まだ太字のまま」「内側でない書式を解除した直後に入力した文字が古い入れ子構造の中に迷い込む」
+// という2つの不具合として実機で確認した）。空文字列ではなく、既存のCARET_MARKER（ゼロ幅
+// スペース、本ファイル前方でEnterキーの末尾改行キャレット問題向けに導入済み）を渡すことで、
+// 中身が空でない（＝normalize()で除去されない）実在のテキストノードとして退出点を確実に
+// 生き残らせる。次に実際の文字が入力された時点でhandleInputの冒頭のremoveCaretMarkerFromDom
+// が速やかに片付け、domToPlainText/domToMarkdownの出力にも一切含まれない（既存の仕組みを
+// そのまま再利用しているだけで、新しい特別扱いは増やしていない）。
+export function toggleFormatAtCursorDom(
+  root: HTMLElement,
+  cursor: number,
+  activeFormats: ToggleFormatKind[],
+  kind: ToggleFormatKind,
+): ToggleFormatAtCursorDomResult {
+  if (!isCursorInsideActiveFormats(root, cursor, activeFormats)) {
+    // カーソルが既にズレている状態で同じボタンをもう一度押した場合。DOMには一切触れず、
+    // 記憶からその書式だけを取り除く（ボタンの見た目を正すだけ）。
+    return { activeFormats: activeFormats.filter((f) => f !== kind), newlyPending: [] }
+  }
+
+  const elementChain = getFormatElementChainAt(root, cursor) // 内側→外側の順
+  const idx = activeFormats.indexOf(kind)
+  const isInnermost = idx === activeFormats.length - 1
+
+  if (isInnermost) {
+    const target = elementChain[0]
+    if (textLength(target) === 0) {
+      // 何も入力しないまま同じボタンをもう一度押して解除した場合。要素自体を削除する
+      // （文字数は変化しないためSelectionは自然にその位置に残る）。
+      target.remove()
+      return { activeFormats: activeFormats.slice(0, -1), newlyPending: [] }
     }
-    // バグ修正（ユーザーからの報告「取り消し線で、Enterを押して改行してからDeleteを押すと
-    // 記号が出てくる」）: 改行はその書式の中身の一部として挿入される（内側にカーソルがある
-    // 状態でEnterを押すと、その場に生の"\n"が挿入されるだけで書式そのものは閉じない）ため、
-    // 改行の直後・カーソルは「閉じマーカーの直前（＝中身の末尾）」に位置することになる。
-    // この位置でDeleteキーを押すと、ネイティブには「次のノード」である閉じマーカーspan
-    // （contentEditable=falseの原子ノード）がそのまま1回で消えてしまい、対になる相手を
-    // 失った開きマーカーだけが可視化される。同様にBackspaceキーでも「開きマーカーの直後
-    // （＝中身の先頭）」という対称の位置で同じ事故が起こりうる。どちらも「中身の内部で
-    // これ以上その方向へ消せる文字が無い」位置のため、マーカーには一切触れず、書式の
-    // 外側（直後/直前の1文字）を代わりに削除して書式の外へ抜ける（中身が無ければ何も
-    // 削除せず、その位置をまたぐだけになる——replaceRangeWithTextが範囲をクランプするため
-    // 安全）。
-    if (direction === 'backward' && cursor === contentStart) {
-      return { start: wrapperRange.start - 1, end: wrapperRange.start }
+    insertTextAfterNode(target, CARET_MARKER)
+    return { activeFormats: activeFormats.slice(0, -1), newlyPending: [] }
+  }
+
+  // 内側でない書式を解除: 現在アクティブなチェーンの最も外側の要素を基準に、カーソルより
+  // 後ろに既入力の内容が残っていればそれを切り出して残りの書式で再ラップし直し、外側要素の
+  // 直後（Range.extractContents/insertNodeが境界点を正しく分割する既存の前提を利用）へ
+  // 退出点を作る。残りの書式（例: bold+underline）は、その場に空の要素を作るのではなく
+  // newlyPendingとして返し、実際に次の文字が入力されたときにComposer.tsx側の
+  // materializePendingFormatsが改めてその場にラップする。
+  const outer = elementChain[elementChain.length - 1]
+  const outerRange = computeElementOffset(root, outer)
+  const remaining = activeFormats.filter((f) => f !== kind)
+
+  if (outerRange.end > cursor) {
+    const startPos = resolveOffset(root, cursor)
+    const endPos = resolveOffset(root, outerRange.end)
+    const range = document.createRange()
+    range.setStart(startPos.node, startPos.offset)
+    range.setEnd(endPos.node, endPos.offset)
+    const fragment = range.extractContents()
+    const outerParent = outer.parentNode as Node
+    const anchor = outer.nextSibling
+    const node = remaining.length > 0 ? buildFormattedNode(fragment, remaining) : fragment
+    outerParent.insertBefore(node, anchor)
+    const lastInserted = anchor ? anchor.previousSibling : outerParent.lastChild
+    insertTextAfterNode(lastInserted ?? outer, CARET_MARKER)
+  } else {
+    insertTextAfterNode(outer, CARET_MARKER)
+  }
+  return { activeFormats: [], newlyPending: remaining }
+}
+
+/** kindの実要素（TOGGLE_FORMAT_ELEMENT_ATTR="<kind>"）が[start,end)を（複数要素での分割
+ * カバーも含めて）完全に覆っているか判定する。選択範囲トグルの「既に囲まれていれば外す」
+ * 判定に使う。 */
+export function isFullyWrapped(root: HTMLElement, start: number, end: number, kind: ToggleFormatKind): boolean {
+  if (start >= end) return false
+  const spans = Array.from(root.querySelectorAll<HTMLElement>(`[${TOGGLE_FORMAT_ELEMENT_ATTR}="${kind}"]`))
+    .map((el) => computeElementOffset(root, el))
+    .sort((a, b) => a.start - b.start)
+  let covered = start
+  for (const s of spans) {
+    if (s.start > covered) break
+    if (s.end > covered) covered = s.end
+    if (covered >= end) return true
+  }
+  return covered >= end
+}
+
+/** 選択範囲がある状態で書式トグルボタンを押した結果を計算・適用する（既に完全にkindで
+ * 囲まれていれば外す、そうでなければ丸ごと囲むトグル動作）。Range.extractContents/insertNodeが
+ * 既存要素の境界を自然に分割するため、選択範囲が既存書式の境界を跨ぐケースも特別な処理は
+ * 不要（部分的に重なった場合は新しい外側要素の内側に元の要素が入れ子で残るだけで、表示は
+ * 変わらない）。マーカー文字を一切経由しないため、返す選択範囲は常に[start,end)のまま
+ * （±prefix.lengthのような補正が不要——旧実装より単純になった点）。 */
+export function toggleFormatOnSelectionDom(
+  root: HTMLElement,
+  start: number,
+  end: number,
+  kind: ToggleFormatKind,
+): { selectionStart: number; selectionEnd: number } {
+  if (start >= end) return { selectionStart: start, selectionEnd: end }
+  const wasFullyWrapped = isFullyWrapped(root, start, end, kind)
+  const startPos = resolveOffset(root, start)
+  const endPos = resolveOffset(root, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+  if (wasFullyWrapped) {
+    unwrapMatching(fragment, `[${TOGGLE_FORMAT_ELEMENT_ATTR}="${kind}"]`)
+    range.insertNode(fragment)
+  } else {
+    range.insertNode(buildFormattedNode(fragment, [kind]))
+  }
+  return { selectionStart: start, selectionEnd: end }
+}
+
+/** 1件の生Markdownマッチ（開始・終了記号を含む範囲）を破壊的に処理する: 記号を取り除き、
+ * 残りを（入れ子の生Markdownも再帰的に処理して）実要素でラップする。異常構造の場合は部分
+ * 破壊を避け、切り出した内容をそのまま戻す（consumeRawMarkdownSyntaxのみから使う）。 */
+function consumeOneRawMatch(root: Node, match: LiveMatch): void {
+  const { start, end, kind } = match
+  if (kind === 'code' || start >= end) return
+  const startPos = resolveOffset(root, start)
+  const endPos = resolveOffset(root, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+
+  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+  // extractHiddenMarkerは本来「隠しマーカーspanを作る」関数だが、ここでは返り値のspanは
+  // 捨てて「記号の文字を確実に切り落とす」副作用だけを再利用する（引用側の隠しマーカー
+  // 方式とは異なり、この経路では記号を隠すのではなく消し去るため）。
+  const leading = extractHiddenMarker(fragment, prefix.length, false)
+  const trailing = leading ? extractHiddenMarker(fragment, suffix.length, true) : null
+  if (!leading || !trailing) {
+    range.insertNode(fragment)
+    return
+  }
+  consumeRawMarkdownMatchesOnFragment(fragment)
+  range.insertNode(buildFormattedNode(fragment, [kind]))
+}
+
+/** fragment（既に1マッチぶんとして抽出済みの中身）の中に、さらに別の生Markdownが入れ子に
+ * なっていないかを調べ、あれば再帰的にconsumeOneRawMatchを適用する。 */
+function consumeRawMarkdownMatchesOnFragment(fragment: DocumentFragment): void {
+  const innerText = domToPlainText(fragment)
+  if (!innerText) return
+  const nested = [...collectRawMarkdownMatches(innerText)].sort((a, b) => b.start - a.start)
+  for (const m of nested) consumeOneRawMatch(fragment, m)
+}
+
+function stripSelectionMarkersFromDom(root: HTMLElement): void {
+  if (!root.textContent) return
+  if (!root.textContent.includes(SELECTION_START_MARKER) && !root.textContent.includes(SELECTION_END_MARKER)) return
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = node as Text
+      if (t.data.includes(SELECTION_START_MARKER) || t.data.includes(SELECTION_END_MARKER)) {
+        t.data = stripSelectionMarkers(t.data)
+      }
+      return
     }
-    if (direction === 'forward' && cursor === contentEnd) {
-      return { start: wrapperRange.end, end: wrapperRange.end + 1 }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    for (const child of Array.from(node.childNodes)) walk(child)
+  }
+  for (const child of Array.from(root.childNodes)) walk(child)
+}
+
+function findMarkerNode(root: HTMLElement, marker: string): { node: Text; offset: number } | null {
+  const walk = (node: Node): { node: Text; offset: number } | null => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const idx = (node as Text).data.indexOf(marker)
+      return idx === -1 ? null : { node: node as Text, offset: idx }
     }
-    const hit =
-      (direction === 'backward' && cursor === wrapperRange.end) || (direction === 'forward' && cursor === wrapperRange.start)
-    if (!hit) continue
-    if (contentEnd > contentStart) {
-      return direction === 'backward' ? { start: contentEnd - 1, end: contentEnd } : { start: contentStart, end: contentStart + 1 }
+    if (node.nodeType !== Node.ELEMENT_NODE) return null
+    for (const child of Array.from(node.childNodes)) {
+      const found = walk(child)
+      if (found) return found
     }
-    return { start: wrapperRange.start, end: wrapperRange.end }
+    return null
+  }
+  for (const child of Array.from(root.childNodes)) {
+    const found = walk(child)
+    if (found) return found
   }
   return null
+}
+
+// バグ修正（実機Playwright検証で発見。ユーザーからの報告「引用の中で手打ちの**bold**が
+// 閉じた直後、続けて打った文字までbold扱いになってしまう」）: 目印文字の位置を数値オフセットで
+// 記録し、処理完了後にfinalText.indexOf(...)で求めた数値オフセットをsetSelectionOffsets経由で
+// 復元する実装だと、「閉じたばかりの実要素の直後」という境界でtoggleFormatAtCursorDomと全く
+// 同じ問題（resolveOffsetが手前の要素の内側に留まる位置を返すバイアス、composerEditing.tsの
+// toggleFormatAtCursorDomのコメント参照）が起きる——目印文字は復元の直前に取り除いてしまうため、
+// 復元の瞬間には「ただの数値オフセット」に戻ってしまい、境界のあいまいさを一切解消できない。
+// 目印文字のノード参照を直接見つけて、その場でdataから1文字だけ取り除きながらSelectionを
+// 明示的に置き直す（数値オフセットのround-tripを一切経由しない）ことで、この問題を避ける。
+//
+// バグ修正（実機Playwright検証で発見、上と同じ根の問題）: 目印文字を単純に取り除く
+// （data.slice等で1文字減らす）と、その目印1文字だけがテキストノードの全内容だった場合
+// （閉じたばかりの実要素の直後で他に何も続いていない、まさに今回のケース）、除去後は
+// 中身が空のテキストノードにSelectionが取り残される。空のテキストノードはtoggleFormatAtCursorDom
+// のコメントで既に指摘した通りNode.normalize()で除去されてしまうため、次に実際の文字が
+// 入力される前にこの退出点そのものが消え、Selectionが手前の要素の内側へ巻き戻ってしまう。
+// 単純に取り除くのではなく、既存のCARET_MARKER（ゼロ幅スペース、改行キャレット問題向けに
+// 導入済み）へ置き換える——中身が空でない実在のテキストノードとして退出点を確実に生き残らせ、
+// 次に実際の文字が入力された時点でhandleInputの冒頭のremoveCaretMarkerFromDomが速やかに
+// 片付ける（既存の仕組みをそのまま再利用するだけで、新しい特別扱いは増やしていない）。 */
+function restoreSelectionFromMarkers(root: HTMLElement, hasRange: boolean): boolean {
+  const startHit = findMarkerNode(root, SELECTION_START_MARKER)
+  if (!startHit) return false
+  const endHit = hasRange ? findMarkerNode(root, SELECTION_END_MARKER) : null
+
+  // 終端側を先に置き換える（同じテキストノードに両方ある場合、終端側のオフセットは常に
+  // 開始側以降にあるため、先に置き換えても開始側のオフセットには影響しない）。1文字→1文字の
+  // 置き換えのため、いずれの場合もオフセットの数値は変化しない。
+  if (endHit) {
+    endHit.node.data = endHit.node.data.slice(0, endHit.offset) + CARET_MARKER + endHit.node.data.slice(endHit.offset + 1)
+  }
+  startHit.node.data = startHit.node.data.slice(0, startHit.offset) + CARET_MARKER + startHit.node.data.slice(startHit.offset + 1)
+
+  // バグ修正（実機Playwright検証で発見、上と同じ根の問題）: Selectionをoffset（＝置き換えた
+  // CARET_MARKER文字の手前）に置くと、ブラウザが「新しい入力の書式は直前の要素から継承する」
+  // という自前のヒューリスティック（resolveOffsetとは無関係にブラウザ自身が持つ、キャレットが
+  // 要素境界のどちら側にあるかで入力書式を決める挙動）により、次に入力した文字が閉じたばかりの
+  // <strong>等の内側に吸い込まれてしまう。insertTextAfterNode（本ファイル前方）がoffsetでは
+  // なくtextNode.length（＝挿入した文字の直後）にSelectionを置いているのと同じ理由・同じ規約
+  // で、CARET_MARKER文字の直後（offset+1）に置く。 */
+  const sel = window.getSelection()
+  if (!sel) return true
+  const range = document.createRange()
+  range.setStart(startHit.node, startHit.offset + 1)
+  range.setEnd(endHit ? endHit.node : startHit.node, endHit ? endHit.offset + 1 : startHit.offset + 1)
+  sel.removeAllRanges()
+  sel.addRange(range)
+  return true
+}
+
+/** 手打ちの生Markdown（**word**等）を検出し、マーカー文字を削除して実要素（<strong>等）へ
+ * 破壊的に変換する。エスケープ機構が無いMarkdown方言のため、ボタンを使わず直接手打ちした
+ * 場合も送信後の見た目と食い違わないようにする（本ファイル前方の書式セクションの冒頭コメント
+ * 参照）。syncLiveFormattingから毎回呼ばれる。
+ *
+ * 選択範囲の保存・復元はこの関数の責務ではない（呼び出し元のsyncLiveFormattingが、この関数を
+ * 含む一連の変換全体を1つの目印文字ベースの保存・復元で包む。詳細はsyncLiveFormattingの
+ * コメント参照——以前はこの関数単独で数値オフセットの保存・復元を行っていたが、直後に
+ * syncLiveFormatting自身が行う別の保存・復元と二重になり、後者が「閉じたばかりの実要素の
+ * 直後」という境界を数値オフセットのround-tripだけで復元しようとして同じ問題を再発させて
+ * いた）。この関数はDOM/テキストの変換だけに専念する。 */
+export function consumeRawMarkdownSyntax(root: HTMLElement): void {
+  const text = domToPlainText(root)
+  const matches = collectRawMarkdownMatches(text)
+  if (matches.length === 0) return
+
+  // 開始位置の降順で処理する（後の要素ほど前方。処理済みの要素より前方のオフセットは
+  // 後続の処理に影響しない）。
+  const sorted = [...matches].sort((a, b) => b.start - a.start)
+  for (const m of sorted) consumeOneRawMatch(root, m)
+  root.normalize()
 }
