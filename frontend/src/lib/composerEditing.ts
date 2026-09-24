@@ -1109,12 +1109,26 @@ export function computeMarkerAwareDeletion(root: HTMLElement, direction: DeleteD
     if (contentStart === contentEnd && cursor === contentStart) {
       return { start: wrapperRange.start, end: wrapperRange.end }
     }
-    const isClosing = wrapper.lastChild === marker
-    const isOpening = wrapper.firstChild === marker
-    const { start: markerStart, end: markerEnd } = computeElementOffset(root, marker)
+    // バグ修正（ユーザーからの報告「取り消し線で、Enterを押して改行してからDeleteを押すと
+    // 記号が出てくる」）: 改行はその書式の中身の一部として挿入される（内側にカーソルがある
+    // 状態でEnterを押すと、その場に生の"\n"が挿入されるだけで書式そのものは閉じない）ため、
+    // 改行の直後・カーソルは「閉じマーカーの直前（＝中身の末尾）」に位置することになる。
+    // この位置でDeleteキーを押すと、ネイティブには「次のノード」である閉じマーカーspan
+    // （contentEditable=falseの原子ノード）がそのまま1回で消えてしまい、対になる相手を
+    // 失った開きマーカーだけが可視化される。同様にBackspaceキーでも「開きマーカーの直後
+    // （＝中身の先頭）」という対称の位置で同じ事故が起こりうる。どちらも「中身の内部で
+    // これ以上その方向へ消せる文字が無い」位置のため、マーカーには一切触れず、書式の
+    // 外側（直後/直前の1文字）を代わりに削除して書式の外へ抜ける（中身が無ければ何も
+    // 削除せず、その位置をまたぐだけになる——replaceRangeWithTextが範囲をクランプするため
+    // 安全）。
+    if (direction === 'backward' && cursor === contentStart) {
+      return { start: wrapperRange.start - 1, end: wrapperRange.start }
+    }
+    if (direction === 'forward' && cursor === contentEnd) {
+      return { start: wrapperRange.end, end: wrapperRange.end + 1 }
+    }
     const hit =
-      (direction === 'backward' && isClosing && markerEnd === cursor) ||
-      (direction === 'forward' && isOpening && markerStart === cursor)
+      (direction === 'backward' && cursor === wrapperRange.end) || (direction === 'forward' && cursor === wrapperRange.start)
     if (!hit) continue
     if (contentEnd > contentStart) {
       return direction === 'backward' ? { start: contentEnd - 1, end: contentEnd } : { start: contentStart, end: contentStart + 1 }
