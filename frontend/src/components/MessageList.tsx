@@ -5,7 +5,9 @@ import { useMe } from '../hooks/useMe'
 import { useDraftKeys } from '../hooks/useDraftKeys'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { apiFetch, ApiError, uploadAttachment } from '../lib/api'
-import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
+import {
+  continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapCodeText, wrapSelectionText,
+} from '../lib/textFormatting'
 import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useToast } from './Toast'
@@ -157,11 +159,12 @@ function findNamedLinkMatches(text: string): { start: number; end: number; label
   return results
 }
 
-// 簡易書式（太字・斜体・下線・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望「Slackの
+// 簡易書式（太字・斜体・下線・取り消し線・コード・箇条書き・引用）。ユーザーからの明示的な要望「Slackの
 // メッセージ入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような機能を付けたい」
 // （2026-09-10最初の実装）と、続けて「コードボックスの中の文字は黒とは別の色にしてほしい。斜体や
-// 下線もSlackにあったので実装したい」（同日追加）により拡張した。採用した記法はGFM（GitHub Flavored
-// Markdown）風の`**太字**`・`` `コード` ``・``` ```コードブロック``` ```・行頭「- 」の箇条書き・
+// 下線もSlackにあったので実装したい」（同日追加）・「Slackと同じような引用タグの機能を付けたい」
+// （後日追加）により拡張した。採用した記法はGFM（GitHub Flavored Markdown）風の`**太字**`・
+// `` `コード` ``・``` ```コードブロック``` ```・行頭「- 」の箇条書き・行頭「> 」の引用・
 // `~~取り消し線~~`に加え、`_斜体_`（GFM標準の単一アンダースコア）・`++下線++`（標準Markdownに無い
 // ため独自に定めた記法）を追加した。Slack自体のmrkdwn記法（単一`*`太字・単一`~`取り消し線）は、
 // 日本語の波ダッシュ「〜」や文中で単発の`*`を使う文章との誤検出が多いため意図的に避けた（着手前に
@@ -171,15 +174,19 @@ function findNamedLinkMatches(text: string): { start: number; end: number; label
 // 判断で受容した**（コードスパン内の文字は装飾を解釈しないため、`` `__init__` `` のようにバック
 // クォートで囲めば誤検出は防げる）。下線の`++`記法も、既存の増分演算子`i++`のような単発の出現では
 // マッチしない（`++`が対になって初めて反応する）ため実用上のリスクは小さいと判断した。コードブロック・
-// 箇条書きは行を跨ぐ構造のため、メンション・URL・太字・斜体・下線・取り消し線・インラインコードと
+// 箇条書き・引用は行を跨ぐ構造のため、メンション・URL・太字・斜体・下線・取り消し線・インラインコードと
 // 同じ「本文中の位置に対するmatches」方式では扱えず、まず本文をコードブロック単位（1階層目）→
-// 箇条書き行の連続単位（2階層目）に分割してから、残った通常の文章部分にだけ既存のインライン装飾
-// （renderInlineSegment）を適用する2段階構成にした。コードスパン・コードブロックの中身は
+// 箇条書き/引用行の連続単位（2階層目）に分割してから、残った通常の文章部分にだけ既存のインライン装飾
+// （renderInlineSegment）を適用する2段階構成にした。箇条書き（行頭「- 」）・引用（行頭「> 」）は
+// 1行ごとに排他的に判定する（両方が同時に成立する行は無い。ネスト（引用の中の箇条書き等）には
+// 対応しない、という簡易実装の範囲内の割り切り）。コードスパン・コードブロックの中身は
 // Markdownの一般的な挙動どおり、太字・斜体・下線・取り消し線・メンション・URLをさらに解釈しない
 // （ネストした書式には対応しない、という簡易実装の範囲内の割り切り）。
 // コード表示の背景色はbg-surface-subtleではなくbg-surface-mutedを使う（発言行のホバー背景が
 // hover:bg-surface-subtleのため、同じ色にするとホバー時にコードの箱が消えて見えてしまうため）。
 // コード表示の文字色は黒（ink）と紛れないよう専用のtext-code-text（index.css参照）を使う。
+// 引用は左端に縦線（border-l）を置き、本文よりやや薄い色（text-ink-muted）で表示する（Slackの
+// 引用ブロックと同じ、左のバー＋やや控えめな文字色という見た目）。
 const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
 const INLINE_CODE_REGEX = /`([^`\n]+)`/g
 const BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
@@ -202,12 +209,16 @@ function splitCodeBlocks(text: string): { type: 'code' | 'text'; content: string
   return segments.length > 0 ? segments : [{ type: 'text', content: text }]
 }
 
-function splitBulletLists(
-  text: string,
-): ({ type: 'list'; items: string[] } | { type: 'text'; content: string })[] {
-  const segments: ({ type: 'list'; items: string[] } | { type: 'text'; content: string })[] = []
+type LineBlock =
+  | { type: 'list'; items: string[] }
+  | { type: 'quote'; lines: string[] }
+  | { type: 'text'; content: string }
+
+function splitLineBlocks(text: string): LineBlock[] {
+  const segments: LineBlock[] = []
   let textBuf: string[] = []
   let listBuf: string[] = []
+  let quoteBuf: string[] = []
   const flushText = () => {
     if (textBuf.length > 0) segments.push({ type: 'text', content: textBuf.join('\n') })
     textBuf = []
@@ -216,18 +227,30 @@ function splitBulletLists(
     if (listBuf.length > 0) segments.push({ type: 'list', items: listBuf })
     listBuf = []
   }
+  const flushQuote = () => {
+    if (quoteBuf.length > 0) segments.push({ type: 'quote', lines: quoteBuf })
+    quoteBuf = []
+  }
   for (const line of text.split('\n')) {
-    const m = /^- (.+)$/.exec(line)
-    if (m) {
+    const listMatch = /^- (.+)$/.exec(line)
+    const quoteMatch = /^> (.+)$/.exec(line)
+    if (listMatch) {
       flushText()
-      listBuf.push(m[1])
+      flushQuote()
+      listBuf.push(listMatch[1])
+    } else if (quoteMatch) {
+      flushText()
+      flushList()
+      quoteBuf.push(quoteMatch[1])
     } else {
       flushList()
+      flushQuote()
       textBuf.push(line)
     }
   }
   flushText()
   flushList()
+  flushQuote()
   return segments
 }
 
@@ -480,7 +503,7 @@ export function renderMessageBody(
       )
       return
     }
-    splitBulletLists(seg.content).forEach((ls, lsIdx) => {
+    splitLineBlocks(seg.content).forEach((ls, lsIdx) => {
       if (ls.type === 'list') {
         nodes.push(
           <ul key={`list-${segIdx}-${lsIdx}`} className="my-1 list-disc space-y-0.5 pl-5">
@@ -490,6 +513,19 @@ export function renderMessageBody(
               </li>
             ))}
           </ul>,
+        )
+      } else if (ls.type === 'quote') {
+        nodes.push(
+          <blockquote
+            key={`quote-${segIdx}-${lsIdx}`}
+            className="my-1 border-l-[3px] border-line-strong py-0.5 pl-2.5 text-ink-muted"
+          >
+            {ls.lines.map((line, li) => (
+              <div key={li}>
+                {renderInlineSegment(line, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}-q${li}`, customEmoji, jumbo)}
+              </div>
+            ))}
+          </blockquote>,
         )
       } else {
         nodes.push(
@@ -1600,6 +1636,18 @@ export default function MessageList({
       el.setSelectionRange(r.selStart, r.selEnd)
     })
   }
+  const applyEditQuote = () => {
+    const el = editTextareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? editBody.length
+    const end = el.selectionEnd ?? editBody.length
+    const r = insertQuoteText(editBody, start, end)
+    setEditBody(r.body)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(r.selStart, r.selEnd)
+    })
+  }
   const insertEditEmoji = (emoji: string) => {
     const el = editTextareaRef.current
     const cursor = el?.selectionStart ?? editBody.length
@@ -1842,6 +1890,17 @@ export default function MessageList({
                           <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                         </svg>
                       </button>
+                      <button
+                        type="button"
+                        title="引用（行頭に「> 」を付けます）"
+                        onClick={applyEditQuote}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                          <rect x="3" y="4" width="2" height="12" rx="1" fill="currentColor" />
+                          <path d="M8 6h9M8 10h9M8 14h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                        </svg>
+                      </button>
                     </div>
                     <textarea
                       ref={editTextareaRef}
@@ -1863,9 +1922,10 @@ export default function MessageList({
                           cancelEdit()
                           return
                         }
-                        // 箇条書きの行でEnterを押すと次の行にも自動で「- 」を続ける（Composer.tsxと同じ）
+                        // 箇条書き・引用の行でEnterを押すと次の行にも自動で「- 」/「> 」を続ける
+                        // （Composer.tsxと同じ）
                         if (e.key === 'Enter' && !e.shiftKey && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
-                          const r = continueBulletOnEnter(editBody, e.currentTarget.selectionStart)
+                          const r = continueBulletOnEnter(editBody, e.currentTarget.selectionStart) ?? continueQuoteOnEnter(editBody, e.currentTarget.selectionStart)
                           if (r) {
                             e.preventDefault()
                             const el = e.currentTarget

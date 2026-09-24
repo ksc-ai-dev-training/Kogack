@@ -642,6 +642,33 @@ export default function Composer({
     afterMutate()
   }
 
+  // 引用ボタン（ユーザーからの明示的な要望「Slackと同じような引用タグの機能を付けたい」）。
+  // insertBulletListと全く同じ考え方で、行頭「- 」の代わりに「> 」をトグルする（MessageList.tsxの
+  // 送信後表示・lib/textFormatting.ts（発言編集・定期投稿/トリガー本文欄）と同じ記法）。
+  const insertQuote = () => {
+    const root = editorRef.current
+    if (!root) return
+    const offs = getSelectionOffsets(root)
+    const total = domToPlainText(root).length
+    const start = offs?.start ?? total
+    const end = offs?.end ?? start
+    const text = domToPlainText(root)
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1
+    const nextNewline = text.indexOf('\n', end)
+    const lineEnd = nextNewline === -1 ? text.length : nextNewline
+    const lines = text.slice(lineStart, lineEnd).split('\n')
+    const nonBlankLines = lines.filter((l) => l.trim() !== '')
+    const allQuoted = nonBlankLines.length > 0 && nonBlankLines.every((l) => l.startsWith('> '))
+    const nextLines = lines.map((l) => {
+      if (l.trim() === '') return lines.length === 1 ? '> ' : l
+      return allQuoted ? l.replace(/^> /, '') : l.startsWith('> ') ? l : `> ${l}`
+    })
+    const nextBlock = nextLines.join('\n')
+    replaceRangeWithText(root, lineStart, lineEnd, nextBlock)
+    setPickerQuery(null)
+    afterMutate()
+  }
+
   // メンション候補の選択（人間・@channel・@here・チャンネルAIすべて共通）。ハイライトは
   // 挿入時点のみ付与する（詳細はcomposerEditing.tsの冒頭コメント参照）。挿入した表示文字列
   // 直後の空白は意図的にハイライトspanの外側（別のプレーンテキストノード）として挿入し、
@@ -843,11 +870,11 @@ export default function Composer({
     // contentEditableではEnterキーの既定挙動（ブロック要素の分割等、ブラウザ間で挙動が
     // 大きく異なる）に任せず、常に自前で処理する（改行はテキストノード内の生の"\n"文字として
     // 挿入し、white-space:pre-wrapで見た目を成立させる。詳細はcomposerEditing.tsの
-    // 冒頭コメント参照）。箇条書きの行でEnterを押すと、次の行にも自動的に「- 」を付けて
-    // 箇条書きを続ける（ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を
+    // 冒頭コメント参照）。箇条書き・引用の行でEnterを押すと、次の行にも自動的に「- 」/「> 」を
+    // 付けて続ける（ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を
     // 置き換える通常の入力）は対象外とし、素朴にカーソル位置のみのケースに絞る。何も入力して
-    // いない箇条書き行でEnterを押した場合は、そのままだと空の「- 」が際限なく増えてしまうため、
-    // 多くのエディタ（Notion・GitHub等）と同じくマーカーを外してリストから抜ける
+    // いない箇条書き/引用行でEnterを押した場合は、そのままだと空のマーカーが際限なく増えてしまう
+    // ため、多くのエディタ（Notion・GitHub等）と同じくマーカーを外して抜ける
     if (e.key === 'Enter') {
       e.preventDefault()
       const root = editorRef.current
@@ -859,12 +886,15 @@ export default function Composer({
         const lineStart = text.lastIndexOf('\n', cursor - 1) + 1
         const nextNewlineIdx = text.indexOf('\n', cursor)
         const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
-        const bulletMatch = /^- (.*)$/.exec(text.slice(lineStart, lineEnd))
-        if (bulletMatch) {
-          if (bulletMatch[1].trim() === '') {
+        const currentLine = text.slice(lineStart, lineEnd)
+        const bulletMatch = /^- (.*)$/.exec(currentLine)
+        const quoteMatch = !bulletMatch ? /^> (.*)$/.exec(currentLine) : null
+        const lineMatch = bulletMatch ?? quoteMatch
+        if (lineMatch) {
+          if (lineMatch[1].trim() === '') {
             replaceRangeWithText(root, lineStart, lineEnd, '')
           } else {
-            replaceRangeWithText(root, cursor, cursor, '\n- ')
+            replaceRangeWithText(root, cursor, cursor, bulletMatch ? '\n- ' : '\n> ')
           }
           afterMutate()
           return
@@ -1185,6 +1215,20 @@ export default function Composer({
             <circle cx="4" cy="10" r="1.3" fill="currentColor" />
             <circle cx="4" cy="14" r="1.3" fill="currentColor" />
             <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          title="引用（行頭に「> 」を付けます）"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            insertQuote()
+          }}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+        >
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <rect x="3" y="4" width="2" height="12" rx="1" fill="currentColor" />
+            <path d="M8 6h9M8 10h9M8 14h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </button>
       </div>

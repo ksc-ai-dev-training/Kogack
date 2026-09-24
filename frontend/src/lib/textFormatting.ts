@@ -1,5 +1,5 @@
 // 投稿欄（Composer.tsx）で2026-09-10に実装した書式ボタン（太字・斜体・下線・取り消し線・
-// コード・箇条書き）のテキスト操作アルゴリズムを、状態を持たない純粋関数として切り出したもの。
+// コード・箇条書き・引用）のテキスト操作アルゴリズムを、状態を持たない純粋関数として切り出したもの。
 // 発言の編集（MessageList.tsxのインライン編集、ユーザーからの要望「編集の時にも通常のメッセージと
 // 同じように書式のボタンを付けてほしい」、2026-09-11）でも同じ挙動を再現するために、Composer.tsx
 // 内部に留めず共有モジュールへ出した（アルゴリズム自体は既に2回のバグ修正を経ており
@@ -70,6 +70,44 @@ export function continueBulletOnEnter(body: string, cursor: number): TextEditRes
     return { body: nextBody, selStart: lineStart, selEnd: lineStart }
   }
   const insertText = '\n- '
+  const nextBody = body.slice(0, cursor) + insertText + body.slice(cursor)
+  const pos = cursor + insertText.length
+  return { body: nextBody, selStart: pos, selEnd: pos }
+}
+
+/** 引用（Slackと同じ「> 」プレフィックスの引用ブロック）。選択範囲を含む行全体を対象に行頭へ
+ * 「> 」を付ける（既に全行付いていれば外すトグル動作）。箇条書き（insertBulletListText）と
+ * 全く同じ考え方: 複数行選択に含まれる空行は維持し、対象がその空行1行だけの場合は「> 」を付ける */
+export function insertQuoteText(body: string, start: number, end: number): TextEditResult {
+  const lineStart = body.lastIndexOf('\n', start - 1) + 1
+  const nextNewline = body.indexOf('\n', end)
+  const lineEnd = nextNewline === -1 ? body.length : nextNewline
+  const lines = body.slice(lineStart, lineEnd).split('\n')
+  const nonBlankLines = lines.filter((l) => l.trim() !== '')
+  const allQuoted = nonBlankLines.length > 0 && nonBlankLines.every((l) => l.startsWith('> '))
+  const nextLines = lines.map((l) => {
+    if (l.trim() === '') return lines.length === 1 ? '> ' : l
+    return allQuoted ? l.replace(/^> /, '') : (l.startsWith('> ') ? l : `> ${l}`)
+  })
+  const nextBlock = nextLines.join('\n')
+  const nextBody = body.slice(0, lineStart) + nextBlock + body.slice(lineEnd)
+  const pos = lineStart + nextBlock.length
+  return { body: nextBody, selStart: pos, selEnd: pos }
+}
+
+/** 引用の行でEnterを押した際の継続処理。continueBulletOnEnterと同じ考え方
+ * （対象外の行ならnull、空の引用行ならマーカーを外して抜ける） */
+export function continueQuoteOnEnter(body: string, cursor: number): TextEditResult | null {
+  const lineStart = body.lastIndexOf('\n', cursor - 1) + 1
+  const nextNewlineIdx = body.indexOf('\n', cursor)
+  const lineEnd = nextNewlineIdx === -1 ? body.length : nextNewlineIdx
+  const quoteMatch = /^> (.*)$/.exec(body.slice(lineStart, lineEnd))
+  if (!quoteMatch) return null
+  if (quoteMatch[1].trim() === '') {
+    const nextBody = body.slice(0, lineStart) + body.slice(lineEnd)
+    return { body: nextBody, selStart: lineStart, selEnd: lineStart }
+  }
+  const insertText = '\n> '
   const nextBody = body.slice(0, cursor) + insertText + body.slice(cursor)
   const pos = cursor + insertText.length
   return { body: nextBody, selStart: pos, selEnd: pos }

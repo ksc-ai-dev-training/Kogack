@@ -16,7 +16,9 @@ import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { EmojiGridPopover } from '../components/MessageList'
 import { detectMentionQuery, findMentionHighlights, type MentionCandidate } from '../components/Composer'
-import { continueBulletOnEnter, insertBulletListText, wrapCodeText, wrapSelectionText } from '../lib/textFormatting'
+import {
+  continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapCodeText, wrapSelectionText,
+} from '../lib/textFormatting'
 import type {
   AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, MentionPayload, RecurringPost,
   Skill, TriggerRule,
@@ -1742,6 +1744,7 @@ function useBodyFormatting(body: string, onBodyChange: (v: string) => void) {
     applySelectionEdit((start, end) => wrapSelectionText(body, start, end, prefix, suffix))
   const applyCode = () => applySelectionEdit((start, end) => wrapCodeText(body, start, end))
   const applyBulletList = () => applySelectionEdit((start, end) => insertBulletListText(body, start, end))
+  const applyQuote = () => applySelectionEdit((start, end) => insertQuoteText(body, start, end))
   const insertEmoji = (emoji: string) => {
     const el = textareaRef.current
     const cursor = el?.selectionStart ?? body.length
@@ -1759,10 +1762,11 @@ function useBodyFormatting(body: string, onBodyChange: (v: string) => void) {
     const rect = e.currentTarget.getBoundingClientRect()
     setEmojiAnchor((v) => (v ? null : rect))
   }
-  // 箇条書きの行でEnterを押すと次の行にも自動で「- 」を続ける（Composer.tsx・発言編集と同じ）
+  // 箇条書き・引用の行でEnterを押すと次の行にも自動で「- 」/「> 」を続ける
+  // （Composer.tsx・発言編集と同じ）
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
-      const r = continueBulletOnEnter(body, e.currentTarget.selectionStart)
+      const r = continueBulletOnEnter(body, e.currentTarget.selectionStart) ?? continueQuoteOnEnter(body, e.currentTarget.selectionStart)
       if (r) {
         e.preventDefault()
         const el = e.currentTarget
@@ -1776,17 +1780,18 @@ function useBodyFormatting(body: string, onBodyChange: (v: string) => void) {
   }
 
   return {
-    textareaRef, applyWrap, applyCode, applyBulletList, insertEmoji,
+    textareaRef, applyWrap, applyCode, applyBulletList, applyQuote, insertEmoji,
     emojiAnchor, toggleEmojiPicker, closeEmojiPicker: () => setEmojiAnchor(null), handleKeyDown,
   }
 }
 
 function FormatToolbarButtons({
-  onWrap, onCode, onBulletList,
+  onWrap, onCode, onBulletList, onQuote,
 }: {
   onWrap: (prefix: string, suffix: string) => void
   onCode: () => void
   onBulletList: () => void
+  onQuote: () => void
 }) {
   return (
     <div className="flex items-center gap-0.5">
@@ -1801,6 +1806,12 @@ function FormatToolbarButtons({
           <circle cx="4" cy="10" r="1.3" fill="currentColor" />
           <circle cx="4" cy="14" r="1.3" fill="currentColor" />
           <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+      <button type="button" title="引用（行頭に「> 」を付けます）" onClick={onQuote} className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted">
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="2" height="12" rx="1" fill="currentColor" />
+          <path d="M8 6h9M8 10h9M8 14h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       </button>
     </div>
@@ -2089,7 +2100,7 @@ function RecurringPostFormFields({
             位置が実際の文字位置とずれるため。Composer.tsx確立済みの制約と同じ） */}
         <div className="relative">
           <div className="mb-1.5 flex items-center gap-0.5">
-            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
+            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} onQuote={fmt.applyQuote} />
           </div>
           <div className="relative">
             <div
@@ -2590,7 +2601,7 @@ function TriggerRuleFormFields({
             （ユーザーからの明示的な要望「メンション相手の名前に背景色が同じ感じで出ると嬉しい」） */}
         <div className="relative">
           <div className="mb-1.5 flex items-center gap-0.5">
-            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} />
+            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} onQuote={fmt.applyQuote} />
           </div>
           <div className="relative">
             <div
