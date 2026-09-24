@@ -23,6 +23,10 @@ import {
   removeCaretMarkerFromDom,
   scrollCaretIntoView,
   syncLiveFormatting,
+  toggleFormatAtCursor,
+  toggleFormatOnSelection,
+  isCursorInsideActiveFormats,
+  type ToggleFormatKind,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
@@ -222,6 +226,11 @@ export default function Composer({
   // 操作起点の変更）でのみtrueにし、マウント時の下書き復元自体では立てない。
   const hasUserEditedRef = useRef(false)
   const emojiCatchUpAppliedRef = useRef(false)
+  // 書式トグルボタン（太字・斜体・下線・取り消し線、ユーザーからの明示的な要望「ボタンが押されて
+  // いる間はその記法になり、もう一度押すと解除される仕組みにしてほしい（Wordみたいな感じ）」）の
+  // 現在の押下状態。カーソル位置に対する見た目上のヒントに過ぎず（詳細はcomposerEditing.tsの
+  // 冒頭コメント参照）、テキスト自体は常にその場で完全なMarkdownとして存在する。
+  const [activeFormats, setActiveFormats] = useState<ToggleFormatKind[]>([])
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
@@ -331,6 +340,33 @@ export default function Composer({
     setContentVersion((v) => v + 1)
     resizeEditor()
   }
+
+  // 書式トグルボタンの押下状態（activeFormats）は、カーソルが現在の書式の終端マーカー列の
+  // 直前から外れた時点でボタンの見た目だけを元に戻す（テキストは一切変更しない。詳細は
+  // composerEditing.tsのisCursorInsideActiveFormatsのコメント参照）。documentレベルの
+  // selectionchangeを監視し、選択範囲がこのエディタ内・かつ折りたたまれている（選択範囲が
+  // 無くカーソルのみ）ときだけ判定する。関数型のsetState（prev）を使うことでactiveFormats
+  // 自体をこの効果の依存配列に含める必要を無くしている（購読の再登録を避けるため）。
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const root = editorRef.current
+      if (!root) return
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0) return
+      const range = sel.getRangeAt(0)
+      if (!range.collapsed) return
+      if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return
+      setActiveFormats((prev) => {
+        if (prev.length === 0) return prev
+        const cursor = getSelectionOffsets(root)?.start
+        if (cursor === undefined) return prev
+        const text = domToPlainText(root)
+        return isCursorInsideActiveFormats(text, cursor, prev) ? prev : []
+      })
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [])
   // 利用者の操作（入力・ボタンクリック等）によるDOM変更のあとに呼ぶ。hasUserEditedRefを立てる
   // ことで、customEmoji読み込み待ちの追いかけ変換（上のuseEffect）が、既に本人が編集を始めた
   // 内容を勝手に上書きしないようにする。
@@ -445,6 +481,7 @@ export default function Composer({
     const root = editorRef.current
     if (!root) return
     root.replaceChildren()
+    setActiveFormats([])
     afterMutate()
   }
 
@@ -491,14 +528,16 @@ export default function Composer({
     }
   }
 
-  // 書式ツールバー（太字・取り消し線・コード・箇条書き）。ユーザーからの明示的な要望
-  // 「Slackのメッセージ入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような
-  // 機能を付けたい」による追加。記法・下線の扱いは既存のとおり（GFM風のMarkdown記法、下線は
-  // 独自の`++text++`）。すべてのボタンはonMouseDown+preventDefaultでフォーカス（＝
-  // contentEditableの選択範囲）を失わせない（既存のメンション/絵文字ピッカーと同じパターンを
-  // 全ボタンへ広げた。2026-09-18のcontentEditable化に伴う変更——textareaのselectionStartは
-  // フォーカスを失っても値を保持するが、contentEditableのSelectionはフォーカスを失うと
-  // 容易に失われるため、そもそもフォーカスを離さない設計にした）。
+  // 書式ツールバー（コード・箇条書き・引用等）。ユーザーからの明示的な要望「Slackのメッセージ
+  // 入力欄と同じように、コードのボックス・下線・ボールド・箇条書きのような機能を付けたい」による
+  // 追加。すべてのボタンはonMouseDown+preventDefaultでフォーカス（＝contentEditableの選択範囲）を
+  // 失わせない（既存のメンション/絵文字ピッカーと同じパターンを全ボタンへ広げた。2026-09-18の
+  // contentEditable化に伴う変更——textareaのselectionStartはフォーカスを失っても値を保持するが、
+  // contentEditableのSelectionはフォーカスを失うと容易に失われるため、そもそもフォーカスを
+  // 離さない設計にした）。**太字・斜体・下線・取り消し線は下のtoggleFormatButtonへ移行し、
+  // このwrapSelectionはコード（wrapCode）専用になった**（ユーザーからの明示的な要望「ボタンが
+  // 押されている間はその記法になり、もう一度押すと解除される仕組みにしてほしい」を受け、選択が
+  // 無い場合に単にマーカーを挿入するだけのこの関数では要件を満たせなくなったため）。
   const wrapSelection = (prefix: string, suffix: string) => {
     const root = editorRef.current
     if (!root) return
@@ -517,6 +556,39 @@ export default function Composer({
     } else {
       setSelectionOffsets(root, start + prefix.length)
     }
+    setPickerQuery(null)
+    afterMutate()
+  }
+
+  // 書式トグルボタン（太字・斜体・下線・取り消し線）。ユーザーからの明示的な要望「入力している
+  // 段階で送信した後の表示と同じようにしたい。記号で囲むような表示をなくしたい。太字、斜体、
+  // 下線、取り消し線に関しては、ボタンが押されている間はその記法になり、もう一度ボタンを押すと
+  // 解除される、というような仕組みにしてほしい（Wordみたいな感じ）」。選択範囲がある場合は
+  // 従来どおり「選択範囲を囲む/既に囲まれていれば外す」トグル、選択範囲が無い場合は
+  // composerEditing.tsのtoggleFormatAtCursor（詳細はそちらのコメント参照）に従い、押すたびに
+  // 「その場に空のマーカー対を挿入してモードに入る」「解除してカーソルをマーカーの外へ出す」を
+  // 切り替える。実際のテキスト書き換えはeditsを高いオフセットから順に適用するだけでよい
+  // （composerEditing.ts側で既にその順に並べてある）。
+  const toggleFormatButton = (kind: ToggleFormatKind) => {
+    const root = editorRef.current
+    if (!root) return
+    const offs = getSelectionOffsets(root)
+    const text = domToPlainText(root)
+    const total = text.length
+    const start = offs?.start ?? total
+    const end = offs?.end ?? start
+    if (start !== end) {
+      const result = toggleFormatOnSelection(text, start, end, kind)
+      for (const e of result.edits) replaceRangeWithText(root, e.start, e.end, e.text)
+      setSelectionOffsets(root, result.selectionStart, result.selectionEnd)
+      setPickerQuery(null)
+      afterMutate()
+      return
+    }
+    const result = toggleFormatAtCursor(text, start, activeFormats, kind)
+    for (const e of result.edits) replaceRangeWithText(root, e.start, e.end, e.text)
+    setSelectionOffsets(root, result.cursor)
+    setActiveFormats(result.activeFormats)
     setPickerQuery(null)
     afterMutate()
   }
@@ -1135,45 +1207,53 @@ export default function Composer({
       <div className="mb-1.5 flex items-center gap-0.5">
         <button
           type="button"
-          title="太字（**で囲みます）"
+          title="太字（選択範囲が無ければ、押している間タイプする文字が太字になります）"
           onMouseDown={(e) => {
             e.preventDefault()
-            wrapSelection('**', '**')
+            toggleFormatButton('bold')
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black hover:bg-surface-muted ${
+            activeFormats.includes('bold') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+          }`}
         >
           B
         </button>
         <button
           type="button"
-          title="斜体（_で囲みます）"
+          title="斜体（選択範囲が無ければ、押している間タイプする文字が斜体になります）"
           onMouseDown={(e) => {
             e.preventDefault()
-            wrapSelection('_', '_')
+            toggleFormatButton('italic')
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic text-ink-subtle hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic hover:bg-surface-muted ${
+            activeFormats.includes('italic') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+          }`}
         >
           I
         </button>
         <button
           type="button"
-          title="下線（++で囲みます）"
+          title="下線（選択範囲が無ければ、押している間タイプする文字に下線が付きます）"
           onMouseDown={(e) => {
             e.preventDefault()
-            wrapSelection('++', '++')
+            toggleFormatButton('underline')
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle underline hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold underline hover:bg-surface-muted ${
+            activeFormats.includes('underline') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+          }`}
         >
           U
         </button>
         <button
           type="button"
-          title="取り消し線（~~で囲みます）"
+          title="取り消し線（選択範囲が無ければ、押している間タイプする文字に取り消し線が付きます）"
           onMouseDown={(e) => {
             e.preventDefault()
-            wrapSelection('~~', '~~')
+            toggleFormatButton('strike')
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold line-through hover:bg-surface-muted ${
+            activeFormats.includes('strike') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+          }`}
         >
           S
         </button>

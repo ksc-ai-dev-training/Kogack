@@ -75,6 +75,7 @@ Keirekiと同じ流儀（1画面につきDB・API・画面をひととおり作�
 - **動作確認はDocker Postgres＋`DEV_AUTH=1`のバックエンド＋Playwrightで行う**。検証用に作ったチャンネル・利用者設定（`notif_mode`等）は必ず削除・復元すること。過去に消し忘れた検証用データが原因で別の検証結果を誤読した事例が複数回ある。
 - **フロントの配色・余白等は `frontend/src/index.css` の `@theme` トークンに集約**する。Tailwindはソースに実在するクラス文字列しかCSSへ出力しないため、動的に組み立てた任意値クラス名（テンプレートリテラルでのpx指定等）は機能しない。UI全体の文字サイズ拡大は `documentElement.style.zoom` を使っており、`100vh`/`100vw` 前提のレイアウトは `calc(.../var(--ui-zoom))` での補正が要る。
 - ローカル既定ポートはKeirekiと衝突しないようずらしてある: DB 55433 / backend 8011 / frontend 5174。
+- **投稿欄（contentEditable）は「常にDOMを丸ごと作り直す」設計**（`frontend/src/lib/composerEditing.ts`）。太字・斜体・下線・取り消し線はボタンでトグルするモード方式（押している間だけ記法が有効になり、マーカー文字`**`/`_`/`++`/`~~`は実テキストとして残しつつ`font-size:1px`で常に視覚的に隠す。`display:none`は幅0になりRange.getClientRects()が空になるため使わない）。太字の中に斜体等の入れ子を`Range`で再帰処理する際、`resolveOffset`のwalkが`ELEMENT_NODE`しか許可していないと`DocumentFragment`（`nodeType=11`）を渡した瞬間に子を辿らず落ちる（実機でのみ顕在化し、文字列レベルの単体テストでは検出できなかった）。この種のRange/DOM操作を追加するときは、pure関数の単体テストに加えて必ず実ブラウザ（Playwright）でHTML構造を確認すること。
 
 ## Keirekiからの意図的な相違点（実装時に必ず踏襲すること。Keirekiのコードを安易にコピーしない）
 

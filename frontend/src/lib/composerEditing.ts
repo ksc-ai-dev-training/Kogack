@@ -190,8 +190,10 @@ function indexOfChild(node: Node): number {
 
 /** プレーンテキストオフセット→DOM位置。原子絵文字imgの「内部」は決して返さず、常に手前/直後の
  * ノード境界へ丸める（Text.splitTextは呼ばない。Range.deleteContents/insertNodeが境界点の
- * 分割を仕様上正しく行うため、ここでは正しい{node,offset}のペアを返すことだけに専念する）。 */
-function resolveOffset(root: HTMLElement, targetOffset: number): DomPosition {
+ * 分割を仕様上正しく行うため、ここでは正しい{node,offset}のペアを返すことだけに専念する）。
+ * rootはエディタ本体（HTMLElement）だけでなく、書式のライブプレビュー（後述）が入れ子処理の
+ * 途中で扱う検体DocumentFragmentでもよい（Range APIはどちらに対しても同じように機能するため）。 */
+function resolveOffset(root: Node, targetOffset: number): DomPosition {
   let remaining = targetOffset
   let lastPosition: DomPosition = { node: root, offset: 0 }
 
@@ -203,7 +205,16 @@ function resolveOffset(root: HTMLElement, targetOffset: number): DomPosition {
       lastPosition = { node, offset: len }
       return null
     }
-    if (node.nodeType !== Node.ELEMENT_NODE) return null
+    // バグ修正（実機Playwright検証で発見）: 書式のライブプレビューが入れ子（例: 太字の中の斜体）を
+    // 再帰的に処理する際、containerとしてHTMLElementだけでなくDocumentFragment（nodeType=11）も
+    // 渡すようになった。ELEMENT_NODE（nodeType=1）だけを許可する判定だとwalk(root)の最初の呼び出し
+    // 自体がDocumentFragmentを弾いて即座にnullを返してしまい（子ノードを一切辿らない）、
+    // resolveOffsetが常にフォールバック位置{node:root,offset:0}を返す不具合があった。これにより
+    // 該当のRangeが常に「先頭で折りたたまれた」状態になり、extractContents()が何も抽出できず、
+    // 入れ子になった書式（<em>等）の中身が空のまま、実際の文字は外側にプレーンテキストとして
+    // 取り残される（記号も隠れない）という不具合が実機で発生した。DOCUMENT_FRAGMENT_NODEも
+    // 子ノードを持つ「親ノード」である点はELEMENT_NODEと同じであるため、ここでも通す。
+    if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return null
     if (isEmojiNode(node)) {
       const len = (node.getAttribute(EMOJI_ATTR) as string).length + 2 // ":name:"
       const parent = node.parentNode as Node
@@ -475,84 +486,117 @@ export function normalizeInvariants(root: HTMLElement): void {
   root.normalize()
 }
 
-// 書式のライブプレビュー（ユーザーからの明示的な要望「太字とか下線とかに変更する機能があるが、
-// メッセージ送信後だけでなく、入力している段階でどのような見た目になるのか見られるようにしたい」）。
-// 2026-09-10の書式ツールバー実装時点では「入力のたびにスタイル付きノードをDOMツリー全体で
-// 差分再構築する処理は自前contentEditable実装で最もバグりやすい」という理由でスコープ外に
-// していた（Composer.tsx冒頭のメンションに関する同種の判断と同じ理由）が、書式プレビューは
-// メンションと異なり「本文中の任意の位置に既に存在する記法パターンを検出する」性質そのものが
-// 本質的に全文スキャンを要する問題であるため、差分更新ではなく「常に全体を作り直す」設計にして
-// リスクを抑えた: 呼ばれるたびに(1)自分が過去に挿入した書式ラッパー要素だけを全て解除して
-// プレーンな状態に戻し（原子絵文字img・メンションspanはノードごと移動するだけで再生成しない）、
-// (2) MessageList.tsx（送信後の表示）と全く同じ正規表現・優先度（コード＞太字/斜体/下線/取消線）で
-// 完成した記法パターンだけを検出し、(3) 該当範囲をRange.extractContents()で抽出→スタイル付き
-// 要素で包んで戻す。マーカー文字（**・_・++・~~）はテキストとして残したまま範囲全体を
-// スタイルする（Slackのように確定後だけマーカーを消す方式は、隠す/戻すためのオフセット管理が
-// 追加で必要になり複雑さ・リスクが増すため見送った、シンプルな設計判断）。@メンション・URL
-// 自動リンク・名前付きリンクは対象外のまま（メンションは既存の「挿入時点のみハイライト」方式を
-// 維持し継続的な全文再スキャンをしない設計を崩さない。リンクは専用ポップアップで確定前に
-// テキスト/URLが見えるため「入力中にどう見えるか分からない」という今回の要望の対象外と判断）。
-// 箇条書き（行頭「- 」）も対象外（行頭に「- 」という記法自体が既に見た目として自己説明的であり、
-// スタイル変化の予測が必要な太字・斜体・下線・取消線・コードとは性質が異なるため）。
+// 書式のライブプレビュー（太字・斜体・下線・取り消し線）。ユーザーからの明示的な要望「入力して
+// いる段階で送信した後の表示と同じようにしたい。記号で囲むような表示をなくしたい」を受け、
+// 2026-09-10（ツールバー実装）・2026-09-18（マーカー文字を残したまま範囲全体をスタイルするだけの
+// 初回ライブプレビュー）に続く見直し。今回はマーカー文字（**・_・++・~~）を常に完全に隠す
+// （送信後の実際の見た目と一致させる）方式に一本化した——それ以前に検討した「カーソルが触れて
+// いるときだけマーカーを表示する」Typora風の設計は、ユーザーが今回求めているのはボタンによる
+// 明示的なモード切替であり、マーカーを手で見て編集する前提そのものが不要になるため、あえて
+// 採用しなかった。マーカー文字はdomToPlainTextとの往復性を保つため実際のテキストとして残すが、
+// 常にfont-size:1px相当の極小サイズにして視覚的に消す（display:noneにすると幅0の要素になり
+// Range.getClientRects()が空の矩形を返しキャレット配置に使えなくなる、というensureTrailing
+// NewlineCaretMarkerの教訓と同じ理由で避けた）。
 //
-// unwrap→rewrapは文字の追加・削除を一切行わない（ラッパー要素の付け外しのみ）ため、
-// domToPlainText(root)が返すプレーンテキストの長さ・内容は一切変化しない。したがって
-// getSelectionOffsets/setSelectionOffsetsが使う「プレーンテキストオフセット」は
-// unwrap前後で同じ意味を保ち続け、呼び出し前に保存したオフセットをそのまま呼び出し後に
-// 復元するだけでカーソル位置を正しく保てる（新しいオフセット変換ロジックを発明する必要が無い）。
+// 太字/斜体/下線/取り消し線は入れ子になりうる（下記toggleFormatAtCursorが「太字の中に斜体」の
+// ような組み合わせを作れるため）。MessageList.tsx（送信後の表示）は入れ子に対応しない簡易実装の
+// ままだが、投稿欄のライブプレビューだけは入れ子を再帰的に解決する（applyNestedFormats）。
+// コードブロック・インラインコードはマーカー隠しの対象外（フェンス自体が複数行にまたがる・
+// 中身をさらに解釈しないという既存の性質のため、マーカーを含めた範囲全体をそのままスタイル
+// する）。@メンション・URL自動リンク・名前付きリンク・箇条書き（行頭「- 」）・引用（行頭「> 」）も
+// 対象外のまま（メンションは挿入時点のみハイライトする既存方式を維持、リンクは専用ポップアップで
+// 確定前に見えるため対象外、箇条書き・引用は記法自体が既に見た目として自己説明的なため）。
+//
+// ユーザーからの追加要望「太字、斜体、下線、取り消し線に関しては、ボタンが押されている間はその
+// 記法になり、もう一度ボタンを押すと解除される、というような仕組みにしてほしい（Wordみたいな
+// 感じ）」を受け、書式トグルボタン（Composer.tsxのtoggleFormatButton）は選択範囲が無い場合、
+// その場で（内容が空のまま）開始・終了マーカーを即座に挿入し、カーソルをその間に置く。以後の
+// 通常の入力はブラウザのネイティブな「カーソル位置への文字挿入」がその2つのマーカーの間へ
+// 自然に入っていくだけで済むため、「まだ確定していない書式領域」を別途追跡する必要が無い
+// （普通にMarkdownを手打ちするのと全く同じ仕組みで、Enter・メンション挿入・絵文字挿入・
+// 箇条書き/引用トグル等どんな変更経路を通っても自動的に機能する）。複数の書式を組み合わせる
+// 場合は内側へ入れ子にし、1つだけ解除する場合、それが最も内側（最後に有効化したもの）なら
+// カーソルをその終端マーカーの直後へ移すだけでよい。内側でない書式を解除する場合は、既存の
+// 終端マーカー列全体の直後までカーソルを進めて（＝そこまでの内容を正しく閉じて）から、残りの
+// 書式だけの新しい空マーカー対を改めて挿入し直す（詳細はtoggleFormatAtCursor参照）。
+//
+// ボタンの押下状態（activeFormats、Composer.tsx側のReact state）はカーソル位置に対する見た目
+// 上のヒントに過ぎず、テキスト自体は常にその場で完全なMarkdownとして存在する（保留中の
+// 未確定状態は無い）ため、送信・下書き保存等の前に特別な「確定」処理を挟む必要が無い。
+// selectionchangeでカーソルが現在のactiveFormatsの終端マーカー列の直前から外れたことを
+// 検知したら、ボタンの見た目だけを元に戻す（isCursorInsideActiveFormats、テキストは
+// 一切変更しない）。
 
 const LIVE_FORMAT_ATTR = 'data-live-format'
+const LIVE_FORMAT_MARKER_ATTR = 'data-live-format-marker'
+const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-code-text'
+// マーカー文字（**・_・++・~~）を常に視覚的に消すためのクラス。display:noneを避ける理由は上記コメント参照。
+const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-none'
 
-// MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEX/BOLD_REGEX/ITALIC_REGEX/UNDERLINE_REGEX/
-// STRIKE_REGEXと全く同じ定義（送信後の見た目と入力中のプレビューを一致させるため）
+// MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義（コードは対象外のまま）。
+// 太字・斜体・下線・取り消し線は、書式トグルボタンが「まだ何も入力していない空のマーカー対」を
+// 挿入した瞬間から隠したいため、MessageList.tsx側（1文字以上を要求する`[\s\S]+?`）とは異なり
+// `[\s\S]*?`（0文字以上）で完成パターンとみなす。送信後の実際の解釈（MessageList.tsx）は
+// 変更していない。
 const LIVE_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
 const LIVE_INLINE_CODE_REGEX = /`([^`\n]+)`/g
-const LIVE_BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
-const LIVE_STRIKE_REGEX = /~~([\s\S]+?)~~/g
-const LIVE_ITALIC_REGEX = /_([\s\S]+?)_/g
-const LIVE_UNDERLINE_REGEX = /\+\+([\s\S]+?)\+\+/g
+const LIVE_BOLD_REGEX = /\*\*([\s\S]*?)\*\*/g
+const LIVE_ITALIC_REGEX = /_([\s\S]*?)_/g
+const LIVE_UNDERLINE_REGEX = /\+\+([\s\S]*?)\+\+/g
+const LIVE_STRIKE_REGEX = /~~([\s\S]*?)~~/g
 
-interface LiveFormatCandidate {
+export type ToggleFormatKind = 'bold' | 'italic' | 'underline' | 'strike'
+
+export const TOGGLE_FORMAT_MARKERS: Record<ToggleFormatKind, { prefix: string; suffix: string }> = {
+  bold: { prefix: '**', suffix: '**' },
+  italic: { prefix: '_', suffix: '_' },
+  underline: { prefix: '++', suffix: '++' },
+  strike: { prefix: '~~', suffix: '~~' },
+}
+
+const FORMAT_ELEMENT: Record<ToggleFormatKind, { tagName: string; className: string }> = {
+  bold: { tagName: 'strong', className: 'font-bold' },
+  italic: { tagName: 'em', className: 'italic' },
+  underline: { tagName: 'u', className: 'underline' },
+  strike: { tagName: 's', className: 'line-through' },
+}
+
+interface LiveMatch {
   start: number
   end: number
   priority: number
-  tagName: string
-  kind: string
-  className: string
+  kind: 'code' | ToggleFormatKind
 }
 
-const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-code-text'
-
-/** MessageList.tsxのrenderInlineSegmentと同じ優先度付き重なり解決（コード＞太字/斜体/下線/取消線）。
- * 送信後の表示と異なりメンション・URL・名前付きリンクは対象外（上記コメント参照）。 */
-function collectLiveFormatCandidates(text: string): LiveFormatCandidate[] {
-  const candidates: LiveFormatCandidate[] = []
+/** MessageList.tsxのrenderInlineSegmentと同じ優先度付き重なり解決（コード＞太字/斜体/下線/取消線）。 */
+function collectLiveMatches(text: string): LiveMatch[] {
+  const candidates: LiveMatch[] = []
   for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 0, tagName: 'code', kind: 'code-block', className: CODE_CLASSNAME })
+    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
   }
   for (const m of text.matchAll(LIVE_INLINE_CODE_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 0, tagName: 'code', kind: 'code', className: CODE_CLASSNAME })
+    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
   }
   for (const m of text.matchAll(LIVE_BOLD_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 'strong', kind: 'bold', className: 'font-bold' })
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'bold' })
   }
   for (const m of text.matchAll(LIVE_ITALIC_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 'em', kind: 'italic', className: 'italic' })
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'italic' })
   }
   for (const m of text.matchAll(LIVE_UNDERLINE_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 'u', kind: 'underline', className: 'underline' })
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'underline' })
   }
   for (const m of text.matchAll(LIVE_STRIKE_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 1, tagName: 's', kind: 'strike', className: 'line-through' })
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'strike' })
   }
   candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
-  const accepted: LiveFormatCandidate[] = []
+  const accepted: LiveMatch[] = []
   for (const c of candidates) {
     if (accepted.some((a) => c.start < a.end && a.start < c.end)) continue
     accepted.push(c)
@@ -561,30 +605,88 @@ function collectLiveFormatCandidates(text: string): LiveFormatCandidate[] {
   return accepted
 }
 
-/** [start,end)をタグ名・クラスで包む（deleteRangeReturningCollapsedと異なり中身は破棄せず
- * Range.extractContents()で保持したまま新しい親要素へ移す。原子絵文字img・メンションspanが
- * 範囲内にあっても、ノードとして移動するだけで再生成しないため既存の属性・イベント紐付けは
- * 保たれる）。 */
-function wrapRangeInElement(root: HTMLElement, start: number, end: number, tagName: string, className: string, kind: string): void {
+/** fragmentの先頭または末尾からcount文字を切り出し、隠しマーカー用のspanへ包んで返す。
+ * マッチした記法の境界文字は必ずテキストノードの先頭/末尾に単独である前提で書いており
+ * （正規表現の定義上、絵文字の`:name:`・メンションspanの表示名のいずれにもマーカー用の記号は
+ * 含まれ得ない）、想定外の構造だった場合はnullを返す（呼び出し側はマーカーを隠さず範囲全体を
+ * そのままスタイルするだけにフォールバックする）。 */
+function extractHiddenMarker(fragment: DocumentFragment, count: number, fromEnd: boolean): HTMLSpanElement | null {
+  if (count === 0) return null
+  const target = fromEnd ? fragment.lastChild : fragment.firstChild
+  if (!target || target.nodeType !== Node.TEXT_NODE) return null
+  const t = target as Text
+  if (t.data.length < count) return null
+  const cut = fromEnd ? t.data.slice(t.data.length - count) : t.data.slice(0, count)
+  t.data = fromEnd ? t.data.slice(0, t.data.length - count) : t.data.slice(count)
+  if (t.data === '') fragment.removeChild(t)
+  const span = document.createElement('span')
+  span.setAttribute(LIVE_FORMAT_MARKER_ATTR, 'true')
+  span.className = HIDDEN_MARKER_CLASSNAME
+  span.appendChild(document.createTextNode(cut))
+  return span
+}
+
+/** [start,end)を指定した種別で包む。containerはHTMLElement（エディタ本体）・DocumentFragment
+ * （入れ子処理中の中間結果）のどちらでもよい（Range APIはどちらに対しても同じように機能する）。
+ * 太字/斜体/下線/取り消し線はさらに中身を再帰的に処理し、入れ子になった別の書式（例: 太字の中の
+ * 斜体）も同様にマーカーを隠して正しくスタイルする。 */
+function wrapLiveMatch(container: Node, match: LiveMatch): void {
+  const { start, end, kind } = match
   if (start >= end) return
-  const startPos = resolveOffset(root, start)
-  const endPos = resolveOffset(root, end)
+  const startPos = resolveOffset(container, start)
+  const endPos = resolveOffset(container, end)
   const range = document.createRange()
   range.setStart(startPos.node, startPos.offset)
   range.setEnd(endPos.node, endPos.offset)
   const fragment = range.extractContents()
-  const wrapper = document.createElement(tagName)
+
+  if (kind === 'code') {
+    const wrapper = document.createElement('code')
+    wrapper.setAttribute(LIVE_FORMAT_ATTR, kind)
+    wrapper.className = CODE_CLASSNAME
+    wrapper.appendChild(fragment)
+    range.insertNode(wrapper)
+    return
+  }
+
+  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+  const leading = extractHiddenMarker(fragment, prefix.length, false)
+  const trailing = leading ? extractHiddenMarker(fragment, suffix.length, true) : null
+  const def = FORMAT_ELEMENT[kind]
+  const wrapper = document.createElement(def.tagName)
   wrapper.setAttribute(LIVE_FORMAT_ATTR, kind)
-  wrapper.className = className
+  wrapper.className = def.className
+
+  if (!leading || !trailing) {
+    // 想定外の構造（切り出し失敗）。マーカーを隠さず範囲全体をそのままスタイルするだけに
+    // フォールバックする（見た目は多少崩れても編集不能にはしないための保険）。
+    wrapper.appendChild(fragment)
+    range.insertNode(wrapper)
+    return
+  }
+
+  applyNestedFormats(fragment)
+  wrapper.appendChild(leading)
   wrapper.appendChild(fragment)
+  wrapper.appendChild(trailing)
   range.insertNode(wrapper)
 }
 
-/** 過去にsyncLiveFormattingが挿入した書式ラッパー要素だけを解除し、中身（テキストノード・
- * 原子絵文字img・メンションspan）をその場に残す（`unwrap`＝親を消して子をその位置へ展開する
- * 標準的なDOM操作。子ノードの中身自体は一切変更しない）。 */
+/** fragment（既にトップレベルの1マッチぶんとして抽出済みの中身）の中に、さらに別の書式が
+ * 入れ子になっていないかを調べ、あれば再帰的にwrapLiveMatchを適用する。要素で包む操作自体は
+ * 文字数を変化させないため、複数のネストしたマッチを順番に処理しても後続のオフセットは
+ * ずれない。 */
+function applyNestedFormats(fragment: DocumentFragment): void {
+  const innerText = domToPlainText(fragment)
+  if (!innerText) return
+  const nested = collectLiveMatches(innerText)
+  for (const m of nested) wrapLiveMatch(fragment, m)
+}
+
+/** 過去にsyncLiveFormattingが挿入した書式ラッパー要素・隠しマーカー用spanを解除し、中身
+ * （テキストノード・原子絵文字img・メンションspan）をその場に残す。 */
 function unwrapLiveFormatting(root: HTMLElement): void {
-  const wrappers = root.querySelectorAll(`[${LIVE_FORMAT_ATTR}]`)
+  const wrappers = root.querySelectorAll(`[${LIVE_FORMAT_ATTR}], [${LIVE_FORMAT_MARKER_ATTR}]`)
   wrappers.forEach((wrapper) => {
     const parent = wrapper.parentNode
     if (!parent) return
@@ -596,16 +698,164 @@ function unwrapLiveFormatting(root: HTMLElement): void {
 /** 書式のライブプレビューを最新化する。ネイティブ入力・IME確定・ツールバー操作・メンション/
  * 絵文字挿入・貼り付け・下書き復元など、本文が変わりうるあらゆる箇所の後に呼ぶ想定
  * （Composer.tsxのrefreshEditorHousekeeping、実質すべての変更経路を1箇所に集約している）。
- * 呼ぶたびに全体を作り直す設計のため冪等（何度呼んでも同じ結果になる）。 */
+ * 呼ぶたびに全体を作り直す設計のため冪等（何度呼んでも同じ結果になる）。マーカーの表示・
+ * 非表示はカーソル位置に依存しない（常に隠す）ため、選択範囲の変化だけでこの関数を
+ * 再度呼ぶ必要は無い。 */
 export function syncLiveFormatting(root: HTMLElement): void {
   const preserved = getSelectionOffsets(root)
   unwrapLiveFormatting(root)
   root.normalize()
   const text = domToPlainText(root)
-  const matches = collectLiveFormatCandidates(text)
-  for (const m of matches) {
-    wrapRangeInElement(root, m.start, m.end, m.tagName, m.className, m.kind)
-  }
+  const matches = collectLiveMatches(text)
+  for (const m of matches) wrapLiveMatch(root, m)
   root.normalize()
   if (preserved) setSelectionOffsets(root, preserved.start, preserved.end)
+}
+
+// 書式トグルボタン（太字・斜体・下線・取り消し線、ユーザーからの明示的な要望）。以下は
+// DOM操作を伴わない純粋関数で、実際のテキスト書き換え・カーソル移動はComposer.tsx側が
+// TextEdit（{start,end,text}、既存のreplaceRangeWithTextへそのまま渡せる形）を順番に
+// 適用することで行う。edits配列は常に「高いオフセット→低いオフセット」の順（後の要素ほど
+// 前方）に並んでおり、この順で素直にreplaceRangeWithTextを呼べば、先に適用した編集が
+// あとから適用する編集のオフセットへ影響しない（既存のwrapSelectionが「終端側を先に、
+// 始端側を後に」処理しているのと同じ考え方）。
+
+function closingSequence(formats: ToggleFormatKind[]): string {
+  return formats
+    .slice()
+    .reverse()
+    .map((f) => TOGGLE_FORMAT_MARKERS[f].suffix)
+    .join('')
+}
+
+function openingSequence(formats: ToggleFormatKind[]): string {
+  return formats.map((f) => TOGGLE_FORMAT_MARKERS[f].prefix).join('')
+}
+
+/** カーソル（選択なし）が現在activeFormatsの終端マーカー列の直前に位置しているか
+ * （＝ボタンの押下状態がまだ有効かどうか）を判定する。selectionchangeで使う。 */
+export function isCursorInsideActiveFormats(text: string, cursor: number, activeFormats: ToggleFormatKind[]): boolean {
+  if (activeFormats.length === 0) return false
+  const seq = closingSequence(activeFormats)
+  return text.slice(cursor, cursor + seq.length) === seq
+}
+
+export interface TextEdit {
+  start: number
+  end: number
+  text: string
+}
+
+export interface ToggleFormatAtCursorResult {
+  /** 高いオフセット→低いオフセットの順（0〜1件）。空配列ならテキストの変更は不要。 */
+  edits: TextEdit[]
+  cursor: number
+  activeFormats: ToggleFormatKind[]
+}
+
+/** 選択範囲が無い（カーソルのみ）状態で書式トグルボタンを押した結果を計算する。kindが既に
+ * activeFormatsに含まれていなければ有効化、含まれていれば無効化する。 */
+export function toggleFormatAtCursor(
+  text: string,
+  cursor: number,
+  activeFormats: ToggleFormatKind[],
+  kind: ToggleFormatKind,
+): ToggleFormatAtCursorResult {
+  const isActive = activeFormats.includes(kind)
+  const cursorValid = isCursorInsideActiveFormats(text, cursor, activeFormats)
+
+  if (!isActive) {
+    // 有効化: 現在のカーソル位置に新しい書式の開始・終了マーカーを挿入し、間へカーソルを置く。
+    // カーソルが既存のactiveFormatsの終端マーカー列の直前に無い（利用者が移動した後など）場合は、
+    // 古いactiveFormatsの記憶を信用せず、この書式単体から新しく始める（安全側のフォールバック）。
+    const base = cursorValid ? activeFormats : []
+    const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+    return {
+      edits: [{ start: cursor, end: cursor, text: prefix + suffix }],
+      cursor: cursor + prefix.length,
+      activeFormats: [...base, kind],
+    }
+  }
+
+  if (!cursorValid) {
+    // カーソルが既にズレている状態で同じボタンをもう一度押した場合。テキストには一切触れず、
+    // 記憶からその書式だけを取り除く（ボタンの見た目を正すだけ）。
+    return { edits: [], cursor, activeFormats: activeFormats.filter((f) => f !== kind) }
+  }
+
+  const idx = activeFormats.indexOf(kind)
+  const isInnermost = idx === activeFormats.length - 1
+  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+
+  if (isInnermost) {
+    const isEmpty = text.slice(Math.max(0, cursor - prefix.length), cursor) === prefix
+    if (isEmpty) {
+      // 何も入力しないまま同じボタンをもう一度押して解除した場合は、空のマーカー対を丸ごと
+      // 削除する（本文に空の**が残らないようにする）
+      return {
+        edits: [{ start: cursor - prefix.length, end: cursor + suffix.length, text: '' }],
+        cursor: cursor - prefix.length,
+        activeFormats: activeFormats.slice(0, -1),
+      }
+    }
+    // 最も内側の書式を解除: 自分自身の終端マーカーの直後までカーソルを進めるだけでよい
+    // （残りの書式の終端マーカー列はそのまま後ろに続いている）
+    return { edits: [], cursor: cursor + suffix.length, activeFormats: activeFormats.slice(0, -1) }
+  }
+
+  // 内側でない書式を解除: 現在有効な全書式の終端マーカー列全体の直後までカーソルを進めて
+  // （＝そこまでに入力した内容を正しく閉じて）から、残りの書式だけの新しい空マーカー対を
+  // 改めて挿入し直す（続けて入力すると、残りの書式のままタイプできるようにするため）。
+  const fullClosing = closingSequence(activeFormats)
+  const afterClosing = cursor + fullClosing.length
+  const remaining = activeFormats.filter((f) => f !== kind)
+  if (remaining.length === 0) {
+    return { edits: [], cursor: afterClosing, activeFormats: [] }
+  }
+  const reopenOpen = openingSequence(remaining)
+  const reopenClose = closingSequence(remaining)
+  return {
+    edits: [{ start: afterClosing, end: afterClosing, text: reopenOpen + reopenClose }],
+    cursor: afterClosing + reopenOpen.length,
+    activeFormats: remaining,
+  }
+}
+
+export interface ToggleFormatOnSelectionResult {
+  /** 常に2件、高いオフセット→低いオフセットの順。 */
+  edits: TextEdit[]
+  selectionStart: number
+  selectionEnd: number
+}
+
+/** 選択範囲がある状態で書式トグルボタンを押した結果を計算する（選択範囲の直前・直後に既に
+ * ちょうどそのマーカーが付いていれば外す、無ければ付けるトグル動作）。戻り値の選択範囲は
+ * 常にcontent部分（マーカーを除く）を指す。 */
+export function toggleFormatOnSelection(
+  text: string,
+  start: number,
+  end: number,
+  kind: ToggleFormatKind,
+): ToggleFormatOnSelectionResult {
+  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+  const hasPrefix = text.slice(Math.max(0, start - prefix.length), start) === prefix
+  const hasSuffix = text.slice(end, end + suffix.length) === suffix
+  if (hasPrefix && hasSuffix) {
+    return {
+      edits: [
+        { start: end, end: end + suffix.length, text: '' },
+        { start: start - prefix.length, end: start, text: '' },
+      ],
+      selectionStart: start - prefix.length,
+      selectionEnd: end - prefix.length,
+    }
+  }
+  return {
+    edits: [
+      { start: end, end, text: suffix },
+      { start, end: start, text: prefix },
+    ],
+    selectionStart: start + prefix.length,
+    selectionEnd: end + prefix.length,
+  }
 }
