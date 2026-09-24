@@ -182,6 +182,15 @@ function findNamedLinkMatches(text: string): { start: number; end: number; label
 // 対応しない、という簡易実装の範囲内の割り切り）。コードスパン・コードブロックの中身は
 // Markdownの一般的な挙動どおり、太字・斜体・下線・取り消し線・メンション・URLをさらに解釈しない
 // （ネストした書式には対応しない、という簡易実装の範囲内の割り切り）。
+// **太字・斜体・下線・取り消し線の4種同士の組み合わせ（例: 太字の中に斜体）だけは例外的に
+// 再帰的に解決する**（renderStyledContent、2026-09-24）。投稿欄の書式トグルボタン
+// （composerEditing.ts）は複数書式を同時に有効化すると入れ子のMarkdown（`**_++text++_**`）を
+// 生成し、投稿欄自身のライブプレビューは既に入れ子を再帰的に解決していたが、この送信後表示側は
+// フラットな重なり解決のみだったため、外側の書式（例: 太字）しか認識されず内側のマーカー
+// （`_`・`++`等）がそのまま文字として表示されてしまう不具合が実際に発生した（ユーザーからの
+// 報告「入力欄では正常に表示されるのに、送ると太字以外記号になる」）。メンション・URL・
+// 名前付きリンク・カスタム絵文字はこの再帰の対象に含めない（composerEditing.tsの
+// applyNestedFormatsと同じスコープに揃えた。太字の中のメンション等はこれまでどおり対象外のまま）。
 // コード表示の背景色はbg-surface-subtleではなくbg-surface-mutedを使う（発言行のホバー背景が
 // hover:bg-surface-subtleのため、同じ色にするとホバー時にコードの箱が消えて見えてしまうため）。
 // コード表示の文字色は黒（ink）と紛れないよう専用のtext-code-text（index.css参照）を使う。
@@ -193,6 +202,92 @@ const BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
 const STRIKE_REGEX = /~~([\s\S]+?)~~/g
 const ITALIC_REGEX = /_([\s\S]+?)_/g
 const UNDERLINE_REGEX = /\+\+([\s\S]+?)\+\+/g
+
+/** 太字・斜体・下線・取り消し線・インラインコードの入れ子を再帰的に解決するための最小限の
+ * マッチ収集（renderInlineSegmentの本体とは別に用意する。メンション・URL・名前付きリンク・
+ * カスタム絵文字はこの5種だけの重なり解決には含めない——composerEditing.tsのcollectLiveMatches
+ * と同じスコープ）。優先度はコード(0)が最優先、太字/斜体/下線/取り消し線は同列(1)。 */
+type StyleMatchKind = 'code' | 'bold' | 'italic' | 'underline' | 'strike'
+interface StyleMatch {
+  start: number
+  end: number
+  priority: number
+  kind: StyleMatchKind
+}
+const STYLE_MARKER_LEN: Record<StyleMatchKind, number> = { code: 1, bold: 2, italic: 1, underline: 2, strike: 2 }
+
+function collectStyleMatches(text: string): StyleMatch[] {
+  const candidates: StyleMatch[] = []
+  for (const m of text.matchAll(INLINE_CODE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
+  }
+  for (const m of text.matchAll(BOLD_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'bold' })
+  }
+  for (const m of text.matchAll(ITALIC_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'italic' })
+  }
+  for (const m of text.matchAll(UNDERLINE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'underline' })
+  }
+  for (const m of text.matchAll(STRIKE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'strike' })
+  }
+  candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
+  const accepted: StyleMatch[] = []
+  for (const c of candidates) {
+    if (accepted.some((a) => c.start < a.end && a.start < c.end)) continue
+    accepted.push(c)
+  }
+  accepted.sort((a, b) => a.start - b.start)
+  return accepted
+}
+
+/** 太字/斜体/下線/取り消し線の内容（renderInlineSegmentが呼ぶ）をさらに再帰的に解決する。
+ * 例えば太字の中に斜体が入れ子になった`**_text_**`の場合、外側の太字だけでなく内側の斜体も
+ * 認識してマーカー（`_`）を消し、実際にイタリック体で表示する。コードは中身をさらに解釈しない
+ * （kindが'code'の場合は再帰しない）ため、コードの中の`**`等は従来どおり文字のまま表示される。 */
+function renderStyledContent(text: string, keyPrefix: string): ReactNode[] {
+  const matches = collectStyleMatches(text)
+  if (matches.length === 0) return [text]
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  matches.forEach((m, i) => {
+    if (m.start > cursor) nodes.push(text.slice(cursor, m.start))
+    const markerLen = STYLE_MARKER_LEN[m.kind]
+    const inner = text.slice(m.start + markerLen, m.end - markerLen)
+    const key = `${keyPrefix}-s${i}`
+    switch (m.kind) {
+      case 'code':
+        nodes.push(
+          <code key={key} className="rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-code-text">
+            {inner}
+          </code>,
+        )
+        break
+      case 'bold':
+        nodes.push(<strong key={key} className="font-bold">{renderStyledContent(inner, key)}</strong>)
+        break
+      case 'italic':
+        nodes.push(<em key={key} className="italic">{renderStyledContent(inner, key)}</em>)
+        break
+      case 'underline':
+        nodes.push(<u key={key} className="underline">{renderStyledContent(inner, key)}</u>)
+        break
+      case 'strike':
+        nodes.push(<s key={key} className="line-through">{renderStyledContent(inner, key)}</s>)
+        break
+    }
+    cursor = m.end
+  })
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
 
 function splitCodeBlocks(text: string): { type: 'code' | 'text'; content: string }[] {
   const segments: { type: 'code' | 'text'; content: string }[] = []
@@ -339,7 +434,10 @@ function renderInlineSegment(
       start,
       end: start + m[0].length,
       priority: 3,
-      render: (key) => <strong key={key} className="font-bold">{content}</strong>,
+      // 中身をrenderStyledContentでさらに解決することで、太字の中に斜体・下線・取り消し線・
+      // インラインコードが入れ子になっていても正しく認識する（詳細は本ファイル冒頭の
+      // コメント参照。組み合わせた書式が送信後に記号のまま表示されていた不具合の修正）。
+      render: (key) => <strong key={key} className="font-bold">{renderStyledContent(content, key)}</strong>,
     })
   }
   for (const m of text.matchAll(ITALIC_REGEX)) {
@@ -349,7 +447,7 @@ function renderInlineSegment(
       start,
       end: start + m[0].length,
       priority: 3,
-      render: (key) => <em key={key} className="italic">{content}</em>,
+      render: (key) => <em key={key} className="italic">{renderStyledContent(content, key)}</em>,
     })
   }
   for (const m of text.matchAll(UNDERLINE_REGEX)) {
@@ -359,7 +457,7 @@ function renderInlineSegment(
       start,
       end: start + m[0].length,
       priority: 3,
-      render: (key) => <u key={key} className="underline">{content}</u>,
+      render: (key) => <u key={key} className="underline">{renderStyledContent(content, key)}</u>,
     })
   }
   for (const m of text.matchAll(STRIKE_REGEX)) {
@@ -369,7 +467,7 @@ function renderInlineSegment(
       start,
       end: start + m[0].length,
       priority: 3,
-      render: (key) => <s key={key} className="line-through">{content}</s>,
+      render: (key) => <s key={key} className="line-through">{renderStyledContent(content, key)}</s>,
     })
   }
   // カスタム絵文字（2026-09-17）。`:name:`のnameが登録済みの絵文字名と一致する場合のみ画像として
