@@ -577,8 +577,13 @@ export function normalizeInvariants(root: HTMLElement): void {
 const LIVE_FORMAT_ATTR = 'data-live-format'
 const LIVE_FORMAT_MARKER_ATTR = 'data-live-format-marker'
 const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-code-text'
-// マーカー文字（**・_・++・~~）を常に視覚的に消すためのクラス。display:noneを避ける理由は上記コメント参照。
-const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-none'
+// マーカー文字（**・_・++・~~）を常に視覚的に消すためのクラス。display:noneを避ける理由は上記コメント参照
+// （幅0になりRange.getClientRects()が空になってキャレット配置に使えなくなるため）。
+// バグ修正（ユーザーからの報告「太字ボタンを押すとよく見えないが小さい記号らしきものが入力される」）:
+// font-size:1pxだけでは文字色が地の色のまま極小の実体として描画され、うっすら点のように見えて
+// しまっていた。text-transparentで文字色も透明にし、矩形の大きさ（≠0でキャレット計算には使える）
+// はそのまま保ちつつ視覚的には完全に消す。
+const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-none text-transparent'
 
 // MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義（コードは対象外のまま）。
 // 太字・斜体・下線・取り消し線は、書式トグルボタンが「まだ何も入力していない空のマーカー対」を
@@ -900,7 +905,15 @@ export function syncLiveFormatting(root: HTMLElement): void {
 // あとから適用する編集のオフセットへ影響しない（既存のwrapSelectionが「終端側を先に、
 // 始端側を後に」処理しているのと同じ考え方）。
 
-function closingSequence(formats: ToggleFormatKind[]): string {
+// closingSequence/openingSequenceをexportしている理由（ユーザーからの報告「太字ボタンを押して
+// 何も入力しないまま2回Deleteを押すと画面に**が見えてしまう」）: 何も入力していない空の
+// マーカー対（例:「**|**」、|はカーソル）でBackspace/Deleteを押すと、閉じ／開きマーカーの
+// どちらか一方（隠しマーカーspanはcontentEditable=falseで原子的に扱われる）だけがネイティブに
+// 1回で削除されてしまい、残った側が「対になる相手を失った単独の**」としてunwrapLiveFormatting
+// 後の正規表現に一致しなくなり、隠されずそのまま可視の文字列として残ってしまう。この事故を
+// Composer.tsx側のhandleKeyDownで「空のactiveFormatsに対するBackspace/Deleteはマーカー対全体を
+// 1回の編集でまとめて削除する」形であらかじめ防ぐために、この2関数をエクスポートする。
+export function closingSequence(formats: ToggleFormatKind[]): string {
   return formats
     .slice()
     .reverse()
@@ -908,7 +921,7 @@ function closingSequence(formats: ToggleFormatKind[]): string {
     .join('')
 }
 
-function openingSequence(formats: ToggleFormatKind[]): string {
+export function openingSequence(formats: ToggleFormatKind[]): string {
   return formats.map((f) => TOGGLE_FORMAT_MARKERS[f].prefix).join('')
 }
 

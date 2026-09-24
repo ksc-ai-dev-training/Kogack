@@ -26,6 +26,8 @@ import {
   toggleFormatAtCursor,
   toggleFormatOnSelection,
   isCursorInsideActiveFormats,
+  openingSequence,
+  closingSequence,
   type ToggleFormatKind,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
@@ -908,6 +910,41 @@ export default function Composer({
     // ブラウザのネイティブなIME処理にそのまま委ねる（Planサブエージェントの設計精査で
     // 指摘された、この種の実装で最も起きやすい不具合クラスへの対処）。
     if ((e.nativeEvent as KeyboardEvent).isComposing) return
+
+    // バグ修正（ユーザーからの報告「太字ボタンを押して何も入力しないまま2回Deleteを押すと
+    // 画面に**が見えてしまう」）: 書式ボタンで挿入した「何も入力していない空のマーカー対」
+    // （例:「**|**」、|はカーソル）の状態でBackspace/Deleteを1回押すと、隠しマーカーspan
+    // （contentEditable=falseの原子ノード）が開き側・閉じ側どちらか一方だけネイティブに
+    // 削除されてしまい、対になる相手を失った単独の**が残る。unwrapLiveFormatting後の
+    // 正規表現は開き・閉じが揃わないと一致しないため、この孤立した**は隠されずそのまま
+    // 可視の文字列として残ってしまっていた（composerEditing.tsのclosingSequence/
+    // openingSequenceのコメント参照）。カーソルが現在のactiveFormats全ての空マーカー対の
+    // 直中（開き列の直後＝閉じ列の直前）にあるBackspace/Deleteは、ネイティブの1ノードずつの
+    // 削除に任せず、開き列・閉じ列をまとめて1回の編集で削除する（トグルボタンをもう一度
+    // 押して空のまま解除したときと同じ結果になるようにする）。
+    if ((e.key === 'Backspace' || e.key === 'Delete') && activeFormats.length > 0) {
+      const root = editorRef.current
+      if (root) {
+        const offs = getSelectionOffsets(root)
+        if (offs && offs.start === offs.end) {
+          const text = domToPlainText(root)
+          const cursor = offs.start
+          const opening = openingSequence(activeFormats)
+          const closing = closingSequence(activeFormats)
+          const isEmpty =
+            text.slice(Math.max(0, cursor - opening.length), cursor) === opening &&
+            text.slice(cursor, cursor + closing.length) === closing
+          if (isEmpty) {
+            e.preventDefault()
+            replaceRangeWithText(root, cursor - opening.length, cursor + closing.length, '')
+            setSelectionOffsets(root, cursor - opening.length)
+            setActiveFormats([])
+            afterMutate()
+            return
+          }
+        }
+      }
+    }
 
     if (emojiOpen && e.key === 'Escape') {
       setEmojiOpen(false)
