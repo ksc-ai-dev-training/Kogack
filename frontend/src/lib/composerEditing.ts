@@ -36,6 +36,26 @@ function isEmojiNode(node: Node): node is HTMLImageElement {
   return node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === 'IMG' && (node as Element).hasAttribute(EMOJI_ATTR)
 }
 
+/** 書式のライブプレビュー用の隠しマーカーspan（LIVE_FORMAT_MARKER_ATTR、下記参照）かどうかの判定。
+ * isEmojiNodeと同じ理由（このspanはcontentEditable=falseで原子的に扱われるため、resolveOffsetも
+ * 内部を指すオフセットを返してはいけない）でresolveOffsetから使う。LIVE_FORMAT_MARKER_ATTRは
+ * このファイルの後方（書式ライブプレビューのセクション）で定義される定数だが、関数宣言は
+ * ホイスティングされ実行（呼び出し）時には既に初期化済みのため問題ない。 */
+function isMarkerNode(node: Node): boolean {
+  return node.nodeType === Node.ELEMENT_NODE && (node as Element).hasAttribute(LIVE_FORMAT_MARKER_ATTR)
+}
+
+/** ノード配下のテキスト総文字数（原子絵文字・BR等の区別はせず、単純にテキストノードの
+ * data.lengthを合算するだけの軽量版。隠しマーカーspanの中身は常に短い1〜数個のテキスト
+ * ノードのみのため、これで十分）。 */
+function textLength(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) return (node as Text).data.length
+  if (node.nodeType !== Node.ELEMENT_NODE) return 0
+  let sum = 0
+  for (const child of Array.from(node.childNodes)) sum += textLength(child)
+  return sum
+}
+
 /** 原子絵文字ノードの生成。バブルの外にラップせず裸のimgのまま（wrapper要素を挟むと
  * プログラムによるRange.deleteContents()で「imgは消えるが空のwrapperが残る」ゾンビノード事故が
  * 起きやすいとPlanサブエージェントの精査で指摘されたため、意図的に裸のまま挿入する）。 */
@@ -221,6 +241,28 @@ function resolveOffset(root: Node, targetOffset: number): DomPosition {
       const idx = indexOfChild(node)
       if (remaining < len) {
         // 内部を指すオフセットは常に手前の境界へクランプする（原子ノードなので「内部」は無い）
+        return { node: parent, offset: idx }
+      }
+      remaining -= len
+      lastPosition = { node: parent, offset: idx + 1 }
+      return null
+    }
+    // バグ修正（ユーザーからの報告「太字入力されたものをDeleteキーで消すと記号の一部が見えて
+    // しまう」の対策でマーカーspanにcontentEditable=falseを付けた際に実機で新たに発覚）:
+    // マーカーspanもisEmojiNodeと全く同じ理由でここで原子ノードとして扱う必要がある。
+    // 対策前は「remaining<=len」なら迷わずspan内部のテキストノードへ位置を返していたが、
+    // ちょうどマーカーの末尾（=次のノードとの境界）を指すオフセットの場合、内部の最後の
+    // 文字位置（例: 2文字のマーカーのoffset=2）をそのまま返してしまい、
+    // 「contentEditable=falseな要素の内部」という、ブラウザのSelectionが事実上使えない
+    // （キャレットを置いても以後のBackspace/Delete等のキー入力を一切受け付けなくなる）
+    // 位置になっていた。isEmojiNodeと同じ「remaining<len なら手前の境界へクランプ、
+    // それ以外（ちょうど末尾も含む）は消費してnullを返し次のノードへ進む」規則にすることで、
+    // マーカーの内部に位置が落ちることを無くした。
+    if (isMarkerNode(node)) {
+      const len = textLength(node)
+      const parent = node.parentNode as Node
+      const idx = indexOfChild(node)
+      if (remaining < len) {
         return { node: parent, offset: idx }
       }
       remaining -= len
@@ -614,7 +656,20 @@ function collectLiveMatches(text: string): LiveMatch[] {
  * マッチした記法の境界文字は必ずテキストノードの先頭/末尾に単独である前提で書いており
  * （正規表現の定義上、絵文字の`:name:`・メンションspanの表示名のいずれにもマーカー用の記号は
  * 含まれ得ない）、想定外の構造だった場合はnullを返す（呼び出し側はマーカーを隠さず範囲全体を
- * そのままスタイルするだけにフォールバックする）。 */
+ * そのままスタイルするだけにフォールバックする）。
+ *
+ * バグ修正（ユーザーからの報告「太字入力されたものをDeleteキーで消そうとすると『**ああ*』のように
+ * なって記号の一部が見えてしまう」）: マーカー（**・_・++・~~）は「実テキストとして残しつつ
+ * font-size:1pxで隠す」設計のため、以前はcontentEditable指定が無く、ブラウザのネイティブな
+ * Backspace/Deleteは他の文字と同様に1文字ずつマーカーを食い荒らせてしまっていた（2文字の
+ * マーカーの片方だけが消え、残った1文字が可視化される）。原子絵文字ノード（createEmojiNode）と
+ * 同じ`contentEditable=false`をこのspanにも付与し、隣接するBackspace/Deleteがマーカー全体を
+ * 1回の操作で不可分に削除する（ネイティブに任せるだけで済み、片方だけ消える中途半端な状態が
+ * 発生しなくなる）ようにした。この属性はDOMツリー構造・テキスト内容そのものには影響しないため、
+ * resolveOffset/domToPlainTextの走査ロジック（spanを通常の子要素として再帰するだけ）は
+ * 変更不要（同じ理由でisEmojiNodeのような特別扱いも不要——マーカーspanは常に
+ * unwrapLiveFormatting→再構築のサイクルの中でのみ存在し、このoffset計算が走る時点では
+ * 既にunwrap済みで実在しない）。 */
 function extractHiddenMarker(fragment: DocumentFragment, count: number, fromEnd: boolean): HTMLSpanElement | null {
   if (count === 0) return null
   const target = fromEnd ? fragment.lastChild : fragment.firstChild
@@ -627,6 +682,7 @@ function extractHiddenMarker(fragment: DocumentFragment, count: number, fromEnd:
   const span = document.createElement('span')
   span.setAttribute(LIVE_FORMAT_MARKER_ATTR, 'true')
   span.className = HIDDEN_MARKER_CLASSNAME
+  span.contentEditable = 'false'
   span.appendChild(document.createTextNode(cut))
   return span
 }
@@ -747,7 +803,9 @@ function collectQuoteRanges(text: string, excludeRanges: { start: number; end: n
 
 /** [start,end)を隠しマーカー用spanで包むだけの汎用ヘルパー（wrapLiveMatchのマーカー抽出と
  * 異なり、範囲全体をそのままspanで囲む——引用の「> 」は行の途中ではなく必ず行頭にあり、
- * 抽出の左右非対称を気にする必要が無いため、より単純なこちらで足りる）。 */
+ * 抽出の左右非対称を気にする必要が無いため、より単純なこちらで足りる）。extractHiddenMarkerと
+ * 同じ理由でcontentEditable=falseを付与し、隣接するBackspace/Deleteが「> 」を1回の操作で
+ * 不可分に削除するようにする（片方の文字だけが消えて残りが可視化される事故を防ぐ）。 */
 function wrapRangeInHiddenSpan(container: Node, start: number, end: number): void {
   if (start >= end) return
   const startPos = resolveOffset(container, start)
@@ -759,6 +817,7 @@ function wrapRangeInHiddenSpan(container: Node, start: number, end: number): voi
   const span = document.createElement('span')
   span.setAttribute(LIVE_FORMAT_MARKER_ATTR, 'true')
   span.className = HIDDEN_MARKER_CLASSNAME
+  span.contentEditable = 'false'
   span.appendChild(fragment)
   range.insertNode(span)
 }
