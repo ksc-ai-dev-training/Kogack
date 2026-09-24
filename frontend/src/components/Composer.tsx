@@ -27,6 +27,8 @@ import {
   toggleFormatOnSelection,
   isCursorInsideActiveFormats,
   computeMarkerAwareDeletion,
+  openingSequence,
+  closingSequence,
   type ToggleFormatKind,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
@@ -229,9 +231,22 @@ export default function Composer({
   const emojiCatchUpAppliedRef = useRef(false)
   // 書式トグルボタン（太字・斜体・下線・取り消し線、ユーザーからの明示的な要望「ボタンが押されて
   // いる間はその記法になり、もう一度押すと解除される仕組みにしてほしい（Wordみたいな感じ）」）の
-  // 現在の押下状態。カーソル位置に対する見た目上のヒントに過ぎず（詳細はcomposerEditing.tsの
-  // 冒頭コメント参照）、テキスト自体は常にその場で完全なMarkdownとして存在する。
+  // 現在の押下状態。activeFormats＝実際にマーカーが本文にすでに挿入済み（＝既に何か入力済み）の
+  // 書式。カーソル位置に対する見た目上のヒントに過ぎず（詳細はcomposerEditing.tsの冒頭コメント
+  // 参照）、テキスト自体は常にその場で完全なMarkdownとして存在する。
   const [activeFormats, setActiveFormats] = useState<ToggleFormatKind[]>([])
+  // pendingFormats＝ボタンは押されているが、まだ1文字も入力されていないため本文には一切
+  // 挿入していない書式（ユーザーからの報告「記法のボタン押すと一文字分見えない何かが入力される
+  // のやめてほしい」への対応）。以前はボタンを押した瞬間に空の開始・終了マーカー対を即座に本文へ
+  // 挿入していた（文字色を透明にして隠していても、実際には「空だが実在する」書式が本文中に
+  // 存在していた）。次にmaterializePendingFormats（下記）が実際に入力された文字を検知した時点で
+  // 初めてマーカーを挿入するよう変更し、それまでは本文・DOMに一切触れない。
+  const [pendingFormats, setPendingFormats] = useState<ToggleFormatKind[]>([])
+  // materializePendingFormatsが「今回の入力で何文字増えたか」を判定するための、直前の
+  // 書式同期後（refreshEditorHousekeeping末尾）の本文文字数。IME合成中（skipLiveFormatSync）は
+  // 更新しない——合成の途中経過ごとに更新すると、合成が確定した時点で「合成開始前からの
+  // 増加分」ではなく「合成の最後の1コマからの増加分」しか測れなくなるため。
+  const prevPlainTextLengthRef = useRef(0)
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
@@ -343,10 +358,42 @@ export default function Composer({
     if (!root) return
     if (!options?.skipLiveFormatSync) {
       syncLiveFormatting(root)
+      // IME合成中は更新しない（上のコメント参照）。この関数の末尾で更新することで、
+      // materializePendingFormatsが次の呼び出しで比較する基準値が常に「直前の同期後」の
+      // 本文文字数になる。
+      prevPlainTextLengthRef.current = domToPlainText(root).length
     }
     setHasContent(domToPlainText(root).trim().length > 0)
     setContentVersion((v) => v + 1)
     resizeEditor()
+  }
+
+  // pendingFormats（ボタンは押されているがまだ本文に挿入していない書式）を、実際に入力された
+  // 文字の周りへ初めてマーカーとして挿入する（上のpendingFormats宣言のコメント参照）。
+  // ネイティブ入力・IME確定・貼り付けのいずれの経路でも、「本文が前回の同期後より何文字
+  // 増えたか」をprevPlainTextLengthRefとの差分で判定する（Backspace/Delete等の削除系は
+  // 自前でpreventDefaultして別経路で処理しているため、この関数が呼ばれる時点では純粋な
+  // 追加だけを想定してよい）。増えていなければ何もしない（null相当）。増えた分（カーソンの
+  // 直前insertedCount文字）だけを開始・終了マーカーで囲み、pendingFormatsをそのまま
+  // activeFormatsへ引き継ぐ（既に開いているactiveFormatsがある場合はその内側に自然に
+  // 入れ子になる——マーカーの挿入はプレーンテキストのオフセットだけで行うため、ネストの
+  // 深さに関わらずそのまま機能する）。呼び出し元はこの直後に必ずafterMutateを呼ぶこと
+  // （syncLiveFormattingが実際にマーカーを隠す処理をここでは行わないため）。
+  const materializePendingFormats = (root: HTMLDivElement) => {
+    if (pendingFormats.length === 0) return
+    const currentLength = domToPlainText(root).length
+    const insertedCount = currentLength - prevPlainTextLengthRef.current
+    if (insertedCount <= 0) return
+    const cursor = getSelectionOffsets(root)?.start
+    if (cursor === undefined || cursor < insertedCount) return
+    const insertStart = cursor - insertedCount
+    const suffix = closingSequence(pendingFormats)
+    const prefix = openingSequence(pendingFormats)
+    replaceRangeWithText(root, cursor, cursor, suffix)
+    replaceRangeWithText(root, insertStart, insertStart, prefix)
+    setSelectionOffsets(root, insertStart + prefix.length + insertedCount)
+    setActiveFormats((prev) => [...prev, ...pendingFormats])
+    setPendingFormats([])
   }
 
   // 書式トグルボタンの押下状態（activeFormats）は、カーソルが現在の書式の終端マーカー列の
@@ -414,6 +461,9 @@ export default function Composer({
       normalizeInvariants(root)
     }
     if (!native.isComposing) {
+      // IME合成中はmaterializePendingFormatsを呼ばない（合成中のDOM書き換えを避ける、
+      // 上のコメントと同じ理由。合成確定時にはhandleCompositionEndで改めて呼ぶ）
+      materializePendingFormats(root)
       runPostInputChecks(root)
     }
     afterMutate(native.isComposing ? { skipLiveFormatSync: true } : undefined)
@@ -422,6 +472,7 @@ export default function Composer({
   const handleCompositionEnd = () => {
     const root = editorRef.current
     if (!root) return
+    materializePendingFormats(root)
     runPostInputChecks(root)
     afterMutate()
   }
@@ -491,6 +542,7 @@ export default function Composer({
     if (!root) return
     root.replaceChildren()
     setActiveFormats([])
+    setPendingFormats([])
     afterMutate()
   }
 
@@ -573,11 +625,14 @@ export default function Composer({
   // 段階で送信した後の表示と同じようにしたい。記号で囲むような表示をなくしたい。太字、斜体、
   // 下線、取り消し線に関しては、ボタンが押されている間はその記法になり、もう一度ボタンを押すと
   // 解除される、というような仕組みにしてほしい（Wordみたいな感じ）」。選択範囲がある場合は
-  // 従来どおり「選択範囲を囲む/既に囲まれていれば外す」トグル、選択範囲が無い場合は
-  // composerEditing.tsのtoggleFormatAtCursor（詳細はそちらのコメント参照）に従い、押すたびに
-  // 「その場に空のマーカー対を挿入してモードに入る」「解除してカーソルをマーカーの外へ出す」を
-  // 切り替える。実際のテキスト書き換えはeditsを高いオフセットから順に適用するだけでよい
-  // （composerEditing.ts側で既にその順に並べてある）。
+  // 従来どおり「選択範囲を囲む/既に囲まれていれば外す」トグル（選択済みの実テキストが対象のため、
+  // pendingFormatsという「未確定」の概念は関係ない）。
+  //
+  // 選択範囲が無い場合: ユーザーからの追加報告「記法のボタン押すと一文字分見えない何かが
+  // 入力されるのやめてほしい」を受け、まだ本文に無い書式をこれから有効化する場合は本文へ
+  // 一切触れず、pendingFormats（上記宣言のコメント参照）の切り替えだけで済ませる。既に
+  // activeFormats（＝実際にマーカーが本文にある）に含まれる書式を解除する場合のみ、実在する
+  // マーカーを操作するcomposerEditing.tsのtoggleFormatAtCursorを呼ぶ。
   const toggleFormatButton = (kind: ToggleFormatKind) => {
     const root = editorRef.current
     if (!root) return
@@ -590,14 +645,25 @@ export default function Composer({
       const result = toggleFormatOnSelection(text, start, end, kind)
       for (const e of result.edits) replaceRangeWithText(root, e.start, e.end, e.text)
       setSelectionOffsets(root, result.selectionStart, result.selectionEnd)
+      setPendingFormats([])
       setPickerQuery(null)
       afterMutate()
+      return
+    }
+    if (!activeFormats.includes(kind)) {
+      // まだ本文に無い書式のトグル: DOMには一切触れず、次に入力される文字へ適用する保留
+      // 状態だけを切り替える（既にpendingならもう一度押して解除、まだなら追加）。
+      setPendingFormats((prev) => (prev.includes(kind) ? prev.filter((f) => f !== kind) : [...prev, kind]))
+      setPickerQuery(null)
       return
     }
     const result = toggleFormatAtCursor(text, start, activeFormats, kind)
     for (const e of result.edits) replaceRangeWithText(root, e.start, e.end, e.text)
     setSelectionOffsets(root, result.cursor)
     setActiveFormats(result.activeFormats)
+    if (result.newlyPending.length > 0) {
+      setPendingFormats((prev) => Array.from(new Set([...prev, ...result.newlyPending])))
+    }
     setPickerQuery(null)
     afterMutate()
   }
@@ -690,6 +756,7 @@ export default function Composer({
     // する設計、上のコメント参照）ことでこの自動切り詰めが失われた。paste特有の欠落のため、ここで
     // 明示的に補う（書式ボタン等での数文字程度の超過は旧実装でも元々防げていなかったため対象外）。
     enforceMaxLength(root, MAX_BODY_LENGTH)
+    materializePendingFormats(root)
     afterMutate()
   }
 
@@ -1248,7 +1315,7 @@ export default function Composer({
             toggleFormatButton('bold')
           }}
           className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black hover:bg-surface-muted ${
-            activeFormats.includes('bold') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+            activeFormats.includes('bold') || pendingFormats.includes('bold') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
           B
@@ -1261,7 +1328,7 @@ export default function Composer({
             toggleFormatButton('italic')
           }}
           className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic hover:bg-surface-muted ${
-            activeFormats.includes('italic') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+            activeFormats.includes('italic') || pendingFormats.includes('italic') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
           I
@@ -1274,7 +1341,7 @@ export default function Composer({
             toggleFormatButton('underline')
           }}
           className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold underline hover:bg-surface-muted ${
-            activeFormats.includes('underline') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+            activeFormats.includes('underline') || pendingFormats.includes('underline') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
           U
@@ -1287,7 +1354,7 @@ export default function Composer({
             toggleFormatButton('strike')
           }}
           className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold line-through hover:bg-surface-muted ${
-            activeFormats.includes('strike') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+            activeFormats.includes('strike') || pendingFormats.includes('strike') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
           S

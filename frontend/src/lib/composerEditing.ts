@@ -910,7 +910,10 @@ export function syncLiveFormatting(root: HTMLElement): void {
 // あとから適用する編集のオフセットへ影響しない（既存のwrapSelectionが「終端側を先に、
 // 始端側を後に」処理しているのと同じ考え方）。
 
-function closingSequence(formats: ToggleFormatKind[]): string {
+// exportしている理由: Composer.tsx側のmaterializePendingFormats（pendingFormatsに保留していた
+// 書式を、実際に入力された文字の周りへ初めてマーカーとして挿入する処理）が、この2関数と全く
+// 同じ「複数書式を入れ子の順番で開始・終了マーカー文字列に変換する」ロジックを必要とするため。
+export function closingSequence(formats: ToggleFormatKind[]): string {
   return formats
     .slice()
     .reverse()
@@ -918,7 +921,7 @@ function closingSequence(formats: ToggleFormatKind[]): string {
     .join('')
 }
 
-function openingSequence(formats: ToggleFormatKind[]): string {
+export function openingSequence(formats: ToggleFormatKind[]): string {
   return formats.map((f) => TOGGLE_FORMAT_MARKERS[f].prefix).join('')
 }
 
@@ -941,36 +944,37 @@ export interface ToggleFormatAtCursorResult {
   edits: TextEdit[]
   cursor: number
   activeFormats: ToggleFormatKind[]
+  /** 内側でない書式を解除した結果、残りの書式を保留（pendingFormats）へ回す必要がある場合に
+   * 含める（下記コメント参照）。それ以外は常に空配列。 */
+  newlyPending: ToggleFormatKind[]
 }
 
-/** 選択範囲が無い（カーソルのみ）状態で書式トグルボタンを押した結果を計算する。kindが既に
- * activeFormatsに含まれていなければ有効化、含まれていれば無効化する。 */
+// バグ修正（ユーザーからの報告「記法のボタン押すと一文字分見えない何かが入力されるのやめて
+// ほしい」）: 以前はボタンを押した瞬間、まだ何も入力していなくても開始・終了マーカーの対を
+// その場のテキストへ即座に挿入していた（文字色を透明にして隠していても、実際にはDOM/本文に
+// 「空だが実在する」書式が存在している状態だった）。今回、実際に文字が入力されるまでは本文へ
+// 一切触れない方式に変更した——ボタンを押した直後は見た目の押下状態（Composer.tsxの
+// pendingFormats、DOMには一切触れない）だけを切り替え、次に実際に文字が入力された瞬間に
+// Composer.tsx側のmaterializePendingFormatsが初めて開始・終了マーカーをその場に挿入する
+// （挿入時点で既に中身が伴っているため、「空のまま」というマーカーが本文に存在する瞬間が
+// 無くなる）。
+//
+// この関数（toggleFormatAtCursor）は、そのため「既にactiveFormats（＝実際にマーカーが
+// その場に存在する、既に文字が入力済みの書式）に含まれる書式をもう一度押して解除する」場合
+// にのみ呼ばれる（Composer.tsxのtoggleFormatButton参照。まだ何も入力されていない新しい書式を
+// 押しただけの場合はこの関数を呼ばず、pendingFormatsの切り替えだけで済ませる）。
 export function toggleFormatAtCursor(
   text: string,
   cursor: number,
   activeFormats: ToggleFormatKind[],
   kind: ToggleFormatKind,
 ): ToggleFormatAtCursorResult {
-  const isActive = activeFormats.includes(kind)
   const cursorValid = isCursorInsideActiveFormats(text, cursor, activeFormats)
-
-  if (!isActive) {
-    // 有効化: 現在のカーソル位置に新しい書式の開始・終了マーカーを挿入し、間へカーソルを置く。
-    // カーソルが既存のactiveFormatsの終端マーカー列の直前に無い（利用者が移動した後など）場合は、
-    // 古いactiveFormatsの記憶を信用せず、この書式単体から新しく始める（安全側のフォールバック）。
-    const base = cursorValid ? activeFormats : []
-    const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
-    return {
-      edits: [{ start: cursor, end: cursor, text: prefix + suffix }],
-      cursor: cursor + prefix.length,
-      activeFormats: [...base, kind],
-    }
-  }
 
   if (!cursorValid) {
     // カーソルが既にズレている状態で同じボタンをもう一度押した場合。テキストには一切触れず、
     // 記憶からその書式だけを取り除く（ボタンの見た目を正すだけ）。
-    return { edits: [], cursor, activeFormats: activeFormats.filter((f) => f !== kind) }
+    return { edits: [], cursor, activeFormats: activeFormats.filter((f) => f !== kind), newlyPending: [] }
   }
 
   const idx = activeFormats.indexOf(kind)
@@ -981,34 +985,30 @@ export function toggleFormatAtCursor(
     const isEmpty = text.slice(Math.max(0, cursor - prefix.length), cursor) === prefix
     if (isEmpty) {
       // 何も入力しないまま同じボタンをもう一度押して解除した場合は、空のマーカー対を丸ごと
-      // 削除する（本文に空の**が残らないようにする）
+      // 削除する（本文に空の**が残らないようにする。これは既に本物として存在するマーカーの
+      // 削除であり、上記のバグ修正とは無関係——computeMarkerAwareDeletionのBackspace/Delete
+      // 経由で中身を全て消しきった後にも同じ空の状態に到達しうるため、この分岐自体は必要）
       return {
         edits: [{ start: cursor - prefix.length, end: cursor + suffix.length, text: '' }],
         cursor: cursor - prefix.length,
         activeFormats: activeFormats.slice(0, -1),
+        newlyPending: [],
       }
     }
     // 最も内側の書式を解除: 自分自身の終端マーカーの直後までカーソルを進めるだけでよい
     // （残りの書式の終端マーカー列はそのまま後ろに続いている）
-    return { edits: [], cursor: cursor + suffix.length, activeFormats: activeFormats.slice(0, -1) }
+    return { edits: [], cursor: cursor + suffix.length, activeFormats: activeFormats.slice(0, -1), newlyPending: [] }
   }
 
   // 内側でない書式を解除: 現在有効な全書式の終端マーカー列全体の直後までカーソルを進めて
-  // （＝そこまでに入力した内容を正しく閉じて）から、残りの書式だけの新しい空マーカー対を
-  // 改めて挿入し直す（続けて入力すると、残りの書式のままタイプできるようにするため）。
+  // （＝そこまでに入力した内容を正しく閉じて）残りをすべて閉じる。残りの書式（例: bold+underline）
+  // は、その場に空のマーカー対を再度挿入するのではなくnewlyPendingとして返し、実際に次の文字が
+  // 入力されたときにComposer.tsx側のmaterializePendingFormatsが改めてその場に挿入する
+  // （上記のバグ修正と同じ理由——ここでeditsを空のままにしているのはそのため）。
   const fullClosing = closingSequence(activeFormats)
   const afterClosing = cursor + fullClosing.length
   const remaining = activeFormats.filter((f) => f !== kind)
-  if (remaining.length === 0) {
-    return { edits: [], cursor: afterClosing, activeFormats: [] }
-  }
-  const reopenOpen = openingSequence(remaining)
-  const reopenClose = closingSequence(remaining)
-  return {
-    edits: [{ start: afterClosing, end: afterClosing, text: reopenOpen + reopenClose }],
-    cursor: afterClosing + reopenOpen.length,
-    activeFormats: remaining,
-  }
+  return { edits: [], cursor: afterClosing, activeFormats: [], newlyPending: remaining }
 }
 
 export interface ToggleFormatOnSelectionResult {
