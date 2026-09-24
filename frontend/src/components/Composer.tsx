@@ -332,10 +332,17 @@ export default function Composer({
   // （ユーザーからの明示的な要望「太字とか下線とかを入力している段階で見られるようにしたい」）の
   // 同期もここ1箇所に集約する。resizeEditor（scrollCaretIntoViewを内包）より前に呼ぶことで、
   // ライブプレビュー適用後の最終的なキャレット位置を基準にスクロール追従が計算されるようにする。
-  const refreshEditorHousekeeping = () => {
+  // skipLiveFormatSync: IME合成中（日本語入力の変換候補選択中）はsyncLiveFormattingが行う
+  // Range抽出・DOM再構築を行わない（合成中にDOMを書き換えるとIMEの変換候補ウィンドウが壊れる/
+  // キャンセルされるおそれがあるため。handleInput/handleKeyDownの既存のisComposingガードと
+  // 同じ考え方）。合成が確定した瞬間（handleCompositionEnd）は必ずスキップなしで呼ばれるため、
+  // 書式の反映（記号を隠す・太字等のスタイルを当てる）はIME確定の直後に即座に行われる。
+  const refreshEditorHousekeeping = (options?: { skipLiveFormatSync?: boolean }) => {
     const root = editorRef.current
     if (!root) return
-    syncLiveFormatting(root)
+    if (!options?.skipLiveFormatSync) {
+      syncLiveFormatting(root)
+    }
     setHasContent(domToPlainText(root).trim().length > 0)
     setContentVersion((v) => v + 1)
     resizeEditor()
@@ -370,9 +377,9 @@ export default function Composer({
   // 利用者の操作（入力・ボタンクリック等）によるDOM変更のあとに呼ぶ。hasUserEditedRefを立てる
   // ことで、customEmoji読み込み待ちの追いかけ変換（上のuseEffect）が、既に本人が編集を始めた
   // 内容を勝手に上書きしないようにする。
-  const afterMutate = () => {
+  const afterMutate = (options?: { skipLiveFormatSync?: boolean }) => {
     hasUserEditedRef.current = true
-    refreshEditorHousekeeping()
+    refreshEditorHousekeeping(options)
   }
 
   const runPostInputChecks = (root: HTMLDivElement) => {
@@ -390,9 +397,10 @@ export default function Composer({
 
   // ネイティブ入力（IME・直接タイプ・OSレベルの貼り付け以外の入力全般）を受けるハンドラ。
   // IME合成中（e.nativeEvent.isComposing）は、ショートコード変換・文字数上限の適用・
-  // メンション候補の絞り込みを一切行わない（合成中にDOMを書き換えるとIMEの変換候補ウィンドウが
-  // 壊れる/キャンセルされるおそれがあるため）。合成が確定した瞬間はonCompositionEndで
-  // 改めて同じチェックを走らせる。
+  // メンション候補の絞り込み・書式のライブプレビュー同期（syncLiveFormatting）を一切行わない
+  // （合成中にDOMを書き換えるとIMEの変換候補ウィンドウが壊れる/キャンセルされるおそれがある
+  // ため）。合成が確定した瞬間はonCompositionEndで改めて同じチェック（書式同期を含む）を
+  // 走らせるため、記号を隠す・太字等のスタイルを当てるといった反映はIME確定の直後に行われる。
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
     const root = editorRef.current
     if (!root) return
@@ -407,7 +415,7 @@ export default function Composer({
     if (!native.isComposing) {
       runPostInputChecks(root)
     }
-    afterMutate()
+    afterMutate(native.isComposing ? { skipLiveFormatSync: true } : undefined)
   }
 
   const handleCompositionEnd = () => {
