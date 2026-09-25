@@ -118,15 +118,36 @@ function stripSelectionMarkers(text: string): string {
   return text.split(SELECTION_START_MARKER).join('').split(SELECTION_END_MARKER).join('')
 }
 
-/** 本文の末尾が改行で終わっている場合にのみ、その直後へCARET_MARKERを1文字追加する
- * （既存のマーカーは先に取り除いてから再判定するため、複数回呼んでも安全＝冪等）。
- * Composer.tsxのEnterキー処理（通常の改行のみ。「\n- 」で始まる箇条書き継続は末尾に実在の
- * 文字列が続くためこの問題自体が起きず対象外）から、\n挿入の直後に呼ぶ。 */
+/** rootの一番最後（lastChildを再帰的に辿った先）にあるテキストノードを返す。要素をまたいで
+ * 末尾を辿る必要があるのは、引用等のブロック要素（2026-09-25導入）の内側で改行した場合、
+ * 本文の実質的な末尾がroot直下ではなく<blockquote>等の内側のテキストノードになるため。 */
+function findDeepestLastTextNode(node: Node): Text | null {
+  let current: Node | null = node
+  while (current) {
+    if (current.nodeType === Node.TEXT_NODE) return current as Text
+    if (current.nodeType !== Node.ELEMENT_NODE) return null
+    current = current.lastChild
+  }
+  return null
+}
+
+/** 本文の末尾（引用等のブロック要素の内側にネストしている場合も含む）が改行で終わっている
+ * 場合にのみ、その直後へCARET_MARKERを1文字追加する（既存のマーカーは先に取り除いてから
+ * 再判定するため、複数回呼んでも安全＝冪等）。Composer.tsxのEnterキー処理（通常の改行・
+ * 引用内の改行。「\n- 」で始まる箇条書き継続は末尾に実在の文字列が続くためこの問題自体が
+ * 起きず対象外）から、\n挿入の直後に呼ぶ。
+ *
+ * バグ修正（Playwrightでの引用のEnter継続検証中に発見）: 以前はroot.lastChildだけを見ていた
+ * ため、末尾の"\n"がroot直下のテキストノードではなく<blockquote>の内側にある場合（引用行で
+ * Enterを押して続ける場合、常にこの状態になる）に何もせず、この関数がそもそも存在する理由
+ * そのものである「末尾の孤立した改行の直後にブラウザが正しくキャレットを計測できず、次に
+ * 入力した文字が新しい行ではなく直前の行の末尾に挿入されてしまう」不具合がそのまま再発して
+ * いた。findDeepestLastTextNodeで要素をまたいで実際の末尾テキストノードを見つけるようにした。 */
 export function ensureTrailingNewlineCaretMarker(root: HTMLElement): void {
   removeCaretMarkerFromDom(root)
-  const last = root.lastChild
-  if (last && last.nodeType === Node.TEXT_NODE && (last as Text).data.endsWith('\n')) {
-    ;(last as Text).data += CARET_MARKER
+  const last = findDeepestLastTextNode(root)
+  if (last && last.data.endsWith('\n')) {
+    last.data += CARET_MARKER
   }
 }
 
@@ -211,6 +232,14 @@ export function domToMarkdown(root: Node): string {
     if (kind && inner) {
       const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
       return prefix + inner + suffix
+    }
+    // 引用（data-block-format="quote"）はマーカー文字を一切持たない実DOM構造のため、
+    // 送信直前にここで各行へ「> 」を復元する（wrapQuoteRangeのコメント参照）。
+    if ((node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'quote') {
+      return inner
+        .split('\n')
+        .map((line) => `> ${line}`)
+        .join('\n')
     }
     return inner
   }
@@ -675,13 +704,37 @@ const FORMAT_ELEMENT: Record<ToggleFormatKind, { tagName: string; className: str
   code: { tagName: 'code', className: CODE_CLASSNAME },
 }
 
-/** 太字・斜体・下線・取り消し線を表す実要素であることを示す属性（値はToggleFormatKind）。
- * LIVE_FORMAT_ATTR（引用・コード専用、隠しマーカー方式のまま）とは意図的に別属性にしている——
- * unwrapLiveFormattingがsyncLiveFormattingのたびに「テキストから再構築した」引用・コードの
- * ラッパーだけを毎回解体・再構築するのに対し、この属性の要素は文字が入力された時点で直接
- * 構築される実体そのもの（テキストパターンから毎回導出されるものではない）ため、
+/** 太字・斜体・下線・取り消し線・インラインコードを表す実要素であることを示す属性（値は
+ * ToggleFormatKind）。LIVE_FORMAT_ATTR（コードブロック専用、隠しマーカー方式のまま）とは
+ * 意図的に別属性にしている——unwrapLiveFormattingがsyncLiveFormattingのたびに「テキストから
+ * 再構築した」ラッパーだけを毎回解体・再構築するのに対し、この属性の要素は文字が入力された
+ * 時点で直接構築される実体そのもの（テキストパターンから毎回導出されるものではない）ため、
  * unwrapLiveFormattingのセレクタに一切引っかからないようにする必要があるため。 */
 const TOGGLE_FORMAT_ELEMENT_ATTR = 'data-toggle-format'
+
+/** 引用・箇条書き（複数行にまたがるブロック要素）を表す実要素であることを示す属性
+ * （値は'quote' | 'list' | 'list-item'）。TOGGLE_FORMAT_ELEMENT_ATTRと同じ理由で
+ * unwrapLiveFormattingの対象にしない——一度実要素になったブロックは、テキストから毎回
+ * 再構築するのではなく、Enter/Backspace等の操作で直接インクリメンタルに更新する
+ * （2026-09-25、引用・箇条書きにも太字等と同じ「マーカー文字を一切持たない」方式を拡張した
+ * 際に導入）。 */
+const BLOCK_FORMAT_ATTR = 'data-block-format'
+
+/** カーソル位置（プレーンテキストオフセット）を包むBLOCK_FORMAT_ATTR要素（引用・箇条書きの
+ * 項目）を、最も内側の1つだけ返す（太字等と違い、引用・箇条書きは入れ子にならないため
+ * チェーンではなく単一の要素で十分）。Composer.tsxのEnter/Backspaceハンドラが、現在行が
+ * 引用/箇条書きの内側かどうかを判定するために使う。 */
+export function getBlockFormatAt(root: HTMLElement, cursor: number): { el: HTMLElement; kind: string } | null {
+  const pos = resolveOffset(root, cursor)
+  let node: HTMLElement | null =
+    pos.node.nodeType === Node.TEXT_NODE ? ((pos.node as Text).parentElement as HTMLElement | null) : (pos.node as HTMLElement)
+  while (node && node !== root) {
+    const kind = node.getAttribute(BLOCK_FORMAT_ATTR)
+    if (kind) return { el: node, kind }
+    node = node.parentElement
+  }
+  return null
+}
 
 // MessageList.tsxのBOLD_REGEX/ITALIC_REGEX/UNDERLINE_REGEX/STRIKE_REGEXと同じ定義（1文字以上
 // 必須）。手打ちの生Markdown（consumeRawMarkdownSyntax）を検出するためのもので、送信後の
@@ -827,17 +880,6 @@ function wrapLiveMatch(container: Node, match: LiveMatch): void {
   range.insertNode(wrapper)
 }
 
-/** fragment（引用範囲として抽出済みの中身）の中に、さらにコードが入れ子になっていないかを
- * 調べ、あれば適用する（太字等は今回の対象外——引用中の太字等はconsumeRawMarkdownSyntaxが
- * 文書全体に対して既に構造化済みのため、ここで重複して処理する必要が無い）。要素で包む操作
- * 自体は文字数を変化させないため、オフセットはずれない。 */
-function applyNestedFormats(fragment: DocumentFragment): void {
-  const innerText = domToPlainText(fragment)
-  if (!innerText) return
-  const nested = collectLiveMatches(innerText)
-  for (const m of nested) wrapLiveMatch(fragment, m)
-}
-
 /** selectorに一致する要素を解除し、中身（テキストノード・原子絵文字img・メンションspan等）を
  * その場に残す（再parent化）。unwrapLiveFormatting・toggleFormatOnSelectionDomの両方から
  * 使う共通ロジック。 */
@@ -851,24 +893,31 @@ function unwrapMatching(root: Node, selector: string): void {
   })
 }
 
-/** 過去にsyncLiveFormattingが挿入した引用・コードのラッパー要素・隠しマーカー用spanを解除し、
- * 中身をその場に残す。太字・斜体・下線・取り消し線（TOGGLE_FORMAT_ELEMENT_ATTR）はテキスト
- * パターンから毎回導出される存在ではなく実体そのものなので、このセレクタには一切引っかからず
- * 触れない（本ファイル前方の書式セクションの冒頭コメント参照）。 */
+/** 過去にsyncLiveFormattingが挿入したコードブロックのラッパー要素・隠しマーカー用spanを解除し、
+ * 中身をその場に残す（コードブロックは本セッション時点でまだ従来の隠しマーカー方式のまま、
+ * phase3で実DOM構造化予定）。太字・斜体・下線・取り消し線・インラインコード
+ * （TOGGLE_FORMAT_ELEMENT_ATTR）・引用・箇条書き（BLOCK_FORMAT_ATTR）はテキストパターンから
+ * 毎回導出される存在ではなく実体そのものなので、このセレクタには一切引っかからず触れない
+ * （本ファイル前方の書式セクションの冒頭コメント参照）。 */
 function unwrapLiveFormatting(root: HTMLElement): void {
   unwrapMatching(root, `[${LIVE_FORMAT_ATTR}], [${LIVE_FORMAT_MARKER_ATTR}]`)
 }
 
 // 引用のライブプレビュー（ユーザーからの明示的な要望「>を入力した時点で、送った後に出てくる
-// 灰色の線みたいなものを表示させるようにしたい」）。太字・斜体・下線・取り消し線と異なり、
-// 引用は「行頭に閉じマーカーの無いプレフィックス（「> 」）が続く」という行単位のブロック構造
-// のため、collectLiveMatches（文字列内の任意位置に対する開始・終了マーカーのペア）とは別に
-// 専用の処理を用意する。MessageList.tsxのsplitLineBlocksと同じ考え方（連続する「> 」行を
-// 1つの引用ブロックとしてまとめる）で範囲を検出し、その範囲全体をMessageList.tsxの送信後表示と
-// 全く同じクラス（QUOTE_BLOCKQUOTE_CLASSNAME）の<blockquote>で包む。各行の「> 」マーカー自体は
-// 太字等と同じ「実テキストとして残しつつ隠す」方式にし、マーカーを除いた本文にはさらに
-// 太字・斜体等のインライン書式が効くよう再帰的に解決する（引用の中でも装飾が効く、送信後の
-// 表示と同じ仕様）。
+// 灰色の線みたいなものを表示させるようにしたい」、2026-09-25「入力している時点で送信後の表示を
+// 反映させたい（記号なしで）」で全面書き換え）。太字等と異なり、引用は「行頭に閉じマーカーの
+// 無いプレフィックス（「> 」）が続く」という行単位のブロック構造のため、専用の検出処理を持つ。
+// MessageList.tsxのsplitLineBlocksと同じ考え方（連続する「> 」行を1つの引用ブロックとして
+// まとめる）で範囲を検出し、その範囲全体をMessageList.tsxの送信後表示と全く同じクラス
+// （QUOTE_BLOCKQUOTE_CLASSNAME）の<blockquote data-block-format="quote">で包む。太字等と同じく
+// マーカー文字（「> 」）は隠すのではなく削除する——一度<blockquote>になった後は
+// unwrapLiveFormattingの対象外（上記コメント参照）なので、以後は毎回テキストから再構築される
+// のではなく、Composer.tsxのEnterキー処理がDOMを直接インクリメンタルに更新する（既存の
+// <blockquote>内に生の"\n"を挿入するだけで続き行になり、逆にDOMから抜けるだけで終了する）。
+// 検出（collectQuoteRanges）自体は太字等がまだ実要素化されていない生テキストの状態でも
+// 行頭の「> 」を見つけられれば良いため無修正のまま。中の太字・インラインコード等は
+// consumeRawMarkdownSyntaxがこの関数より先に文書全体へ対して実行済みのため、ここで
+// 改めて検出し直す必要はない（wrapQuoteRangeは「> 」を消して<blockquote>で包むだけで良い）。
 const QUOTE_BLOCKQUOTE_CLASSNAME = 'my-1 border-l-[3px] border-line-strong py-0.5 pl-2.5 text-ink-muted'
 const QUOTE_LINE_REGEX = /^> (.+)$/
 
@@ -904,29 +953,24 @@ function collectQuoteRanges(text: string, excludeRanges: { start: number; end: n
   return ranges
 }
 
-/** [start,end)を隠しマーカー用spanで包むだけの汎用ヘルパー（wrapLiveMatchのマーカー抽出と
- * 異なり、範囲全体をそのままspanで囲む——引用の「> 」は行の途中ではなく必ず行頭にあり、
- * 抽出の左右非対称を気にする必要が無いため、より単純なこちらで足りる）。extractHiddenMarkerと
- * 同じ理由でcontentEditable=falseを付与し、隣接するBackspace/Deleteが「> 」を1回の操作で
- * 不可分に削除するようにする（片方の文字だけが消えて残りが可視化される事故を防ぐ）。 */
-function wrapRangeInHiddenSpan(container: Node, start: number, end: number): void {
+/** [start,end)をcontainerから削除するだけの汎用ヘルパー（deleteRangeReturningCollapsedの
+ * HTMLElement専属版と違い、DocumentFragment等どんなcontainerに対しても使える、選択範囲を
+ * 気にしない単純な削除）。wrapQuoteRangeが「> 」マーカー文字を消し去るために使う。 */
+function deleteRangeInContainer(container: Node, start: number, end: number): void {
   if (start >= end) return
   const startPos = resolveOffset(container, start)
   const endPos = resolveOffset(container, end)
   const range = document.createRange()
   range.setStart(startPos.node, startPos.offset)
   range.setEnd(endPos.node, endPos.offset)
-  const fragment = range.extractContents()
-  const span = document.createElement('span')
-  span.setAttribute(LIVE_FORMAT_MARKER_ATTR, 'true')
-  span.className = HIDDEN_MARKER_CLASSNAME
-  span.contentEditable = 'false'
-  span.appendChild(fragment)
-  range.insertNode(span)
+  range.deleteContents()
 }
 
-/** 引用範囲を<blockquote>で包み、各行の「> 」マーカーを隠したうえで、残った本文へさらに
- * 太字等のインライン書式を再帰的に適用する。 */
+/** 引用範囲を<blockquote data-block-format="quote">で包む。各行の「> 」マーカーは（太字等と
+ * 同じく）隠すのではなく削除する。太字・インラインコード等はこの関数が呼ばれる時点で
+ * （syncLiveFormattingの並び上）既にconsumeRawMarkdownSyntaxによって文書全体に対して実要素へ
+ * 変換済みのため、ここで改めて検出する必要は無い（以前はapplyNestedFormatsで引用の中だけ
+ * 別途コード検出をやり直していたが、その二度手間が不要になった）。 */
 function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
   const { start, end } = quoteRange
   if (start >= end) return
@@ -938,8 +982,9 @@ function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
   const fragment = range.extractContents()
 
   // fragmentは（collectQuoteRangesの定義上）「> 」で始まる行だけで構成されているはずなので、
-  // 各行の先頭2文字の位置を求めて隠す。wrapRangeInHiddenSpanは文字数を変えないため、複数行分の
-  // オフセットをまとめて計算してから順に処理しても後続のオフセットはずれない。
+  // 各行の先頭2文字の位置を求めて削除する。降順（末尾の行から）で処理しないと、先に削除した
+  // 行より後方の行のオフセットが2文字ぶんずつ崩れる（consumeRawMarkdownSyntaxが生Markdownの
+  // マッチを開始位置の降順で処理しているのと全く同じ理由）。
   const innerText = domToPlainText(fragment)
   const markerOffsets: number[] = []
   let pos = 0
@@ -947,12 +992,10 @@ function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
     markerOffsets.push(pos)
     pos += line.length + 1
   }
-  for (const off of markerOffsets) wrapRangeInHiddenSpan(fragment, off, off + 2)
-
-  applyNestedFormats(fragment)
+  for (const off of [...markerOffsets].reverse()) deleteRangeInContainer(fragment, off, off + 2)
 
   const wrapper = document.createElement('blockquote')
-  wrapper.setAttribute(LIVE_FORMAT_ATTR, 'quote')
+  wrapper.setAttribute(BLOCK_FORMAT_ATTR, 'quote')
   wrapper.className = QUOTE_BLOCKQUOTE_CLASSNAME
   wrapper.appendChild(fragment)
   range.insertNode(wrapper)

@@ -28,6 +28,7 @@ import {
   toggleFormatAtCursorDom,
   toggleFormatOnSelectionDom,
   isCursorInsideActiveFormats,
+  getBlockFormatAt,
   type ToggleFormatKind,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
@@ -800,8 +801,12 @@ export default function Composer({
   }
 
   // 引用ボタン（ユーザーからの明示的な要望「Slackと同じような引用タグの機能を付けたい」）。
-  // insertBulletListと全く同じ考え方で、行頭「- 」の代わりに「> 」をトグルする（MessageList.tsxの
-  // 送信後表示・lib/textFormatting.ts（発言編集・定期投稿/トリガー本文欄）と同じ記法）。
+  // 2026-09-25、引用がマーカー文字を持たない実DOM構造（<blockquote data-block-format="quote">）に
+  // なったため、「外す」方向はテキストの「> 」プレフィックス判定（変換後は既に存在しない）ではなく
+  // getBlockFormatAtでカーソルが既存の<blockquote>の内側かどうかを直接見て判定する。内側なら
+  // ブロックごと解除（unwrapするだけ——外側の"\n"境界には触れないため前後の行は影響を受けない）。
+  // 「付ける」方向は従来どおり行頭に「> 」をテキストとして挿入し、直後のsyncLiveFormattingの
+  // 自動検出（手打ちと同じ経路）に変換を任せる。
   const insertQuote = () => {
     const root = editorRef.current
     if (!root) return
@@ -809,16 +814,29 @@ export default function Composer({
     const total = domToPlainText(root).length
     const start = offs?.start ?? total
     const end = offs?.end ?? start
+
+    const blockAtCursor = getBlockFormatAt(root, start)
+    if (blockAtCursor?.kind === 'quote') {
+      const el = blockAtCursor.el
+      const parent = el.parentNode
+      if (parent) {
+        while (el.firstChild) parent.insertBefore(el.firstChild, el)
+        parent.removeChild(el)
+        root.normalize()
+      }
+      setPickerQuery(null)
+      afterMutate()
+      return
+    }
+
     const text = domToPlainText(root)
     const lineStart = text.lastIndexOf('\n', start - 1) + 1
     const nextNewline = text.indexOf('\n', end)
     const lineEnd = nextNewline === -1 ? text.length : nextNewline
     const lines = text.slice(lineStart, lineEnd).split('\n')
-    const nonBlankLines = lines.filter((l) => l.trim() !== '')
-    const allQuoted = nonBlankLines.length > 0 && nonBlankLines.every((l) => l.startsWith('> '))
     const nextLines = lines.map((l) => {
       if (l.trim() === '') return lines.length === 1 ? '> ' : l
-      return allQuoted ? l.replace(/^> /, '') : l.startsWith('> ') ? l : `> ${l}`
+      return l.startsWith('> ') ? l : `> ${l}`
     })
     const nextBlock = nextLines.join('\n')
     replaceRangeWithText(root, lineStart, lineEnd, nextBlock)
@@ -1027,11 +1045,21 @@ export default function Composer({
     // contentEditableではEnterキーの既定挙動（ブロック要素の分割等、ブラウザ間で挙動が
     // 大きく異なる）に任せず、常に自前で処理する（改行はテキストノード内の生の"\n"文字として
     // 挿入し、white-space:pre-wrapで見た目を成立させる。詳細はcomposerEditing.tsの
-    // 冒頭コメント参照）。箇条書き・引用の行でEnterを押すと、次の行にも自動的に「- 」/「> 」を
-    // 付けて続ける（ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を
-    // 置き換える通常の入力）は対象外とし、素朴にカーソル位置のみのケースに絞る。何も入力して
-    // いない箇条書き/引用行でEnterを押した場合は、そのままだと空のマーカーが際限なく増えてしまう
-    // ため、多くのエディタ（Notion・GitHub等）と同じくマーカーを外して抜ける
+    // 冒頭コメント参照）。箇条書きの行でEnterを押すと、次の行にも自動的に「- 」を付けて続ける
+    // （ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を置き換える通常の
+    // 入力）は対象外とし、素朴にカーソル位置のみのケースに絞る。何も入力していない箇条書き行で
+    // Enterを押した場合は、そのままだと空のマーカーが際限なく増えてしまうため、多くのエディタ
+    // （Notion・GitHub等）と同じくマーカーを外して抜ける。
+    //
+    // 引用（2026-09-25、マーカー文字を持たない実DOM構造へ書き換え）は箇条書きと違いテキスト
+    // プレフィックスが無いため、getBlockFormatAtでカーソルが<blockquote>の内側かどうかを
+    // 判定する。継続は<blockquote>の内側に生の"\n"を1文字挿入するだけ（マーカー文字を挿入する
+    // 必要が無い分、以前よりむしろ単純になった）。空行での脱出は、その空行（内部の末尾の"\n"）を
+    // <blockquote>から取り除き、insertTextAfterNodeで<blockquote>の外側（直後）へ新しい
+    // プレーンな行を作る——数値オフセットのsetSelectionOffsetsだけに頼ると、resolveOffsetが
+    // 「その位置より後に何も実体が無い」場合に要素の内側に留まる位置を返してしまう既知の
+    // バイアス（composerEditing.tsのtoggleFormatAtCursorDomのコメント参照）により、外に
+    // 出したはずのカーソルが<blockquote>の内側へ巻き戻ってしまうため。
     if (e.key === 'Enter') {
       e.preventDefault()
       const root = editorRef.current
@@ -1045,13 +1073,27 @@ export default function Composer({
         const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
         const currentLine = text.slice(lineStart, lineEnd)
         const bulletMatch = /^- (.*)$/.exec(currentLine)
-        const quoteMatch = !bulletMatch ? /^> (.*)$/.exec(currentLine) : null
-        const lineMatch = bulletMatch ?? quoteMatch
-        if (lineMatch) {
-          if (lineMatch[1].trim() === '') {
+        if (bulletMatch) {
+          if (bulletMatch[1].trim() === '') {
             replaceRangeWithText(root, lineStart, lineEnd, '')
           } else {
-            replaceRangeWithText(root, cursor, cursor, bulletMatch ? '\n- ' : '\n> ')
+            replaceRangeWithText(root, cursor, cursor, '\n- ')
+          }
+          afterMutate()
+          return
+        }
+        const block = getBlockFormatAt(root, cursor)
+        if (block?.kind === 'quote') {
+          if (currentLine.trim() === '') {
+            replaceRangeWithText(root, lineStart - 1, lineStart, '')
+            insertTextAfterNode(block.el, '\n')
+            const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
+            ensureTrailingNewlineCaretMarker(root)
+            setSelectionOffsets(root, pos)
+          } else {
+            const pos = replaceRangeWithText(root, cursor, cursor, '\n')
+            ensureTrailingNewlineCaretMarker(root)
+            setSelectionOffsets(root, pos)
           }
           afterMutate()
           return
