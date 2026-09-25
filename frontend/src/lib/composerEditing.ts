@@ -646,13 +646,25 @@ const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-n
 const LIVE_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
 const LIVE_INLINE_CODE_REGEX = /`([^`\n]+)`/g
 
-export type ToggleFormatKind = 'bold' | 'italic' | 'underline' | 'strike'
+// 'code'（インラインコード）は2026-09-25、コード・箇条書き・引用にも「入力している時点で送信後の
+// 表示を反映させたい（記号なしで）」という要望を受けてトグル書式の5番目の種類として追加した。
+// 改行を含まない（`` `[^`\n]+` ``）ため、太字等と全く同じ実DOM構造の仕組み（wrapRangeInFormats・
+// toggleFormatAtCursorDom・toggleFormatOnSelectionDom・isFullyWrapped・materializePendingFormats）に
+// 無修正で乗る。MessageList.tsxの重なり解決はコード（優先度0）が太字等（優先度1）に常に優先し、
+// コードの範囲を太字等が跨ぐと太字側が丸ごと棄却される（=送信後は効かない）仕様のため、コードは
+// 他のトグル書式と組み合わせ不可能というのが送信後の実仕様——Composer.tsxのtoggleFormatButton側で
+// 「codeをarmする際は他を全て置き換える」ガードを設ける（詳細はComposer.tsx参照）。
+// コードブロック（```` ``` ````、複数行）はこのToggleFormatKindには含めない——改行を含み得るため
+// 既存のwrapRangeInFormats等（1つの実要素に単純にネストするだけの仕組み）に乗せられず、引用と同じ
+// 「1コンテナに複数行の生テキスト」という別カテゴリ（後述のdata-block-format）で扱う。
+export type ToggleFormatKind = 'bold' | 'italic' | 'underline' | 'strike' | 'code'
 
 export const TOGGLE_FORMAT_MARKERS: Record<ToggleFormatKind, { prefix: string; suffix: string }> = {
   bold: { prefix: '**', suffix: '**' },
   italic: { prefix: '_', suffix: '_' },
   underline: { prefix: '++', suffix: '++' },
   strike: { prefix: '~~', suffix: '~~' },
+  code: { prefix: '`', suffix: '`' },
 }
 
 const FORMAT_ELEMENT: Record<ToggleFormatKind, { tagName: string; className: string }> = {
@@ -660,6 +672,7 @@ const FORMAT_ELEMENT: Record<ToggleFormatKind, { tagName: string; className: str
   italic: { tagName: 'em', className: 'italic' },
   underline: { tagName: 'u', className: 'underline' },
   strike: { tagName: 's', className: 'line-through' },
+  code: { tagName: 'code', className: CODE_CLASSNAME },
 }
 
 /** 太字・斜体・下線・取り消し線を表す実要素であることを示す属性（値はToggleFormatKind）。
@@ -684,7 +697,10 @@ interface LiveMatch {
   start: number
   end: number
   priority: number
-  kind: 'code' | ToggleFormatKind
+  // 'codeblock'（```` ``` ````、複数行）はToggleFormatKindに含めない別カテゴリ（本ファイル前方の
+  // ToggleFormatKindコメント参照）。collectRawMarkdownMatchesの重なり判定にのみ使い、返り値からは
+  // 除外する（コードブロック自体の構造化は別途consumeCodeBlockMatchが担当）。
+  kind: 'codeblock' | ToggleFormatKind
 }
 
 /** MessageList.tsxのrenderInlineSegmentと同じ優先度付き重なり解決。太字・斜体・下線・取り消し線が
@@ -710,16 +726,20 @@ function collectLiveMatches(text: string): LiveMatch[] {
   return accepted
 }
 
-/** collectLiveMatchesと同じ優先度付き重なり解決だが、太字・斜体・下線・取り消し線
- * （RAW_*_REGEX、1文字以上必須）も候補に含める。コードは重なり判定の優先度としてのみ使い
- * （コードの中の見かけ上の**等を誤って書式と解釈しないようにするため）、返り値からは除外する
- * （コードの隠し変換自体はsyncLiveFormatting/wrapLiveMatch側が別途担当するため）。
- * consumeRawMarkdownSyntaxから使う。 */
+/** collectLiveMatchesと同じ優先度付き重なり解決だが、太字・斜体・下線・取り消し線・インラインコード
+ * （RAW_*_REGEX、1文字以上必須）も候補に含める。コードブロック（```` ``` ````、複数行）は重なり判定の
+ * 優先度としてのみ使い（コードブロックの中の見かけ上の**等・`` ` ``等を誤って書式と解釈しないように
+ * するため）、返り値からは除外する（コードブロック自体の構造化はsyncLiveFormatting側で別途
+ * consumeCodeBlockMatchが担当する）。インラインコードはコードブロックと違い改行を含まないため
+ * ToggleFormatKindの一種として返り値に含め、他の書式と全く同じ経路（consumeOneRawMatch）で
+ * 実要素へ変換する。インラインコードの優先度をコードブロックと同じ0（太字等より高い）にするのは
+ * MessageList.tsxのcollectStyleMatchesと同じ理由（コード範囲の中の見かけ上の**等を誤って書式と
+ * 解釈しないようにするため）。consumeRawMarkdownSyntaxから使う。 */
 function collectRawMarkdownMatches(text: string): LiveMatch[] {
   const candidates: LiveMatch[] = []
   for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
+    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'codeblock' })
   }
   for (const m of text.matchAll(LIVE_INLINE_CODE_REGEX)) {
     const start = m.index ?? 0
@@ -748,7 +768,7 @@ function collectRawMarkdownMatches(text: string): LiveMatch[] {
     accepted.push(c)
   }
   accepted.sort((a, b) => a.start - b.start)
-  return accepted.filter((m) => m.kind !== 'code')
+  return accepted.filter((m) => m.kind !== 'codeblock')
 }
 
 /** fragmentの先頭または末尾からcount文字を切り出し、隠しマーカー用のspanへ包んで返す。
@@ -1231,7 +1251,20 @@ export function isFullyWrapped(root: HTMLElement, start: number, end: number, ki
  * 既存要素の境界を自然に分割するため、選択範囲が既存書式の境界を跨ぐケースも特別な処理は
  * 不要（部分的に重なった場合は新しい外側要素の内側に元の要素が入れ子で残るだけで、表示は
  * 変わらない）。マーカー文字を一切経由しないため、返す選択範囲は常に[start,end)のまま
- * （±prefix.lengthのような補正が不要——旧実装より単純になった点）。 */
+ * （±prefix.lengthのような補正が不要——旧実装より単純になった点）。
+ *
+ * バグ修正（Playwrightでのインラインコード検証中に発見。太字等も含め全種で再現する
+ * 一般的な不具合）: 「既に完全に囲まれている→外す」場合、以前はwrapする場合と同じく
+ * Range.extractContents()で切り出してからunwrapMatchingしていたが、選択範囲の境界が
+ * ちょうど対象要素の中身の先頭/末尾と一致する（例: 本文が丸ごと1つの<strong>だけで、
+ * それを全選択して解除する）と、resolveOffsetは要素の「外側」ではなく「内側のテキスト
+ * ノード」を指す位置を返す（resolveOffsetは未認識要素を常に子へ再帰するため）。この場合
+ * Range自体が対象要素の内部に完全に収まってしまい、extractContentsが切り出すのは中身の
+ * テキストだけで要素自体は含まれない——unwrapMatchingが空振りし、その後のinsertNodeが
+ * 元の（空になった）要素の内側へテキストを戻してしまうため、見た目上「解除されない」
+ * 不具合が起きていた。解除する場合はRangeを経由せず、対象要素そのものを直接querySelectorAll
+ * で見つけて解除する（要素の存在そのものに依存するため、この境界のあいまいさの影響を
+ * 受けない）。 */
 export function toggleFormatOnSelectionDom(
   root: HTMLElement,
   start: number,
@@ -1239,19 +1272,27 @@ export function toggleFormatOnSelectionDom(
   kind: ToggleFormatKind,
 ): { selectionStart: number; selectionEnd: number } {
   if (start >= end) return { selectionStart: start, selectionEnd: end }
-  const wasFullyWrapped = isFullyWrapped(root, start, end, kind)
+  if (isFullyWrapped(root, start, end, kind)) {
+    const targets = Array.from(root.querySelectorAll<HTMLElement>(`[${TOGGLE_FORMAT_ELEMENT_ATTR}="${kind}"]`)).filter((el) => {
+      const r = computeElementOffset(root, el)
+      return r.start < end && start < r.end
+    })
+    for (const el of targets) {
+      const parent = el.parentNode
+      if (!parent) continue
+      while (el.firstChild) parent.insertBefore(el.firstChild, el)
+      parent.removeChild(el)
+    }
+    root.normalize()
+    return { selectionStart: start, selectionEnd: end }
+  }
   const startPos = resolveOffset(root, start)
   const endPos = resolveOffset(root, end)
   const range = document.createRange()
   range.setStart(startPos.node, startPos.offset)
   range.setEnd(endPos.node, endPos.offset)
   const fragment = range.extractContents()
-  if (wasFullyWrapped) {
-    unwrapMatching(fragment, `[${TOGGLE_FORMAT_ELEMENT_ATTR}="${kind}"]`)
-    range.insertNode(fragment)
-  } else {
-    range.insertNode(buildFormattedNode(fragment, [kind]))
-  }
+  range.insertNode(buildFormattedNode(fragment, [kind]))
   return { selectionStart: start, selectionEnd: end }
 }
 
@@ -1260,7 +1301,7 @@ export function toggleFormatOnSelectionDom(
  * 破壊を避け、切り出した内容をそのまま戻す（consumeRawMarkdownSyntaxのみから使う）。 */
 function consumeOneRawMatch(root: Node, match: LiveMatch): void {
   const { start, end, kind } = match
-  if (kind === 'code' || start >= end) return
+  if (kind === 'codeblock' || start >= end) return
   const startPos = resolveOffset(root, start)
   const endPos = resolveOffset(root, end)
   const range = document.createRange()
@@ -1278,7 +1319,9 @@ function consumeOneRawMatch(root: Node, match: LiveMatch): void {
     range.insertNode(fragment)
     return
   }
-  consumeRawMarkdownMatchesOnFragment(fragment)
+  // コードの中身はMessageList.tsx側でさらに解釈されない（太字等が入れ子になっていても記号のまま
+  // 表示される）ため、ここでも再帰的なネスト検出をスキップし中身をそのまま実要素に入れる。
+  if (kind !== 'code') consumeRawMarkdownMatchesOnFragment(fragment)
   range.insertNode(buildFormattedNode(fragment, [kind]))
 }
 

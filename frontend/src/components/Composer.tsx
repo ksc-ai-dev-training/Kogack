@@ -656,7 +656,16 @@ export default function Composer({
     if (!activeFormats.includes(kind)) {
       // まだ本文に無い書式のトグル: DOMには一切触れず、次に入力される文字へ適用する保留
       // 状態だけを切り替える（既にpendingならもう一度押して解除、まだなら追加）。
-      setPendingFormats((prev) => (prev.includes(kind) ? prev.filter((f) => f !== kind) : [...prev, kind]))
+      // コードは他のトグル書式と組み合わせ不可能（composerEditing.tsのToggleFormatKindコメント
+      // 参照。MessageList.tsx側の重なり解決でコードが常に太字等より優先され、太字側が丸ごと
+      // 棄却されてしまうため）。armする際は相手側を全て置き換える。
+      if (kind === 'code') {
+        setPendingFormats((prev) => (prev.includes('code') ? [] : ['code']))
+      } else if (pendingFormats.includes('code')) {
+        setPendingFormats([kind])
+      } else {
+        setPendingFormats((prev) => (prev.includes(kind) ? prev.filter((f) => f !== kind) : [...prev, kind]))
+      }
       setPickerQuery(null)
       return
     }
@@ -670,20 +679,19 @@ export default function Composer({
   }
 
   // コードボタンは選択範囲に改行を含むかで自動的にインラインコード/コードブロックを切り替える
-  // （GitHubのコメント欄と同じ挙動。ボタンを1つに減らせるうえ直感的なため）
+  // （GitHubのコメント欄と同じ挙動。ボタンを1つに減らせるうえ直感的なため）。2026-09-25、
+  // インラインコードは太字等と同じトグル書式（ToggleFormatKind、composerEditing.ts参照）に
+  // 昇格したため、改行を含まない場合はtoggleFormatButton('code')へ委譲する（複数行選択時の
+  // コードブロックは対象外のままマーカー挿入方式——コードブロックの実DOM構造化は別途対応予定）。
   const wrapCode = () => {
     const root = editorRef.current
     if (!root) return
     const offs = getSelectionOffsets(root)
-    if (!offs) {
-      wrapSelection('`', '`')
-      return
-    }
-    const selectedText = domToPlainText(root).slice(offs.start, offs.end)
+    const selectedText = offs ? domToPlainText(root).slice(offs.start, offs.end) : ''
     if (selectedText.includes('\n')) {
       wrapSelection('```\n', '\n```')
     } else {
-      wrapSelection('`', '`')
+      toggleFormatButton('code')
     }
   }
 
@@ -1064,6 +1072,11 @@ export default function Composer({
     }
   }
 
+  // コードは他のトグル書式と組み合わせ不可能（toggleFormatButtonのコメント参照）なため、
+  // 片方がpending/active中はもう片方のボタンをUI上も押せなくする
+  const codeFormatActive = activeFormats.includes('code') || pendingFormats.includes('code')
+  const otherFormatActive = activeFormats.some((f) => f !== 'code') || pendingFormats.some((f) => f !== 'code')
+
   return (
     <div className="relative rounded-[10px] border border-line-strong px-3 py-2.5">
       {pickerOpen && (
@@ -1284,12 +1297,13 @@ export default function Composer({
       <div className="mb-1.5 flex items-center gap-0.5">
         <button
           type="button"
+          disabled={codeFormatActive}
           title="太字（選択範囲が無ければ、押している間タイプする文字が太字になります）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('bold')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black hover:bg-surface-muted ${
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
             activeFormats.includes('bold') || pendingFormats.includes('bold') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
@@ -1297,12 +1311,13 @@ export default function Composer({
         </button>
         <button
           type="button"
+          disabled={codeFormatActive}
           title="斜体（選択範囲が無ければ、押している間タイプする文字が斜体になります）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('italic')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic hover:bg-surface-muted ${
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
             activeFormats.includes('italic') || pendingFormats.includes('italic') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
@@ -1310,12 +1325,13 @@ export default function Composer({
         </button>
         <button
           type="button"
+          disabled={codeFormatActive}
           title="下線（選択範囲が無ければ、押している間タイプする文字に下線が付きます）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('underline')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold underline hover:bg-surface-muted ${
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold underline hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
             activeFormats.includes('underline') || pendingFormats.includes('underline') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
@@ -1323,12 +1339,13 @@ export default function Composer({
         </button>
         <button
           type="button"
+          disabled={codeFormatActive}
           title="取り消し線（選択範囲が無ければ、押している間タイプする文字に取り消し線が付きます）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('strike')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold line-through hover:bg-surface-muted ${
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold line-through hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
             activeFormats.includes('strike') || pendingFormats.includes('strike') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
           }`}
         >
@@ -1349,12 +1366,15 @@ export default function Composer({
         </button>
         <button
           type="button"
-          title="コード（複数行を選択するとコードブロックになります）"
+          disabled={otherFormatActive}
+          title="コード（複数行を選択するとコードブロックになります。太字等とは組み合わせられません）"
           onMouseDown={(e) => {
             e.preventDefault()
             wrapCode()
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
+            codeFormatActive ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+          }`}
         >
           {'</>'}
         </button>
