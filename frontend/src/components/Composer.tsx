@@ -320,6 +320,14 @@ export default function Composer({
     // 下書きに「**太字**」等が含まれていてもリロード直後は装飾なしのプレーンテキストのまま
     // 表示され、次の1文字入力まで反映されない不具合があった。実機Playwrightで発見・修正）
     refreshEditorHousekeeping()
+    // ユーザーからの明示的な要望「チャンネルやDMを開いた時点で、メッセージ入力欄にカーソルが
+    // 当たっている状態にしてほしい（画面を開いてすぐにキーボードを打ち込んでも入力されるように）」
+    // により、マウント時に投稿欄へフォーカスする。Composerはチャンネル/DM切り替えのたびkey propで
+    // 再マウントされる（このuseLayoutEffect冒頭のコメント参照）ため、切り替えるたびに毎回
+    // フォーカスし直される。復元した下書きがあればその末尾へカーソルを置く（続きから入力できる
+    // ように）。
+    root.focus()
+    setSelectionOffsets(root, domToPlainText(root).length)
     // マウント時に1回だけ実行する（draftKey・customEmojiは意図的に依存から外している。
     // customEmojiが後から読み込まれた場合の追いかけ変換は下のuseEffectで別途行う）
     // eslint-disable-next-line react-hooks/exhaustive-deps
