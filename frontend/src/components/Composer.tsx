@@ -470,15 +470,23 @@ export default function Composer({
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
     const root = editorRef.current
     if (!root) return
-    // 前回のEnterキー処理が置いたCARET_MARKER（composerEditing.ts参照）が残っていれば、
-    // 実際に次の文字が入力されたこの時点で速やかに片付ける（domToPlainTextは呼び出しの
-    // たびに除外するため安全ではあるが、DOM上に残したままにしない）
-    removeCaretMarkerFromDom(root)
     const native = e.nativeEvent as InputEvent
     if (native.inputType === 'historyUndo' || native.inputType === 'historyRedo') {
       normalizeInvariants(root)
     }
     if (!native.isComposing) {
+      // 前回のEnterキー処理が置いたCARET_MARKER（composerEditing.ts参照）が残っていれば、
+      // 実際に次の文字が入力されたこの時点で速やかに片付ける（domToPlainTextは呼び出しの
+      // たびに除外するため安全ではあるが、DOM上に残したままにしない）。
+      // バグ修正（ユーザーからの報告「改行してから入力し始めると、IME変換の1文字目だけ確定
+      // されてしまう／1文字目が変換確定前に二重入力される」）: 以前はこの呼び出しをhandleInputの
+      // 先頭でisComposingに関わらず無条件に行っていた。removeCaretMarkerFromDomは内部で
+      // setSelectionOffsets（Selection.removeAllRanges/addRange）を呼ぶため、CARET_MARKERが
+      // 残っている状態（＝Enter直後）でIME合成の1文字目を入力すると、合成中にSelectionを
+      // 書き換えることになり、ブラウザがIME合成を強制的に確定・中断してしまっていた
+      // （実機で「1文字目だけ確定され残りが新しい合成として続く」「1文字目が二重に入力される」
+      // という形で顕在化）。合成中は呼ばず、合成確定時（handleCompositionEnd）に改めて呼ぶ。
+      removeCaretMarkerFromDom(root)
       // IME合成中はmaterializePendingFormatsを呼ばない（合成中のDOM書き換えを避ける、
       // 上のコメントと同じ理由。合成確定時にはhandleCompositionEndで改めて呼ぶ）
       materializePendingFormats(root)
@@ -490,6 +498,7 @@ export default function Composer({
   const handleCompositionEnd = () => {
     const root = editorRef.current
     if (!root) return
+    removeCaretMarkerFromDom(root)
     materializePendingFormats(root)
     runPostInputChecks(root)
     afterMutate()
