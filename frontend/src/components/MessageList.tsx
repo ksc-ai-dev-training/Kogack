@@ -1373,18 +1373,18 @@ export function MessageContextMenu({
 // ホバー時のカスタムツールチップ（黒い吹き出し）で見られるようにした（ユーザーからの明示的な
 // 要望「黒い吹き出しで文字も大きくして見やすいようにしたい」、2026-09-11。従来はブラウザ標準の
 // title属性を使っており、文字が小さく表示までの遅延・見た目の一貫性がOS/ブラウザ依存だった）。
-// 吹き出しの想定最大幅（実際の描画は`w-max max-w-[TOOLTIP_MAX_WIDTH]px`で内容に応じて縮む。
-// 画面端クランプ計算にはこの最大値を使う＝内容が短い時は余裕を持ってクランプされるだけで、
-// はみ出しは発生しない）
-const REACTION_TOOLTIP_MAX_WIDTH = 220
-
 // リアクションピルにカーソルを合わせたときの、誰がリアクションしたか＋絵文字の拡大図を出す吹き出し。
 // バグ修正（ユーザーからの報告「吹き出しがサイドバーにかぶさって見えなくなる」、2026-09-25）:
 // 従来は発言行の中に`absolute`配置していたため、EmojiGridPopover・ProfileCardと同じ理由
 // （会話ログのoverflow-x-hidden/overflow-y-autoスクロール領域でクリップされる）でサイドバー際の
 // ピルの吹き出しが見えなくなっていた。同じ考え方で`document.bodyへポータル配置し、anchor
 // （ホバーしたボタンのgetBoundingClientRect）を基準にposition: fixedで配置」する方式に変更した
-// （常にピルの上に開くため上下判定は不要。`bottom`基準で配置すれば高さ未確定でも上方向に伸びる）
+// （常にピルの上に開くため上下判定は不要。`bottom`基準で配置すれば高さ未確定でも上方向に伸びる）。
+// バグ修正（ユーザーからの報告「吹き出しが出てくる場所がおかしい。絵文字の真上でよい」、
+// 2026-09-25）: 横位置を「吹き出しの想定最大幅」を使ってクランプしていたが、実際の吹き出しは
+// `w-max`で内容に応じて縮む（例: 短い名前1件だけなら想定幅220pxよりずっと狭い）ため、狭い時ほど
+// 想定幅基準の中心とズレて横に大きくはみ出していた。`left: 50%; transform: translateX(-50%)`で
+// 実際に描画された自分自身の幅を基準に中央寄せする（従来のCSSのみ実装と同じ考え方）ことで解消した
 function ReactionTooltip({
   anchor,
   emoji,
@@ -1398,20 +1398,16 @@ function ReactionTooltip({
 }) {
   // UI全体ズーム（lib/uiZoom.ts）分の補正はEmojiGridPopover・ProfileCardと同じ理屈
   // （anchorは常に画面上の実座標を返す一方、このポータルもズーム済みsubtreeの子孫のため
-  // 描画時にもう一度scale倍される）
+  // 描画時にもう一度scale倍される）。translateX(-50%)は自分自身の実際の描画幅に対する相対値
+  // なので、この補正は不要（ズーム後の見た目でも常に正しく中央寄せされる）
   const scale = currentUiZoomScale()
   const marginPx = 8 * scale
-  const edgePaddingPx = 8 * scale
-  const maxWidthPx = REACTION_TOOLTIP_MAX_WIDTH * scale
   const centerOnScreen = anchor.left + anchor.width / 2
-  const leftOnScreen = Math.min(
-    Math.max(centerOnScreen - maxWidthPx / 2, edgePaddingPx),
-    window.innerWidth - maxWidthPx - edgePaddingPx,
-  )
   const style: CSSProperties = {
     position: 'fixed',
-    left: leftOnScreen / scale,
+    left: centerOnScreen / scale,
     bottom: (window.innerHeight - anchor.top + marginPx) / scale,
+    transform: 'translateX(-50%)',
   }
   return createPortal(
     <span
