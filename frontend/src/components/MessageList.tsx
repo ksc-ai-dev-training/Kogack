@@ -1421,7 +1421,9 @@ export function ReactionPills({
             role="tooltip"
             className="pointer-events-none invisible absolute bottom-full left-1/2 z-20 mb-2 flex w-max max-w-[220px] -translate-x-1/2 flex-col items-center gap-1 whitespace-normal break-words rounded-lg bg-ink px-2.5 py-1.5 text-center text-[13px] font-medium leading-snug text-white opacity-0 shadow-[0_8px_20px_rgba(16,24,40,0.25)] transition-opacity duration-150 group-hover/reaction:visible group-hover/reaction:opacity-100 after:absolute after:left-1/2 after:top-full after:-ml-1 after:border-4 after:border-transparent after:border-t-ink"
           >
-            {customUrl ? <img src={customUrl} alt={r.emoji} className="h-6 w-6 object-contain" /> : <span className="text-2xl leading-none">{r.emoji}</span>}
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-white">
+              {customUrl ? <img src={customUrl} alt={r.emoji} className="h-6 w-6 object-contain" /> : <span className="text-2xl leading-none">{r.emoji}</span>}
+            </span>
             <span>{r.user_names.join('、')}</span>
           </span>
         </button>
