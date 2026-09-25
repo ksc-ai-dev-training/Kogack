@@ -1205,22 +1205,20 @@ export default function Composer({
         // 挿入してしまっていた。送信Markdownは改行入りの`` `...\n...` ``になり、コードブロック
         // （```の対）にもインラインコード（改行を含められない単一`` ` ``、MessageList.tsxの
         // INLINE_CODE_REGEX参照）にも一致せず、生の記号付きプレーンテキストとして表示されて
-        // いた。コードブロックボタン（toggleCodeBlock）と同じ考え方で、カーソルが
-        // インラインコードの内側にいる状態でEnterが押されたらコードブロックへ自動アップグレード
-        // する。
+        // いた。
+        //
+        // ユーザーからの明示的な要望「コードボタンを押してコード表記を作っているときに改行すると、
+        // コード（1行のやつ）が二行目にも適用されるようにして、コードブロックに変わらないでほしい
+        // （コードとコードブロックの機能を明確に分けてほしい）」により、2026-09-25まではここで
+        // コードブロックへ自動アップグレードしていたが、それをやめた。代わりに、改行の前後を
+        // それぞれ独立したインラインコード（`` `前半` `` / `` `後半` ``）として残す——INLINE_CODE_REGEXが
+        // 改行を含む内容に一致しないため、"\n"自体はどちらの要素の内側にも入れない。
         const inlineCode = getInlineCodeElementAt(root, cursor)
         if (inlineCode) {
           const codeRange = computeElementOffset(root, inlineCode)
-          // バグ修正（ユーザーからの報告「1回目のEnterはコードブロックへの変換だけにとどまり、
-          // 肝心の改行はもう一回Enterを押さないと起きない」）: 以前はinlineCodeを先にunwrap
-          // （要素ごと取り除きテキストだけ残す）してから、root全体に対する絶対オフセットで
-          // "\n"を挿入し直していた。この順序だと、unwrap直後のDOM構造（隣接テキストノードの
-          // 有無等）次第でresolveOffsetの「境界タイのバイアス」（本ファイル各所のコメント
-          // 参照）を踏み、"\n"が意図した位置（inlineCodeの中）ではなく境界の外側に挿入されて
-          // しまう場合があった——1行のままコードボックス化だけが起き、改行は次のEnterまで
-          // 反映されないように見えていた。inlineCodeがまだ実在し、他の兄弟から独立している
-          // うちに、その要素自身をスコープにした相対オフセットで"\n"を挿入すれば、この
-          // あいまいさが生じる余地が無い（挿入先がinlineCodeの中の一点に一意に定まる）。
+          // "\n"はいったんinlineCodeの内側（要素自身をスコープにした相対オフセット）へ挿入する
+          // ——挿入先が要素内の一点に一意に定まり、root全体に対する絶対オフセットで挿入する場合に
+          // 起きるresolveOffsetの「境界タイのバイアス」（本ファイル各所のコメント参照）を踏まない。
           const relativeOffset = cursor - codeRange.start
           replaceRangeWithText(inlineCode, relativeOffset, relativeOffset, '\n')
           const parent = inlineCode.parentNode
@@ -1229,8 +1227,24 @@ export default function Composer({
             parent.removeChild(inlineCode)
             root.normalize()
           }
-          setActiveFormats((prev) => prev.filter((f) => f !== 'code'))
-          wrapRangeAsCodeBlock(root, codeRange.start, codeRange.end + 1)
+          // 前半（"\n"より前、空でなければ）はそのままインラインコードとして再度囲み直す
+          if (codeRange.start < cursor) {
+            wrapRangeInFormats(root, codeRange.start, cursor, ['code'])
+          }
+          // 後半（"\n"より後）が空でなければ即座に再度囲み直し、activeFormatsはそのまま
+          // 'code'を維持する（カーソルは実在する非空要素の先頭に置かれるだけなので、空要素
+          // 特有の境界あいまいさは起きない）。空の場合（＝改行がインラインコードの末尾で
+          // 押された、実際に打ち込みながらEnterする典型的なケース）は、空要素を先回りで
+          // 作らずpendingFormatsへ「次に入力される文字へcodeを適用する」保留状態として腕を
+          // 引き継ぐ（toggleFormatButtonが選択範囲無しでコードを起動する場合と全く同じ
+          // 考え方——本ファイル各所で繰り返し避けている「空のトグル書式要素」を作らずに済む）。
+          if (cursor < codeRange.end) {
+            wrapRangeInFormats(root, cursor + 1, codeRange.end + 1, ['code'])
+            setActiveFormats((prev) => (prev.includes('code') ? prev : [...prev, 'code']))
+          } else {
+            setActiveFormats((prev) => prev.filter((f) => f !== 'code'))
+            setPendingFormats((prev) => Array.from(new Set([...prev, 'code'])))
+          }
           ensureTrailingNewlineCaretMarker(root)
           setSelectionOffsets(root, cursor + 1)
           afterMutate()
