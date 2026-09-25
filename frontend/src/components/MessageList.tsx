@@ -1994,7 +1994,18 @@ export default function MessageList({
                         onClick={applyEditInlineCode}
                         className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
                       >
-                        {'`'}
+                        {'</>'}
+                      </button>
+                      <button
+                        type="button"
+                        title="コードブロック（複数行のコードを枠で囲みます。選択範囲が無ければ現在の行が対象になります）"
+                        onClick={applyEditCodeBlock}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                          <rect x="2.5" y="3.5" width="15" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.4" />
+                          <path d="M8 8l-2 2 2 2M12 8l2 2-2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
                       </button>
                       <button
                         type="button"
@@ -2008,14 +2019,6 @@ export default function MessageList({
                           <circle cx="4" cy="14" r="1.3" fill="currentColor" />
                           <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                         </svg>
-                      </button>
-                      <button
-                        type="button"
-                        title="コードブロック（複数行のコードを枠で囲みます。選択範囲が無ければ現在の行が対象になります）"
-                        onClick={applyEditCodeBlock}
-                        className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
-                      >
-                        {'</>'}
                       </button>
                       <button
                         type="button"
