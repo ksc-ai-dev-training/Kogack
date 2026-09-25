@@ -691,6 +691,27 @@ export default function Composer({
     const root = editorRef.current
     if (!root) return
     const offs = getSelectionOffsets(root)
+    const start = offs?.start ?? domToPlainText(root).length
+
+    // 要望対応（ユーザーからの報告「Deleteキーとボタン操作の両方でコードブロックを消せる
+    // ようにしてほしい」）: insertQuote/insertBulletListと同じ考え方で、カーソルが既存の
+    // コードブロックの内側にいる場合はボタンを「外す」方向として扱う（ブロックを解除し
+    // 中身をプレーンテキストへ戻す。中の"\n"はそのまま実テキストとして残るため、複数行の
+    // 内容だった場合はプレーンな複数行としてそのまま残る）。
+    const blockAtCursor = getBlockFormatAt(root, start)
+    if (blockAtCursor?.kind === 'codeblock') {
+      const el = blockAtCursor.el
+      const parent = el.parentNode
+      if (parent) {
+        while (el.firstChild) parent.insertBefore(el.firstChild, el)
+        parent.removeChild(el)
+        root.normalize()
+      }
+      setPickerQuery(null)
+      afterMutate()
+      return
+    }
+
     const selectedText = offs ? domToPlainText(root).slice(offs.start, offs.end) : ''
     if (offs && selectedText.includes('\n')) {
       wrapRangeAsCodeBlock(root, offs.start, offs.end)

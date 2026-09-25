@@ -1360,6 +1360,24 @@ function removeEmptyToggleFormatWrappers(root: HTMLElement): void {
   })
 }
 
+/** コードブロック（<pre data-block-format="codeblock">）のうち、中身をDelete/Backspaceで
+ * 全て消し切って空になったものを取り除く（removeEmptyToggleFormatWrappersと同じ理由・同じ
+ * 安全性——空要素の除去は文字数を変えないため、呼び出し元の選択範囲の保存・復元の範囲外で
+ * 安全に呼べる）。バグ修正（ユーザーからの報告「コードブロックになったときに、中の文章を
+ * すべて消してもコードブロックの枠自体が消えない。入力中の判定にはなる（下書きが保存される）
+ * のに本文が空で送信もできない、という矛盾した状態になる」）: 太字等の実要素はこの関数の
+ * すぐ上で自動的に片付けているが、引用・箇条書き・コードブロック（BLOCK_FORMAT_ATTR）は
+ * unwrapLiveFormattingの対象外（syncLiveFormattingの冒頭コメント参照）のため、同じ掃除が
+ * されていなかった。引用・箇条書きは既に専用のBackspace/Enter処理で空行/空項目からの
+ * 脱出を扱っているため対象外とし、そうした専用処理を持たないコードブロックだけをここで
+ * 対象にする。 */
+function removeEmptyCodeBlocks(root: HTMLElement): void {
+  const blocks = root.querySelectorAll(`[${BLOCK_FORMAT_ATTR}="codeblock"]`)
+  blocks.forEach((el) => {
+    if (domToPlainText(el).length === 0) el.remove()
+  })
+}
+
 /** 書式のライブプレビューを最新化する。ネイティブ入力・IME確定・ツールバー操作・メンション/
  * 絵文字挿入・貼り付け・下書き復元など、本文が変わりうるあらゆる箇所の後に呼ぶ想定
  * （Composer.tsxのrefreshEditorHousekeeping、実質すべての変更経路を1箇所に集約している）。
@@ -1372,6 +1390,7 @@ function removeEmptyToggleFormatWrappers(root: HTMLElement): void {
 export function syncLiveFormatting(root: HTMLElement): void {
   root.normalize()
   removeEmptyToggleFormatWrappers(root)
+  removeEmptyCodeBlocks(root)
 
   // バグ修正（実機Playwright検証で発見。ユーザーからの報告「引用の中で手打ちの**bold**が
   // 閉じた直後、続けて打った文字までbold扱いになってしまう」）: 選択範囲の保存・復元を
