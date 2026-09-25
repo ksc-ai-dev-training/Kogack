@@ -761,16 +761,18 @@ const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-n
 // MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義。
 const RAW_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
 const INLINE_CODE_REGEX = /`([^`\n]+)`/g
-// MessageList.tsxのコードブロック描画（<pre>）と全く同じクラス。empty:before:content-['']は、
-// ユーザーからの報告「コードブロックを出現させたとき（中に何も文字列がないとき）に、
-// コードブロックが細すぎてカーソルが半分しか見えていない」への対処——中身が本当に空（子ノードが
+// MessageList.tsxのコードブロック描画（<pre>）と全く同じクラス。ユーザーからの報告
+// 「コードブロックを出現させたとき（中に何も文字列がないとき）に、コードブロックが細すぎて
+// カーソルが半分しか見えていない」への対処として2つ重ねている——中身が本当に空（子ノードが
 // 1つも無い）の<pre>はブラウザ上で行ボックス自体が生成されず、padding分の高さしか残らない
-// （実テキストが1文字もできる前のキャレット表示だけが浮いて見切れる）。空のCSS生成コンテンツ
-// （擬似要素、実DOMには一切現れない——箇条書きの行頭マーカーbefore:content-['•']と同じ手法）を
-// 空の場合だけ挿入することで、DOM構造・domToPlainText等のオフセット計算に一切影響を与えずに
-// 現在のフォント・行間ぶんの行ボックスを1つ確保できる。
+// （実テキストが1文字も無いとキャレット表示だけが浮いて見切れる）。
+// (1) empty:before:content-['']: 空のCSS生成コンテンツ（擬似要素、実DOMには一切現れない——
+//     箇条書きの行頭マーカーbefore:content-['•']と同じ手法）を空の場合だけ挿入することで、
+//     DOM構造・domToPlainText等のオフセット計算に一切影響を与えずに行ボックスを1つ確保する。
+// (2) min-h-[38px]: (1)だけに頼らない保険として、padding（py-2=16px）・border（1px×2）・
+//     行間（text-[12.5px]×leading-[1.6]=20px）を素直に積み上げた高さを明示的な下限にする。
 const CODE_BLOCK_CLASSNAME =
-  "my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text empty:before:content-['']"
+  "my-1 min-h-[38px] overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text empty:before:content-['']"
 
 // 'code'（インラインコード）は2026-09-25、コード・箇条書き・引用にも「入力している時点で送信後の
 // 表示を反映させたい（記号なしで）」という要望を受けてトグル書式の5番目の種類として追加した。
@@ -860,6 +862,32 @@ export function getCodeBlockElementAtSelection(root: HTMLElement): HTMLElement |
     node = node.parentElement
   }
   return null
+}
+
+/** rootの中から中身が空の<pre data-block-format="codeblock">を探し、見つかればその内部
+ * （offset 0）へブラウザの実際のSelectionを直接置く。ユーザーからの報告「コードブロック
+ * ボタンを押すと、コードブロック内ではなく下の普通の所にカーソルが合ってしまう」への対処。
+ * toggleCodeBlockの「空行に新規作成」経路は、生の"```\n\n```"マーカー文字列を挿入して
+ * syncLiveFormatting（consumeCodeBlockMatches）に実DOM変換を任せる方式のため、変換後の
+ * カーソル位置はsyncLiveFormatting自身の目印文字ベースの選択範囲保存・復元に委ねるほかない。
+ * ここで作られる<pre>は中身が0文字（wrapRangeAsCodeBlockと違い空範囲を直接扱えないための
+ * 回避策）で、getCodeBlockElementAtSelectionのコメントで説明した「幅0の要素には整数オフセット
+ * では入れない」問題があるうえ、この変換自体が複数段階の破壊的なテキスト分割（前後の3連
+ * バッククォート・改行を個別に切り出す）を経るため、目印文字が最終的にどこへ着地するかの
+ * 保証が弱い。afterMutateの直後に要素そのものへの参照で直接re-focusすることで、整数
+ * オフセット・目印文字のどちらの経路にも頼らず一意にカーソル位置を確定させる。 */
+export function focusEmptyCodeBlock(root: HTMLElement): boolean {
+  const blocks = root.querySelectorAll<HTMLElement>(`[${BLOCK_FORMAT_ATTR}="codeblock"]`)
+  const target = Array.from(blocks).find((el) => domToPlainText(el).length === 0)
+  if (!target) return false
+  const range = document.createRange()
+  range.setStart(target, 0)
+  range.collapse(true)
+  const sel = window.getSelection()
+  if (!sel) return false
+  sel.removeAllRanges()
+  sel.addRange(range)
+  return true
 }
 
 /** カーソル位置（プレーンテキストオフセット）を包むインラインコード実要素

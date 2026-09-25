@@ -32,6 +32,7 @@ import {
   isCursorInsideActiveFormats,
   getBlockFormatAt,
   getCodeBlockElementAtSelection,
+  focusEmptyCodeBlock,
   getInlineCodeElementAt,
   convertLinesToListItems,
   ungroupListElement,
@@ -817,6 +818,12 @@ export default function Composer({
     setSelectionOffsets(root, start + cursorOffset)
     setPickerQuery(null)
     afterMutate()
+    // ユーザーからの報告「コードブロックボタンを押すと、コードブロック内ではなく下の普通の
+    // 所にカーソルが合ってしまう」への対処（focusEmptyCodeBlockのコメント参照）: 上のマーカー
+    // 文字列ベースの変換は複数段階の破壊的なテキスト分割を経るため、整数オフセット・目印文字
+    // どちらの経路でもカーソルの最終着地位置を保証しきれない。afterMutate直後に作られた
+    // 空のコードブロック要素そのものへ直接re-focusし、必ず内部にカーソルが来るようにする。
+    focusEmptyCodeBlock(root)
   }
 
   // リンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい」）。記法は他の書式
