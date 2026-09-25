@@ -25,6 +25,7 @@ import {
   scrollCaretIntoView,
   syncLiveFormatting,
   wrapRangeInFormats,
+  wrapRangeAsCodeBlock,
   toggleFormatAtCursorDom,
   toggleFormatOnSelectionDom,
   isCursorInsideActiveFormats,
@@ -601,31 +602,7 @@ export default function Composer({
   // 失わせない（既存のメンション/絵文字ピッカーと同じパターンを全ボタンへ広げた。2026-09-18の
   // contentEditable化に伴う変更——textareaのselectionStartはフォーカスを失っても値を保持するが、
   // contentEditableのSelectionはフォーカスを失うと容易に失われるため、そもそもフォーカスを
-  // 離さない設計にした）。**太字・斜体・下線・取り消し線は下のtoggleFormatButtonへ移行し、
-  // このwrapSelectionはコード（wrapCode）専用になった**（ユーザーからの明示的な要望「ボタンが
-  // 押されている間はその記法になり、もう一度押すと解除される仕組みにしてほしい」を受け、選択が
-  // 無い場合に単にマーカーを挿入するだけのこの関数では要件を満たせなくなったため）。
-  const wrapSelection = (prefix: string, suffix: string) => {
-    const root = editorRef.current
-    if (!root) return
-    const offs = getSelectionOffsets(root)
-    const total = domToPlainText(root).length
-    const start = offs?.start ?? total
-    const end = offs?.end ?? start
-    const hasSelection = start !== end
-    const selectedLength = end - start
-    // 終端側を先に挿入してから始端側を挿入する（始端側の挿入が終端側のオフセットへ影響しない
-    // 順序にする。選択されていた中身＝原子絵文字img等はこの間一切触らないため安全）
-    replaceRangeWithText(root, end, end, suffix)
-    replaceRangeWithText(root, start, start, prefix)
-    if (hasSelection) {
-      setSelectionOffsets(root, start, start + prefix.length + selectedLength + suffix.length)
-    } else {
-      setSelectionOffsets(root, start + prefix.length)
-    }
-    setPickerQuery(null)
-    afterMutate()
-  }
+  // 離さない設計にした）。
 
   // 書式トグルボタン（太字・斜体・下線・取り消し線）。ユーザーからの明示的な要望「入力している
   // 段階で送信した後の表示と同じようにしたい。記号で囲むような表示をなくしたい。太字、斜体、
@@ -681,16 +658,19 @@ export default function Composer({
 
   // コードボタンは選択範囲に改行を含むかで自動的にインラインコード/コードブロックを切り替える
   // （GitHubのコメント欄と同じ挙動。ボタンを1つに減らせるうえ直感的なため）。2026-09-25、
-  // インラインコードは太字等と同じトグル書式（ToggleFormatKind、composerEditing.ts参照）に
-  // 昇格したため、改行を含まない場合はtoggleFormatButton('code')へ委譲する（複数行選択時の
-  // コードブロックは対象外のままマーカー挿入方式——コードブロックの実DOM構造化は別途対応予定）。
+  // インラインコード・コードブロックともマーカー文字を持たない実DOM構造になったため、改行を
+  // 含まない場合はtoggleFormatButton('code')（トグル書式）へ、含む場合はwrapRangeAsCodeBlock
+  // （<pre>で直接ラップ、マーカー文字を一切経由しない）へ委譲する。
   const wrapCode = () => {
     const root = editorRef.current
     if (!root) return
     const offs = getSelectionOffsets(root)
     const selectedText = offs ? domToPlainText(root).slice(offs.start, offs.end) : ''
-    if (selectedText.includes('\n')) {
-      wrapSelection('```\n', '\n```')
+    if (offs && selectedText.includes('\n')) {
+      wrapRangeAsCodeBlock(root, offs.start, offs.end)
+      setSelectionOffsets(root, offs.start, offs.end)
+      setPickerQuery(null)
+      afterMutate()
     } else {
       toggleFormatButton('code')
     }

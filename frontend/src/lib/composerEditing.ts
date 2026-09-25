@@ -235,11 +235,19 @@ export function domToMarkdown(root: Node): string {
     }
     // 引用（data-block-format="quote"）はマーカー文字を一切持たない実DOM構造のため、
     // 送信直前にここで各行へ「> 」を復元する（wrapQuoteRangeのコメント参照）。
-    if ((node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'quote') {
+    const blockKind = (node as Element).getAttribute(BLOCK_FORMAT_ATTR)
+    if (blockKind === 'quote') {
       return inner
         .split('\n')
         .map((line) => `> ${line}`)
         .join('\n')
+    }
+    // コードブロック（data-block-format="codeblock"）も同様にマーカー文字（``` ）を持たない
+    // 実DOM構造のため、送信直前に復元する。前後の"\n"はconsumeCodeBlockMatches側の
+    // stripOuterNewlineが投稿欄の表示のために取り除いた分を、ここで必ず復元する
+    // （MessageList.tsxのsplitCodeBlocksが受信側で対称に1つだけ取り除く）。
+    if (blockKind === 'codeblock') {
+      return '```\n' + inner + '\n```'
     }
     return inner
   }
@@ -632,13 +640,14 @@ export function normalizeInvariants(root: HTMLElement): void {
 // マーカーを対で消せず片方だけ残る、境界位置で記号が可視化される等の不具合を繰り返し生んだ
 // （このファイルのgit履歴・過去のバグ修正コメント参照）。
 //
-// 新方式: 太字・斜体・下線・取り消し線は、マーカー文字を一切持たない実DOM構造
-// （<strong>/<em>/<u>/<s>、TOGGLE_FORMAT_ELEMENT_ATTR="<kind>"）として表現する。Markdown記号は
-// 送信・下書き保存の直前にdomToMarkdown（domToPlainTextの直後に定義）がDOM構造から生成する。
-// 引用（「> 」）・コード（`` ` ``/```` ``` ````）は今回の対象外で、従来どおりLIVE_FORMAT_ATTR/
-// LIVE_FORMAT_MARKER_ATTRの隠しマーカー方式を維持する（引用・コードは対になる終端マーカーが
-// 無い、または中身をさらに解釈しないため、太字等と同じ不具合が起きないか、そもそも隠す対象では
-// ないため）。箇条書き（「- 」）はそもそも隠しマーカー機構を持たず生テキストのまま変更不要。
+// 新方式: 太字・斜体・下線・取り消し線・インラインコードは、マーカー文字を一切持たない実DOM構造
+// （<strong>/<em>/<u>/<s>/<code>、TOGGLE_FORMAT_ELEMENT_ATTR="<kind>"）として表現する。引用・
+// コードブロックも同じ方針で、マーカー文字を持たない<blockquote>/<pre>（BLOCK_FORMAT_ATTR）として
+// 表現する（2026-09-25、「コード・箇条書き・引用にも入力している時点で送信後の表示を反映させたい」
+// という要望を受けて太字等から拡張、旧LIVE_FORMAT_ATTR/LIVE_FORMAT_MARKER_ATTRの隠しマーカー方式は
+// 全廃した）。Markdown記号は送信・下書き保存の直前にdomToMarkdown（domToPlainTextの直後に定義）が
+// DOM構造から生成する。箇条書き（「- 」）だけは複数の行に対して実際の黒丸を出す必要があり構造が
+// 異なるため、本ファイル後方の別セクションで扱う。
 //
 // ボタン押下時のツールバー入力は2段階（Composer.tsx側）:
 //  - pendingFormats: ボタンを押しただけ・まだ何も入力していない状態（本文・DOMに一切触れない）。
@@ -655,7 +664,11 @@ export function normalizeInvariants(root: HTMLElement): void {
 // ネスト解決を、DOM構造（toggleFormatAtCursorDom・wrapRangeInFormats）とテキスト検出
 // （consumeRawMarkdownSyntax）の両方で行う。
 
-const LIVE_FORMAT_ATTR = 'data-live-format'
+// LIVE_FORMAT_MARKER_ATTR/HIDDEN_MARKER_CLASSNAMEは、下記extractHiddenMarkerが「マーカー文字を
+// 削り取る」副作用のためだけに内部的に生成するspanの属性・クラス（返り値のspan自体はどの呼び出し元も
+// 実際にDOMへ挿入しない。詳細はextractHiddenMarkerのコメント参照）。かつては引用・コードの
+// マーカー文字を隠すために実際にDOMへ挿入されていたが、2026-09-25に太字等と同じ「マーカー文字を
+// 一切持たない実DOM構造」方式へ全面移行したため、その用途は無くなった。
 const LIVE_FORMAT_MARKER_ATTR = 'data-live-format-marker'
 const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 font-mono text-[12.5px] text-code-text'
 // マーカー文字（**・_・++・~~）を常に視覚的に消すためのクラス。display:noneを避ける理由は上記コメント参照
@@ -671,9 +684,12 @@ const CODE_CLASSNAME = 'rounded border border-line bg-surface-muted px-1 py-0.5 
 // （text-decoration-line:none）を明示し、装飾線がマーカー部分には一切描画されないようにする。
 const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-none text-transparent no-underline'
 
-// MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義（コードは今回の対象外のまま）。
-const LIVE_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
-const LIVE_INLINE_CODE_REGEX = /`([^`\n]+)`/g
+// MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義。
+const RAW_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
+const INLINE_CODE_REGEX = /`([^`\n]+)`/g
+// MessageList.tsxのコードブロック描画（<pre>）と全く同じクラス。
+const CODE_BLOCK_CLASSNAME =
+  'my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text'
 
 // 'code'（インラインコード）は2026-09-25、コード・箇条書き・引用にも「入力している時点で送信後の
 // 表示を反映させたい（記号なしで）」という要望を受けてトグル書式の5番目の種類として追加した。
@@ -756,45 +772,55 @@ interface LiveMatch {
   kind: 'codeblock' | ToggleFormatKind
 }
 
-/** MessageList.tsxのrenderInlineSegmentと同じ優先度付き重なり解決。太字・斜体・下線・取り消し線が
- * 実DOM構造へ移行したため、ここではコードの検出のみを行う（syncLiveFormatting・wrapQuoteRangeの
- * 引用内コード検出から使う）。 */
-function collectLiveMatches(text: string): LiveMatch[] {
-  const candidates: LiveMatch[] = []
-  for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
+/** RAW_CODE_BLOCK_REGEXで完成している（開始・終了の```が揃っている）ペアに加え、終了側の```が
+ * まだ入力されていない「入力中の」コードブロック（最後の対になっていない```から文末までを
+ * 暫定的に保護対象とする）も含めて返す。
+ *
+ * バグ修正（Playwrightでのコードブロック検証中に発見）: この保護が無いと、コードブロックの
+ * 中身を上から順に手打ちしている最中（終了側の```をまだ打っていない状態）に、中の
+ * `**bold**`等や行頭の「> 」が「コードブロックの外の生テキスト」として先に太字・引用へ
+ * 確定してしまい、終了側の```を打って初めてコードブロックだと判明した後もそのまま実要素と
+ * して残ってしまっていた（一度実要素へ変換された太字等・引用は、このファイルの新方式では
+ * 太字等と同じくテキストから毎回再構築される存在ではないため、後から取り消されない）。
+ * 対になっていない```の位置は、文中の```の出現位置を先頭から順に数え、奇数個なら最後の
+ * 1つが未対応と判定する（RAW_CODE_BLOCK_REGEXの非貪欲マッチが左から順に隣接ペアを消費して
+ * いくのと同じ規則）。collectRawMarkdownMatchesの重なり判定・syncLiveFormattingの
+ * codeBlockRanges（引用検出からの除外）の両方から使う。 */
+function findCodeBlockProtectedRanges(text: string): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = []
+  for (const m of text.matchAll(RAW_CODE_BLOCK_REGEX)) {
     const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
+    ranges.push({ start, end: start + m[0].length })
   }
-  for (const m of text.matchAll(LIVE_INLINE_CODE_REGEX)) {
-    const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
+  const delimIndices: number[] = []
+  let searchFrom = 0
+  while (true) {
+    const idx = text.indexOf('```', searchFrom)
+    if (idx === -1) break
+    delimIndices.push(idx)
+    searchFrom = idx + 3
   }
-  candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
-  const accepted: LiveMatch[] = []
-  for (const c of candidates) {
-    if (accepted.some((a) => c.start < a.end && a.start < c.end)) continue
-    accepted.push(c)
+  if (delimIndices.length % 2 === 1) {
+    ranges.push({ start: delimIndices[delimIndices.length - 1], end: text.length })
   }
-  accepted.sort((a, b) => a.start - b.start)
-  return accepted
+  return ranges
 }
 
-/** collectLiveMatchesと同じ優先度付き重なり解決だが、太字・斜体・下線・取り消し線・インラインコード
- * （RAW_*_REGEX、1文字以上必須）も候補に含める。コードブロック（```` ``` ````、複数行）は重なり判定の
- * 優先度としてのみ使い（コードブロックの中の見かけ上の**等・`` ` ``等を誤って書式と解釈しないように
- * するため）、返り値からは除外する（コードブロック自体の構造化はsyncLiveFormatting側で別途
- * consumeCodeBlockMatchが担当する）。インラインコードはコードブロックと違い改行を含まないため
- * ToggleFormatKindの一種として返り値に含め、他の書式と全く同じ経路（consumeOneRawMatch）で
- * 実要素へ変換する。インラインコードの優先度をコードブロックと同じ0（太字等より高い）にするのは
- * MessageList.tsxのcollectStyleMatchesと同じ理由（コード範囲の中の見かけ上の**等を誤って書式と
- * 解釈しないようにするため）。consumeRawMarkdownSyntaxから使う。 */
+/** 太字・斜体・下線・取り消し線・インラインコード（RAW_*_REGEX、1文字以上必須）を候補に含めた
+ * 優先度付き重なり解決（MessageList.tsxのcollectStyleMatchesと同じアルゴリズム）。コードブロック
+ * （```` ``` ````、複数行）は重なり判定の優先度としてのみ使い（コードブロックの中の見かけ上の
+ * **等・`` ` ``等を誤って書式と解釈しないようにするため）、返り値からは除外する（コードブロック
+ * 自体の構造化はsyncLiveFormatting側で別途consumeCodeBlockMatchesが担当する）。インラインコードは
+ * コードブロックと違い改行を含まないためToggleFormatKindの一種として返り値に含め、他の書式と
+ * 全く同じ経路（consumeOneRawMatch）で実要素へ変換する。インラインコードの優先度をコードブロックと
+ * 同じ0（太字等より高い）にするのはMessageList.tsxのcollectStyleMatchesと同じ理由（コード範囲の
+ * 中の見かけ上の**等を誤って書式と解釈しないようにするため）。consumeRawMarkdownSyntaxから使う。 */
 function collectRawMarkdownMatches(text: string): LiveMatch[] {
   const candidates: LiveMatch[] = []
-  for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
-    const start = m.index ?? 0
-    candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'codeblock' })
+  for (const r of findCodeBlockProtectedRanges(text)) {
+    candidates.push({ start: r.start, end: r.end, priority: 0, kind: 'codeblock' })
   }
-  for (const m of text.matchAll(LIVE_INLINE_CODE_REGEX)) {
+  for (const m of text.matchAll(INLINE_CODE_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
   }
@@ -857,50 +883,6 @@ function extractHiddenMarker(fragment: DocumentFragment, count: number, fromEnd:
   span.contentEditable = 'false'
   span.appendChild(document.createTextNode(cut))
   return span
-}
-
-/** [start,end)をコード（インラインコード/コードブロック）として包む。containerはHTMLElement
- * （エディタ本体）・DocumentFragment（入れ子処理中の中間結果）のどちらでもよい（Range APIは
- * どちらに対しても同じように機能する）。太字・斜体・下線・取り消し線は実DOM構造へ移行したため
- * （本ファイル前方の書式セクションの冒頭コメント参照）、collectLiveMatchesが返すmatchは常に
- * kind==='code'になる。 */
-function wrapLiveMatch(container: Node, match: LiveMatch): void {
-  const { start, end } = match
-  if (start >= end) return
-  const startPos = resolveOffset(container, start)
-  const endPos = resolveOffset(container, end)
-  const range = document.createRange()
-  range.setStart(startPos.node, startPos.offset)
-  range.setEnd(endPos.node, endPos.offset)
-  const fragment = range.extractContents()
-  const wrapper = document.createElement('code')
-  wrapper.setAttribute(LIVE_FORMAT_ATTR, 'code')
-  wrapper.className = CODE_CLASSNAME
-  wrapper.appendChild(fragment)
-  range.insertNode(wrapper)
-}
-
-/** selectorに一致する要素を解除し、中身（テキストノード・原子絵文字img・メンションspan等）を
- * その場に残す（再parent化）。unwrapLiveFormatting・toggleFormatOnSelectionDomの両方から
- * 使う共通ロジック。 */
-function unwrapMatching(root: Node, selector: string): void {
-  const wrappers = (root as Element).querySelectorAll(selector)
-  wrappers.forEach((wrapper) => {
-    const parent = wrapper.parentNode
-    if (!parent) return
-    while (wrapper.firstChild) parent.insertBefore(wrapper.firstChild, wrapper)
-    parent.removeChild(wrapper)
-  })
-}
-
-/** 過去にsyncLiveFormattingが挿入したコードブロックのラッパー要素・隠しマーカー用spanを解除し、
- * 中身をその場に残す（コードブロックは本セッション時点でまだ従来の隠しマーカー方式のまま、
- * phase3で実DOM構造化予定）。太字・斜体・下線・取り消し線・インラインコード
- * （TOGGLE_FORMAT_ELEMENT_ATTR）・引用・箇条書き（BLOCK_FORMAT_ATTR）はテキストパターンから
- * 毎回導出される存在ではなく実体そのものなので、このセレクタには一切引っかからず触れない
- * （本ファイル前方の書式セクションの冒頭コメント参照）。 */
-function unwrapLiveFormatting(root: HTMLElement): void {
-  unwrapMatching(root, `[${LIVE_FORMAT_ATTR}], [${LIVE_FORMAT_MARKER_ATTR}]`)
 }
 
 // 引用のライブプレビュー（ユーザーからの明示的な要望「>を入力した時点で、送った後に出てくる
@@ -1020,12 +1002,11 @@ function removeEmptyToggleFormatWrappers(root: HTMLElement): void {
  * （Composer.tsxのrefreshEditorHousekeeping、実質すべての変更経路を1箇所に集約している）。
  * 呼ぶたびに全体を作り直す設計のため冪等（何度呼んでも同じ結果になる）。
  *
- * 太字・斜体・下線・取り消し線（実DOM構造、TOGGLE_FORMAT_ELEMENT_ATTR）はunwrapLiveFormatting
- * では一切触れず、consumeRawMarkdownSyntaxが手打ちの生Markdownだけを検出して実要素へ変換する
- * （詳細は本ファイル前方の書式セクションの冒頭コメント参照）。引用・コードは従来どおり
- * unwrap→テキストから再構築する。 */
+ * 太字・斜体・下線・取り消し線・インラインコード（実DOM構造、TOGGLE_FORMAT_ELEMENT_ATTR）・
+ * 引用・コードブロック（BLOCK_FORMAT_ATTR）は一切unwrapされず、consumeRawMarkdownSyntax・
+ * consumeCodeBlockMatchesが手打ちの生Markdownだけを検出して実要素へ破壊的に変換する
+ * （詳細は本ファイル前方の書式セクションの冒頭コメント参照）。 */
 export function syncLiveFormatting(root: HTMLElement): void {
-  unwrapLiveFormatting(root)
   root.normalize()
   removeEmptyToggleFormatWrappers(root)
 
@@ -1074,29 +1055,29 @@ export function syncLiveFormatting(root: HTMLElement): void {
     }
   }
 
+  // 太字・斜体・下線・取り消し線・インラインコードを先に実要素へ変換する（コードブロックの
+  // 範囲はcollectRawMarkdownMatchesの優先度付き重なり判定により自動的に保護される——コードブロック
+  // の中の見かけ上の**や`はこの時点ではまだ手つかずの生テキストのまま残る）。
   consumeRawMarkdownSyntax(root)
 
   const text = domToPlainText(root)
 
-  // コードブロックの範囲を先に確保し、引用の判定がコードブロックの中身まで誤って
-  // 解釈しないようにする（例: ```の中にgit diff風の「> 」行がある場合）。
-  const codeBlockRanges: { start: number; end: number }[] = []
-  for (const m of text.matchAll(LIVE_CODE_BLOCK_REGEX)) {
-    const start = m.index ?? 0
-    codeBlockRanges.push({ start, end: start + m[0].length })
-  }
+  // コードブロックの範囲（入力中の閉じていないコードブロックを含む、findCodeBlockProtectedRanges
+  // 参照）を先に確保し、引用の判定がコードブロックの中身まで誤って解釈しないようにする（例:
+  // ```の中にgit diff風の「> 」行がある場合。閉じていないコードブロックの中身を保護しないと、
+  // 閉じる```を打つ前に中の「> 」行が先に引用として確定してしまう不具合があった——実機
+  // Playwright検証で発見）。この時点ではconsumeCodeBlockMatchesがまだ走っていないため、```
+  // マーカーはまだ生テキストのまま（collectRawMarkdownMatchesの重なり判定により上の
+  // consumeRawMarkdownSyntaxからは保護されている）で、正しく検出できる。
+  const codeBlockRanges = findCodeBlockProtectedRanges(text)
 
-  // 引用（行頭「> 」の連続行）を先に処理する。行単位のブロック構造のため、文字位置ベースの
-  // collectLiveMatchesとは別立てで扱う。
+  // 引用（行頭「> 」の連続行）を処理する。行単位のブロック構造のため、文字位置ベースの
+  // consumeRawMarkdownSyntaxとは別立てで扱う。
   const quoteRanges = collectQuoteRanges(text, codeBlockRanges)
   for (const q of quoteRanges) wrapQuoteRange(root, q)
 
-  // コードのインライン装飾を、引用ブロックが既に消費した範囲を除いた部分に適用する（引用
-  // ブロックの内部はwrapQuoteRangeが自分で再帰的に処理済みのため、ここで重複して処理しない）。
-  const matches = collectLiveMatches(text).filter(
-    (m) => !quoteRanges.some((q) => m.start < q.end && q.start < m.end),
-  )
-  for (const m of matches) wrapLiveMatch(root, m)
+  // コードブロックは最後に処理する（引用の検出がまだ生の```マーカーを必要とするため）。
+  consumeCodeBlockMatches(root)
 
   root.normalize()
   if (useMarkerBasedRestore) {
@@ -1147,6 +1128,25 @@ export function wrapRangeInFormats(root: Node, start: number, end: number, forma
   range.setEnd(endPos.node, endPos.offset)
   const fragment = range.extractContents()
   range.insertNode(buildFormattedNode(fragment, formats))
+}
+
+/** [start,end)（複数行を含む選択範囲）をコードブロック（<pre data-block-format="codeblock">）で
+ * 直接包む。手打ちの```検出（consumeCodeBlockMatches）と違い、マーカー文字を一切経由しない
+ * ボタン駆動の経路のため、前後の"\n"を取り除く処理（stripOuterNewline）も不要——選択した内容を
+ * そのまま包むだけで良い。Composer.tsxのwrapCode（複数行選択時）から使う。 */
+export function wrapRangeAsCodeBlock(root: HTMLElement, start: number, end: number): void {
+  if (start >= end) return
+  const startPos = resolveOffset(root, start)
+  const endPos = resolveOffset(root, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+  const wrapper = document.createElement('pre')
+  wrapper.setAttribute(BLOCK_FORMAT_ATTR, 'codeblock')
+  wrapper.className = CODE_BLOCK_CLASSNAME
+  wrapper.appendChild(fragment)
+  range.insertNode(wrapper)
 }
 
 /** カーソル位置（プレーンテキストオフセット）を包む太字・斜体・下線・取り消し線の実要素を、
@@ -1484,5 +1484,55 @@ export function consumeRawMarkdownSyntax(root: HTMLElement): void {
   // 後続の処理に影響しない）。
   const sorted = [...matches].sort((a, b) => b.start - a.start)
   for (const m of sorted) consumeOneRawMatch(root, m)
+  root.normalize()
+}
+
+/** fragmentの中身が"\n"で始まる/終わる場合、その1文字だけを取り除く（MessageList.tsxの
+ * splitCodeBlocksが受信側で行う「```\nコード\n```と書いたときの見た目上の余白を除去する」
+ * 処理と対になる——ここで同じだけ削っておくことで、投稿欄のライブ表示と送信後の表示が一致する。
+ * domToMarkdownは逆に、コードブロックを直列化する際に必ず"\n"を1つずつ復元して包む）。 */
+function stripOuterNewline(fragment: DocumentFragment): void {
+  const text = domToPlainText(fragment)
+  if (text.startsWith('\n')) extractHiddenMarker(fragment, 1, false)
+  if (text.endsWith('\n') && text.length > 1) extractHiddenMarker(fragment, 1, true)
+}
+
+/** 手打ちの```コードブロック```を検出し、開始・終了の3連バッククォートを削除して
+ * <pre data-block-format="codeblock">へ破壊的に変換する。中身はMessageList.tsx側でさらに
+ * 解釈されない（太字等・インラインコードのネスト検出は行わない）ため、consumeOneRawMatchと
+ * 違い再帰処理は無い。syncLiveFormattingから、引用の検出（collectQuoteRanges、コードブロックの
+ * 範囲をgit diff風の「> 」誤検出から除外する必要がある）より後に呼ぶ。 */
+function consumeCodeBlockMatches(root: HTMLElement): void {
+  const text = domToPlainText(root)
+  const matches = [...text.matchAll(RAW_CODE_BLOCK_REGEX)]
+  if (matches.length === 0) return
+
+  // 開始位置の降順で処理する（consumeRawMarkdownSyntaxと同じ理由）。
+  const sorted = [...matches].sort((a, b) => (b.index ?? 0) - (a.index ?? 0))
+  for (const m of sorted) {
+    const start = m.index ?? 0
+    const end = start + m[0].length
+    if (start >= end) continue
+    const startPos = resolveOffset(root, start)
+    const endPos = resolveOffset(root, end)
+    const range = document.createRange()
+    range.setStart(startPos.node, startPos.offset)
+    range.setEnd(endPos.node, endPos.offset)
+    const fragment = range.extractContents()
+
+    const leading = extractHiddenMarker(fragment, 3, false)
+    const trailing = leading ? extractHiddenMarker(fragment, 3, true) : null
+    if (!leading || !trailing) {
+      range.insertNode(fragment)
+      continue
+    }
+    stripOuterNewline(fragment)
+
+    const wrapper = document.createElement('pre')
+    wrapper.setAttribute(BLOCK_FORMAT_ATTR, 'codeblock')
+    wrapper.className = CODE_BLOCK_CLASSNAME
+    wrapper.appendChild(fragment)
+    range.insertNode(wrapper)
+  }
   root.normalize()
 }
