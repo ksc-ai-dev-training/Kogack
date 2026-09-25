@@ -754,33 +754,67 @@ export default function Composer({
       return
     }
 
+    // ユーザーからの明示的な要望「コードブロックの上下にコードブロック内ではない普通の文章を
+    // 入力できるようにしたい」への対処: 対象範囲の前後に他のテキストが全く無い場合（＝投稿欄が
+    // 空、またはコードブロックが文書の先頭/末尾に来る場合）、そのままだとコードブロックの直前・
+    // 直後に文字が一切無いままになる。contentEditableは末尾（または先頭）のブロック要素の外側を
+    // クリックしても新しい行を作れない性質があるため、このままでは上下に普通の文章を追加する
+    // 場所自体が無くなってしまう。前後に空行を1行ずつ補い、範囲を補った分だけずらして返す。
+    const padCodeBlockEdges = (rangeStart: number, rangeEnd: number): { start: number; end: number } => {
+      let s = rangeStart
+      let e = rangeEnd
+      if (e === domToPlainText(root).length) {
+        replaceRangeWithText(root, e, e, '\n')
+        ensureTrailingNewlineCaretMarker(root)
+      }
+      if (s === 0) {
+        replaceRangeWithText(root, 0, 0, '\n')
+        s += 1
+        e += 1
+      }
+      return { start: s, end: e }
+    }
+
     if (start !== end) {
-      wrapRangeAsCodeBlock(root, start, end)
-      setSelectionOffsets(root, start, end)
+      const padded = padCodeBlockEdges(start, end)
+      wrapRangeAsCodeBlock(root, padded.start, padded.end)
+      setSelectionOffsets(root, padded.start, padded.end)
       setPickerQuery(null)
       afterMutate()
       return
     }
 
-    // 選択範囲が無い場合はinsertQuote/insertBulletListと同じく現在行全体を対象にする。行が
-    // 空の場合は「```\n\n```」を手打ちしたのと同じマーカー文字列を挿入し、直後のafterMutate→
-    // syncLiveFormatting→consumeCodeBlockMatches（手打ちの```検出）にブロックへの実DOM変換を
-    // 任せる（wrapRangeAsCodeBlockは空範囲を許容しないため、この場合だけ既存の手打ち検出経路を
-    // 再利用する）。カーソルは空行の位置（マーカーの4文字目、"```\n"の直後）に置く。
+    // 選択範囲が無い場合はinsertQuote/insertBulletListと同じく現在行全体を対象にする。
     const text = domToPlainText(root)
     const lineStart = text.lastIndexOf('\n', start - 1) + 1
     const nextNewline = text.indexOf('\n', start)
     const lineEnd = nextNewline === -1 ? text.length : nextNewline
     if (lineStart !== lineEnd) {
-      wrapRangeAsCodeBlock(root, lineStart, lineEnd)
-      setSelectionOffsets(root, lineStart, lineEnd)
+      const padded = padCodeBlockEdges(lineStart, lineEnd)
+      wrapRangeAsCodeBlock(root, padded.start, padded.end)
+      setSelectionOffsets(root, padded.start, padded.end)
       setPickerQuery(null)
       afterMutate()
       return
     }
 
-    replaceRangeWithText(root, start, start, '```\n\n```')
-    setSelectionOffsets(root, start + 4)
+    // 行が空の場合は「```\n\n```」を手打ちしたのと同じマーカー文字列を挿入し、直後の
+    // afterMutate→syncLiveFormatting→consumeCodeBlockMatches（手打ちの```検出）にブロックへの
+    // 実DOM変換を任せる（wrapRangeAsCodeBlockは空範囲を許容しないため、この場合だけ既存の
+    // 手打ち検出経路を再利用する）。前後の空行もこのマーカー文字列自体に含めて一度に挿入する
+    // （padCodeBlockEdgesと同じ判定・同じ理由）。カーソルは空行の位置（マーカー内の"```\n"の
+    // 直後、前に空行を補った分だけ後ろにずれる）に置く。
+    let marker = '```\n\n```'
+    let cursorOffset = 4
+    if (start === 0) {
+      marker = '\n' + marker
+      cursorOffset += 1
+    }
+    const needsTrailingLine = start === text.length
+    if (needsTrailingLine) marker += '\n'
+    replaceRangeWithText(root, start, start, marker)
+    if (needsTrailingLine) ensureTrailingNewlineCaretMarker(root)
+    setSelectionOffsets(root, start + cursorOffset)
     setPickerQuery(null)
     afterMutate()
   }
