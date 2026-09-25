@@ -229,6 +229,7 @@ export default function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const sendingRef = useRef(false)
   const emojiPopoverRef = useRef<HTMLDivElement>(null)
+  const activeCandidateRef = useRef<HTMLButtonElement>(null)
   // 下書き復元直後、まだcustomEmojiの読み込み（非同期SWR）が完了していない場合に:name:が
   // プレーンテキストのまま残る問題への対処（詳細はcustomEmojiのuseEffect参照）。利用者が
   // 既に編集を始めていたら追いかけ変換で上書きしないためのフラグ。afterMutate()（ユーザー
@@ -260,6 +261,15 @@ export default function Composer({
     c.name.toLowerCase().includes((pickerQuery ?? '').toLowerCase()),
   )
   const pickerOpen = pickerQuery !== null && filteredCandidates.length > 0
+
+  // 十字キーでactiveIndexが枠外の候補まで進んだ際、選択中の項目が見えなくなるバグへの対処
+  // （ユーザーからの報告）。ブラウザネイティブのスクロールに追従を任せるのではなく、
+  // activeIndexが変わるたびに選択中のボタンをscrollIntoViewで確実に可視範囲へ収める。
+  useEffect(() => {
+    if (pickerOpen) {
+      activeCandidateRef.current?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [pickerOpen, activeIndex])
 
   // オートリサイズ（MIN_ROWS〜MAX_ROWSまでは入力に合わせて高さを広げ、超えたらスクロール）。
   // 旧実装はbody state変化に反応するuseLayoutEffectだったが、bodyというReact stateを
@@ -1126,6 +1136,7 @@ export default function Composer({
           {filteredCandidates.map((c, i) => (
             <button
               key={c.id}
+              ref={i === activeIndex ? activeCandidateRef : undefined}
               type="button"
               onMouseDown={(e) => {
                 e.preventDefault()
