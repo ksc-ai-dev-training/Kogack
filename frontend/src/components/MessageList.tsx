@@ -594,7 +594,7 @@ export function renderMessageBody(
       nodes.push(
         <pre
           key={`code-${segIdx}`}
-          className="my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text"
+          className="my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text empty:before:content-['']"
         >
           {seg.content}
         </pre>,

@@ -761,9 +761,16 @@ const HIDDEN_MARKER_CLASSNAME = 'text-[1px] leading-none align-baseline select-n
 // MessageList.tsxのCODE_BLOCK_REGEX/INLINE_CODE_REGEXと同じ定義。
 const RAW_CODE_BLOCK_REGEX = /```([\s\S]*?)```/g
 const INLINE_CODE_REGEX = /`([^`\n]+)`/g
-// MessageList.tsxのコードブロック描画（<pre>）と全く同じクラス。
+// MessageList.tsxのコードブロック描画（<pre>）と全く同じクラス。empty:before:content-['']は、
+// ユーザーからの報告「コードブロックを出現させたとき（中に何も文字列がないとき）に、
+// コードブロックが細すぎてカーソルが半分しか見えていない」への対処——中身が本当に空（子ノードが
+// 1つも無い）の<pre>はブラウザ上で行ボックス自体が生成されず、padding分の高さしか残らない
+// （実テキストが1文字もできる前のキャレット表示だけが浮いて見切れる）。空のCSS生成コンテンツ
+// （擬似要素、実DOMには一切現れない——箇条書きの行頭マーカーbefore:content-['•']と同じ手法）を
+// 空の場合だけ挿入することで、DOM構造・domToPlainText等のオフセット計算に一切影響を与えずに
+// 現在のフォント・行間ぶんの行ボックスを1つ確保できる。
 const CODE_BLOCK_CLASSNAME =
-  'my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text'
+  "my-1 overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text empty:before:content-['']"
 
 // 'code'（インラインコード）は2026-09-25、コード・箇条書き・引用にも「入力している時点で送信後の
 // 表示を反映させたい（記号なしで）」という要望を受けてトグル書式の5番目の種類として追加した。
@@ -821,6 +828,35 @@ export function getBlockFormatAt(root: HTMLElement, cursor: number): { el: HTMLE
   while (node && node !== root) {
     const kind = node.getAttribute(BLOCK_FORMAT_ATTR)
     if (kind) return { el: node, kind }
+    node = node.parentElement
+  }
+  return null
+}
+
+/** 中身が空の<pre data-block-format="codeblock">（Composer.tsxのtoggleCodeBlockが作る、
+ * その場で入力を始められる空のコードブロック）は、domToPlainText/resolveOffsetのプレーン
+ * テキストオフセット上で幅0（子ノードが無く1文字も消費しない）になる。resolveOffsetのwalkは
+ * 「remaining<=len」でしか要素の内部へ入れないため、幅0の要素には原理上絶対に入れず、
+ * カーソルが視覚的にその内側にあってもgetBlockFormatAtは常に手前/直後の位置を返してしまう
+ * （ユーザーからの報告「コードブロックボタンを押してコードブロックを出した後に、もう一度
+ * コードブロックボタンを押しても、コードブロックが消えない」の原因）。整数オフセットを経由
+ * せず、ブラウザの実際のSelection（anchorNode/anchorOffset）を直接読んで判定することで、
+ * 空要素の内部にも問題なく対応できる（ブラウザ自身はcontentEditableな空要素の内部に普通に
+ * カーソルを置ける——node=空要素自身、offset=0というRangeになる）。Composer.tsxの
+ * toggleCodeBlockから、選択範囲が折りたたまれている場合のフォールバックとして使う。 */
+export function getCodeBlockElementAtSelection(root: HTMLElement): HTMLElement | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return null
+  const range = sel.getRangeAt(0)
+  if (!root.contains(range.startContainer)) return null
+  let target: Node = range.startContainer
+  if (target.nodeType === Node.ELEMENT_NODE) {
+    const children = (target as Element).childNodes
+    target = children[range.startOffset] ?? target
+  }
+  let node: HTMLElement | null = target.nodeType === Node.TEXT_NODE ? (target as Text).parentElement : (target as HTMLElement)
+  while (node && node !== root) {
+    if (node.getAttribute(BLOCK_FORMAT_ATTR) === 'codeblock') return node
     node = node.parentElement
   }
   return null

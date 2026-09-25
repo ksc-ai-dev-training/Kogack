@@ -31,6 +31,7 @@ import {
   toggleFormatOnSelectionDom,
   isCursorInsideActiveFormats,
   getBlockFormatAt,
+  getCodeBlockElementAtSelection,
   getInlineCodeElementAt,
   convertLinesToListItems,
   ungroupListElement,
@@ -726,7 +727,20 @@ export default function Composer({
     // コードブロックの内側にいる場合はボタンを「外す」方向として扱う（ブロックを解除し
     // 中身をプレーンテキストへ戻す。中の"\n"はそのまま実テキストとして残るため、複数行の
     // 内容だった場合はプレーンな複数行としてそのまま残る）。
-    const blockAtCursor = getBlockFormatAt(root, start)
+    // ユーザーからの報告「コードブロックボタンを押してコードブロックを出した後に、もう一度
+    // コードブロックボタンを押しても、コードブロックが消えない」への対処: 中身が空の
+    // コードブロックはgetBlockFormatAt（整数のプレーンテキストオフセット経由）では検出できない
+    // （getCodeBlockElementAtSelectionのコメント参照、幅0の要素には原理上resolveOffsetが入れない
+    // ため）。選択範囲が折りたたまれていて見つからない場合は、ブラウザの実際のSelectionを直接
+    // 見るフォールバックで再判定する。
+    const blockAtCursor =
+      getBlockFormatAt(root, start) ??
+      (start === end
+        ? (() => {
+            const el = getCodeBlockElementAtSelection(root)
+            return el ? { el, kind: 'codeblock' } : null
+          })()
+        : null)
     if (blockAtCursor?.kind === 'codeblock') {
       const el = blockAtCursor.el
       const parent = el.parentNode
