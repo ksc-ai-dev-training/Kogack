@@ -28,12 +28,30 @@ export function wrapSelectionText(body: string, start: number, end: number, pref
   return { body: nextBody, selStart: pos, selEnd: pos }
 }
 
-/** 選択範囲に改行を含むかで自動的にインラインコード/コードブロックを切り替える */
-export function wrapCodeText(body: string, start: number, end: number): TextEditResult {
-  if (body.slice(start, end).includes('\n')) {
+/** インラインコード（`で囲む）。ユーザーからの明示的な要望「コード（一行）とコードブロックの
+ * ボタンを分けてください」を受け、旧wrapCodeText（改行の有無で自動的にインライン/ブロックを
+ * 切り替えていた）から分割した。改行を含む選択には使えない（送信後の表示が崩れるため）ので
+ * nullを返す——呼び出し元はnullを見てコードブロックボタンを使うよう案内する */
+export function wrapInlineCodeText(body: string, start: number, end: number): TextEditResult | null {
+  if (body.slice(start, end).includes('\n')) return null
+  return wrapSelectionText(body, start, end, '`', '`')
+}
+
+/** コードブロック（3連バッククォートで囲む）。選択範囲が無ければ現在行を対象にし、現在行も
+ * 空ならその場に空のコードブロックを作ってカーソルを中に置く */
+export function wrapCodeBlockText(body: string, start: number, end: number): TextEditResult {
+  if (start !== end) {
     return wrapSelectionText(body, start, end, '```\n', '\n```')
   }
-  return wrapSelectionText(body, start, end, '`', '`')
+  const lineStart = body.lastIndexOf('\n', start - 1) + 1
+  const nextNewline = body.indexOf('\n', start)
+  const lineEnd = nextNewline === -1 ? body.length : nextNewline
+  if (lineStart !== lineEnd) {
+    return wrapSelectionText(body, lineStart, lineEnd, '```\n', '\n```')
+  }
+  const nextBody = body.slice(0, start) + '```\n\n```' + body.slice(start)
+  const pos = start + 4
+  return { body: nextBody, selStart: pos, selEnd: pos }
 }
 
 /** 選択範囲を含む行全体を対象に行頭へ「- 」を付ける（既に全行付いていれば外すトグル動作）。

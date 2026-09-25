@@ -6,7 +6,7 @@ import { useDraftKeys } from '../hooks/useDraftKeys'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { apiFetch, ApiError, uploadAttachment } from '../lib/api'
 import {
-  continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapCodeText, wrapSelectionText,
+  continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapInlineCodeText, wrapCodeBlockText, wrapSelectionText,
 } from '../lib/textFormatting'
 import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
@@ -1713,12 +1713,30 @@ export default function MessageList({
       el.setSelectionRange(r.selStart, r.selEnd)
     })
   }
-  const applyEditCode = () => {
+  // ユーザーからの明示的な要望「コード（一行）とコードブロックのボタンを分けてください」により
+  // 旧applyEditCode（改行の有無で自動的にインライン/ブロックを切り替えていた）を分割した
+  const applyEditInlineCode = () => {
     const el = editTextareaRef.current
     if (!el) return
     const start = el.selectionStart ?? editBody.length
     const end = el.selectionEnd ?? editBody.length
-    const r = wrapCodeText(editBody, start, end)
+    const r = wrapInlineCodeText(editBody, start, end)
+    if (!r) {
+      toast('複数行を選択している場合はコードブロックのボタンを使ってください', 'error')
+      return
+    }
+    setEditBody(r.body)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(r.selStart, r.selEnd)
+    })
+  }
+  const applyEditCodeBlock = () => {
+    const el = editTextareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? editBody.length
+    const end = el.selectionEnd ?? editBody.length
+    const r = wrapCodeBlockText(editBody, start, end)
     setEditBody(r.body)
     requestAnimationFrame(() => {
       el.focus()
@@ -1972,11 +1990,11 @@ export default function MessageList({
                       </button>
                       <button
                         type="button"
-                        title="コード（複数行を選択するとコードブロックになります）"
-                        onClick={applyEditCode}
+                        title="コード（1行。複数行はコードブロックのボタンを使ってください）"
+                        onClick={applyEditInlineCode}
                         className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
                       >
-                        {'</>'}
+                        {'`'}
                       </button>
                       <button
                         type="button"
@@ -1990,6 +2008,14 @@ export default function MessageList({
                           <circle cx="4" cy="14" r="1.3" fill="currentColor" />
                           <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                         </svg>
+                      </button>
+                      <button
+                        type="button"
+                        title="コードブロック（複数行のコードを枠で囲みます。選択範囲が無ければ現在の行が対象になります）"
+                        onClick={applyEditCodeBlock}
+                        className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
+                      >
+                        {'</>'}
                       </button>
                       <button
                         type="button"

@@ -17,7 +17,7 @@ import { useConfirm } from '../components/ui/ConfirmDialog'
 import { EmojiGridPopover } from '../components/MessageList'
 import { detectMentionQuery, findMentionHighlights, type MentionCandidate } from '../components/Composer'
 import {
-  continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapCodeText, wrapSelectionText,
+  continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapInlineCodeText, wrapCodeBlockText, wrapSelectionText,
 } from '../lib/textFormatting'
 import type {
   AiSettings, AutoResponseRule, ChannelDetail, DocFolder, DocPermissionConflict, MentionPayload, RecurringPost,
@@ -1727,6 +1727,7 @@ function defaultAnchor(): { date: string; time: string } {
 function useBodyFormatting(body: string, onBodyChange: (v: string) => void) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [emojiAnchor, setEmojiAnchor] = useState<DOMRect | null>(null)
+  const toast = useToast()
 
   const applySelectionEdit = (edit: (start: number, end: number) => ReturnType<typeof wrapSelectionText>) => {
     const el = textareaRef.current
@@ -1742,7 +1743,25 @@ function useBodyFormatting(body: string, onBodyChange: (v: string) => void) {
   }
   const applyWrap = (prefix: string, suffix: string) =>
     applySelectionEdit((start, end) => wrapSelectionText(body, start, end, prefix, suffix))
-  const applyCode = () => applySelectionEdit((start, end) => wrapCodeText(body, start, end))
+  // ユーザーからの明示的な要望「コード（一行）とコードブロックのボタンを分けてください」により
+  // 旧applyCode（改行の有無で自動的にインライン/ブロックを切り替えていた）を分割した
+  const applyInlineCode = () => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? body.length
+    const end = el.selectionEnd ?? body.length
+    const r = wrapInlineCodeText(body, start, end)
+    if (!r) {
+      toast('複数行を選択している場合はコードブロックのボタンを使ってください', 'error')
+      return
+    }
+    onBodyChange(r.body)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(r.selStart, r.selEnd)
+    })
+  }
+  const applyCodeBlock = () => applySelectionEdit((start, end) => wrapCodeBlockText(body, start, end))
   const applyBulletList = () => applySelectionEdit((start, end) => insertBulletListText(body, start, end))
   const applyQuote = () => applySelectionEdit((start, end) => insertQuoteText(body, start, end))
   const insertEmoji = (emoji: string) => {
@@ -1780,16 +1799,17 @@ function useBodyFormatting(body: string, onBodyChange: (v: string) => void) {
   }
 
   return {
-    textareaRef, applyWrap, applyCode, applyBulletList, applyQuote, insertEmoji,
+    textareaRef, applyWrap, applyInlineCode, applyCodeBlock, applyBulletList, applyQuote, insertEmoji,
     emojiAnchor, toggleEmojiPicker, closeEmojiPicker: () => setEmojiAnchor(null), handleKeyDown,
   }
 }
 
 function FormatToolbarButtons({
-  onWrap, onCode, onBulletList, onQuote,
+  onWrap, onInlineCode, onCodeBlock, onBulletList, onQuote,
 }: {
   onWrap: (prefix: string, suffix: string) => void
-  onCode: () => void
+  onInlineCode: () => void
+  onCodeBlock: () => void
   onBulletList: () => void
   onQuote: () => void
 }) {
@@ -1799,7 +1819,7 @@ function FormatToolbarButtons({
       <button type="button" title="斜体（_で囲みます）" onClick={() => onWrap('_', '_')} className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic text-ink-subtle hover:bg-surface-muted">I</button>
       <button type="button" title="下線（++で囲みます）" onClick={() => onWrap('++', '++')} className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle underline hover:bg-surface-muted">U</button>
       <button type="button" title="取り消し線（~~で囲みます）" onClick={() => onWrap('~~', '~~')} className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted">S</button>
-      <button type="button" title="コード（複数行を選択するとコードブロックになります）" onClick={onCode} className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted">{'</>'}</button>
+      <button type="button" title="コード（1行。複数行はコードブロックのボタンを使ってください）" onClick={onInlineCode} className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted">{'`'}</button>
       <button type="button" title="箇条書き（行頭に「- 」を付けます）" onClick={onBulletList} className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted">
         <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
           <circle cx="4" cy="6" r="1.3" fill="currentColor" />
@@ -1808,6 +1828,7 @@ function FormatToolbarButtons({
           <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       </button>
+      <button type="button" title="コードブロック（複数行のコードを枠で囲みます。選択範囲が無ければ現在の行が対象になります）" onClick={onCodeBlock} className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted">{'</>'}</button>
       <button type="button" title="引用（行頭に「> 」を付けます）" onClick={onQuote} className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted">
         <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
           <rect x="3" y="4" width="2" height="12" rx="1" fill="currentColor" />
@@ -2100,7 +2121,7 @@ function RecurringPostFormFields({
             位置が実際の文字位置とずれるため。Composer.tsx確立済みの制約と同じ） */}
         <div className="relative">
           <div className="mb-1.5 flex items-center gap-0.5">
-            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} onQuote={fmt.applyQuote} />
+            <FormatToolbarButtons onWrap={fmt.applyWrap} onInlineCode={fmt.applyInlineCode} onCodeBlock={fmt.applyCodeBlock} onBulletList={fmt.applyBulletList} onQuote={fmt.applyQuote} />
           </div>
           <div className="relative">
             <div
@@ -2601,7 +2622,7 @@ function TriggerRuleFormFields({
             （ユーザーからの明示的な要望「メンション相手の名前に背景色が同じ感じで出ると嬉しい」） */}
         <div className="relative">
           <div className="mb-1.5 flex items-center gap-0.5">
-            <FormatToolbarButtons onWrap={fmt.applyWrap} onCode={fmt.applyCode} onBulletList={fmt.applyBulletList} onQuote={fmt.applyQuote} />
+            <FormatToolbarButtons onWrap={fmt.applyWrap} onInlineCode={fmt.applyInlineCode} onCodeBlock={fmt.applyCodeBlock} onBulletList={fmt.applyBulletList} onQuote={fmt.applyQuote} />
           </div>
           <div className="relative">
             <div

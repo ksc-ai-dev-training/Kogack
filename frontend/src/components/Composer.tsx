@@ -682,16 +682,36 @@ export default function Composer({
     afterMutate()
   }
 
-  // コードボタンは選択範囲に改行を含むかで自動的にインラインコード/コードブロックを切り替える
-  // （GitHubのコメント欄と同じ挙動。ボタンを1つに減らせるうえ直感的なため）。2026-09-25、
-  // インラインコード・コードブロックともマーカー文字を持たない実DOM構造になったため、改行を
-  // 含まない場合はtoggleFormatButton('code')（トグル書式）へ、含む場合はwrapRangeAsCodeBlock
-  // （<pre>で直接ラップ、マーカー文字を一切経由しない）へ委譲する。
-  const wrapCode = () => {
+  // ユーザーからの明示的な要望「コード（一行）とコードブロックのボタンを分けてください」により、
+  // 従来1つだった「コード」ボタン（改行の有無で自動的にインライン/ブロックを切り替えていた）を
+  // 2つに分割した。インラインコードはB/I/U/Sと同じ「他のトグル書式と組み合わせ不可能」グループ
+  // （toggleFormatButtonへ委譲、否＝otherFormatActiveで無効化）、コードブロックは箇条書き・引用と
+  // 同じ「選択範囲/現在行全体を変換する」グループ（disabled指定なし）として扱う。
+  //
+  // インラインコード（改行を含む選択には使えない——MessageList.tsxのINLINE_CODE_REGEXが改行を
+  // 含む内容を一致させないため、そのまま送信すると表示が崩れる。複数行はコードブロックボタンへ
+  // 誘導する）。
+  const toggleInlineCode = () => {
     const root = editorRef.current
     if (!root) return
     const offs = getSelectionOffsets(root)
-    const start = offs?.start ?? domToPlainText(root).length
+    const selectedText = offs ? domToPlainText(root).slice(offs.start, offs.end) : ''
+    if (selectedText.includes('\n')) {
+      toast('複数行を選択している場合はコードブロックのボタンを使ってください', 'error')
+      return
+    }
+    toggleFormatButton('code')
+  }
+
+  // コードブロック（選択範囲、選択が無ければ現在行を<pre>で直接ラップする。マーカー文字を
+  // 一切経由しない、旧wrapCodeの複数行分岐と同じ経路）。
+  const toggleCodeBlock = () => {
+    const root = editorRef.current
+    if (!root) return
+    const offs = getSelectionOffsets(root)
+    const total = domToPlainText(root).length
+    const start = offs?.start ?? total
+    const end = offs?.end ?? start
 
     // 要望対応（ユーザーからの報告「Deleteキーとボタン操作の両方でコードブロックを消せる
     // ようにしてほしい」）: insertQuote/insertBulletListと同じ考え方で、カーソルが既存の
@@ -712,15 +732,35 @@ export default function Composer({
       return
     }
 
-    const selectedText = offs ? domToPlainText(root).slice(offs.start, offs.end) : ''
-    if (offs && selectedText.includes('\n')) {
-      wrapRangeAsCodeBlock(root, offs.start, offs.end)
-      setSelectionOffsets(root, offs.start, offs.end)
+    if (start !== end) {
+      wrapRangeAsCodeBlock(root, start, end)
+      setSelectionOffsets(root, start, end)
       setPickerQuery(null)
       afterMutate()
-    } else {
-      toggleFormatButton('code')
+      return
     }
+
+    // 選択範囲が無い場合はinsertQuote/insertBulletListと同じく現在行全体を対象にする。行が
+    // 空の場合は「```\n\n```」を手打ちしたのと同じマーカー文字列を挿入し、直後のafterMutate→
+    // syncLiveFormatting→consumeCodeBlockMatches（手打ちの```検出）にブロックへの実DOM変換を
+    // 任せる（wrapRangeAsCodeBlockは空範囲を許容しないため、この場合だけ既存の手打ち検出経路を
+    // 再利用する）。カーソルは空行の位置（マーカーの4文字目、"```\n"の直後）に置く。
+    const text = domToPlainText(root)
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1
+    const nextNewline = text.indexOf('\n', start)
+    const lineEnd = nextNewline === -1 ? text.length : nextNewline
+    if (lineStart !== lineEnd) {
+      wrapRangeAsCodeBlock(root, lineStart, lineEnd)
+      setSelectionOffsets(root, lineStart, lineEnd)
+      setPickerQuery(null)
+      afterMutate()
+      return
+    }
+
+    replaceRangeWithText(root, start, start, '```\n\n```')
+    setSelectionOffsets(root, start + 4)
+    setPickerQuery(null)
+    afterMutate()
   }
 
   // リンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい」）。記法は他の書式
@@ -1157,7 +1197,7 @@ export default function Composer({
         // 挿入してしまっていた。送信Markdownは改行入りの`` `...\n...` ``になり、コードブロック
         // （```の対）にもインラインコード（改行を含められない単一`` ` ``、MessageList.tsxの
         // INLINE_CODE_REGEX参照）にも一致せず、生の記号付きプレーンテキストとして表示されて
-        // いた。wrapCode（選択範囲に改行を含む場合の自動切り替え）と同じ考え方で、カーソルが
+        // いた。コードブロックボタン（toggleCodeBlock）と同じ考え方で、カーソルが
         // インラインコードの内側にいる状態でEnterが押されたらコードブロックへ自動アップグレード
         // する。
         const inlineCode = getInlineCodeElementAt(root, cursor)
@@ -1486,6 +1526,20 @@ export default function Composer({
         </button>
         <button
           type="button"
+          disabled={otherFormatActive}
+          title="コード（1行、選択範囲が無ければ押している間タイプする文字がコード表示になります。複数行はコードブロックのボタンを使ってください。太字等とは組み合わせられません）"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            toggleInlineCode()
+          }}
+          className={`flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
+            codeFormatActive ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
+          }`}
+        >
+          {'`'}
+        </button>
+        <button
+          type="button"
           title="リンク（テキストとURLを指定して挿入します）"
           onMouseDown={(e) => {
             e.preventDefault()
@@ -1496,20 +1550,6 @@ export default function Composer({
           }`}
         >
           🔗
-        </button>
-        <button
-          type="button"
-          disabled={otherFormatActive}
-          title="コード（複数行を選択するとコードブロックになります。太字等とは組み合わせられません）"
-          onMouseDown={(e) => {
-            e.preventDefault()
-            wrapCode()
-          }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
-            codeFormatActive ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
-          }`}
-        >
-          {'</>'}
         </button>
         <button
           type="button"
@@ -1526,6 +1566,17 @@ export default function Composer({
             <circle cx="4" cy="14" r="1.3" fill="currentColor" />
             <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
+        </button>
+        <button
+          type="button"
+          title="コードブロック（複数行のコードを枠で囲みます。選択範囲が無ければ現在の行が対象になります）"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            toggleCodeBlock()
+          }}
+          className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
+        >
+          {'</>'}
         </button>
         <button
           type="button"
