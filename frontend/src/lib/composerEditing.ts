@@ -1733,9 +1733,14 @@ export function wrapRangeInFormats(root: Node, start: number, end: number, forma
 /** [start,end)（複数行を含む選択範囲）をコードブロック（<pre data-block-format="codeblock">）で
  * 直接包む。手打ちの```検出（consumeCodeBlockMatches）と違い、マーカー文字を一切経由しない
  * ボタン駆動の経路のため、前後の"\n"を取り除く処理（stripOuterNewline）も不要——選択した内容を
- * そのまま包むだけで良い。Composer.tsxのwrapCode（複数行選択時）から使う。 */
+ * そのまま包むだけで良い。Composer.tsxのtoggleCodeBlockから使う。
+ * start===end（何も入力されていない行でコードブロックボタンを押した場合）はconvertLinesToQuote/
+ * convertLinesToListItemsと同じ考え方で、空のコードブロックを直接構築しCARET_MARKERでカーソルを
+ * 内部へ置く（以前は「```\n\n```」をマーカー文字列として挿入し手打ち検出経路に変換を委ねていたが、
+ * ユーザーからの報告「コードブロックボタンを押したときに前後に空行ができてしまう、コードボックス
+ * 一行分でよい」により、前後に空行を補う処理ごと廃止した）。 */
 export function wrapRangeAsCodeBlock(root: HTMLElement, start: number, end: number): void {
-  if (start >= end) return
+  if (start > end) return
   const startPos = resolveOffset(root, start)
   const endPos = resolveOffset(root, end)
   const range = document.createRange()
@@ -1747,6 +1752,19 @@ export function wrapRangeAsCodeBlock(root: HTMLElement, start: number, end: numb
   wrapper.className = CODE_BLOCK_CLASSNAME
   wrapper.appendChild(fragment)
   range.insertNode(wrapper)
+
+  if (start === end) {
+    const marker = document.createTextNode(CARET_MARKER)
+    wrapper.appendChild(marker)
+    const caretRange = document.createRange()
+    caretRange.setStart(marker, marker.length)
+    caretRange.collapse(true)
+    const sel = window.getSelection()
+    if (sel) {
+      sel.removeAllRanges()
+      sel.addRange(caretRange)
+    }
+  }
 }
 
 /** カーソル位置（プレーンテキストオフセット）を包む太字・斜体・下線・取り消し線の実要素を、
