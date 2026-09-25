@@ -30,6 +30,11 @@ import {
   toggleFormatOnSelectionDom,
   isCursorInsideActiveFormats,
   getBlockFormatAt,
+  convertLinesToListItems,
+  ungroupListElement,
+  handleEnterInListItem,
+  handleBackspaceAtListItemStart,
+  computeElementOffset,
   type ToggleFormatKind,
 } from '../lib/composerEditing'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
@@ -750,12 +755,14 @@ export default function Composer({
     afterMutate()
   }
 
-  // 箇条書きボタンは選択範囲を含む行全体を対象に行頭へ「- 」を付ける（既に全行付いていれば外す
-  // トグル動作）。複数行の選択に含まれる空行（段落の区切り）はそのまま維持するが、対象が
-  // その空行1行だけ（何も入力していない行にカーソルがある状態でボタンを押した場合）は
-  // 「- 」を付ける（ユーザーからの要望「何も入力されていない行で箇条書きボタンを押しても
-  // 箇条書きのマークが出てくるようにしたい」）。allBulletedは空行を除いた行だけで判定する
-  // （空行しか無い1行だけの対象を「既に箇条書き済み」と誤判定して何もしなくなるのを防ぐため）
+  // 箇条書きボタン。2026-09-25、箇条書きがマーカー文字を持たない実DOM構造
+  // （1行=1つのdata-block-format="list-item"要素、composerEditing.ts参照）になったため、
+  // insertQuoteと同じ考え方で「外す」方向はgetBlockFormatAtでカーソルが既存のリストの内側かを
+  // 直接見て判定する（内側ならリストごと解除）。「付ける」方向は選択範囲を含む行全体を
+  // convertLinesToListItemsで構築する。何も入力されていない行にカーソルがある状態でボタンを
+  // 押した場合も1つの空項目を作る（ユーザーからの要望「何も入力されていない行で箇条書き
+  // ボタンを押しても箇条書きのマークが出てくるようにしたい」、convertLinesToListItems側で
+  // start===endを許容している）。
   const insertBulletList = () => {
     const root = editorRef.current
     if (!root) return
@@ -763,19 +770,21 @@ export default function Composer({
     const total = domToPlainText(root).length
     const start = offs?.start ?? total
     const end = offs?.end ?? start
+
+    const blockAtCursor = getBlockFormatAt(root, start)
+    if (blockAtCursor?.kind === 'list' || blockAtCursor?.kind === 'list-item') {
+      const listEl = blockAtCursor.kind === 'list' ? blockAtCursor.el : (blockAtCursor.el.parentElement as HTMLElement)
+      ungroupListElement(listEl)
+      setPickerQuery(null)
+      afterMutate()
+      return
+    }
+
     const text = domToPlainText(root)
     const lineStart = text.lastIndexOf('\n', start - 1) + 1
     const nextNewline = text.indexOf('\n', end)
     const lineEnd = nextNewline === -1 ? text.length : nextNewline
-    const lines = text.slice(lineStart, lineEnd).split('\n')
-    const nonBlankLines = lines.filter((l) => l.trim() !== '')
-    const allBulleted = nonBlankLines.length > 0 && nonBlankLines.every((l) => l.startsWith('- '))
-    const nextLines = lines.map((l) => {
-      if (l.trim() === '') return lines.length === 1 ? '- ' : l
-      return allBulleted ? l.replace(/^- /, '') : l.startsWith('- ') ? l : `- ${l}`
-    })
-    const nextBlock = nextLines.join('\n')
-    replaceRangeWithText(root, lineStart, lineEnd, nextBlock)
+    convertLinesToListItems(root, lineStart, lineEnd)
     setPickerQuery(null)
     afterMutate()
   }
@@ -1009,6 +1018,23 @@ export default function Composer({
         return
       }
     }
+    // 箇条書きの項目先頭（絶対オフセットがちょうど項目の開始位置と一致する場合）でのBackspaceは
+    // 自前で処理する。項目またぎのブロック要素の結合はブラウザ間の挙動が大きく異なるため
+    // （Enterキー処理と同じ理由、ファイル冒頭の設計判断コメント参照）。それ以外のBackspace
+    // （項目の途中・項目が無い等）は一切介入せず、今まで通りネイティブ処理に任せる。
+    if (e.key === 'Backspace') {
+      const root = editorRef.current
+      const offs = root ? getSelectionOffsets(root) : null
+      if (root && offs && offs.start === offs.end) {
+        const block = getBlockFormatAt(root, offs.start)
+        if (block?.kind === 'list-item' && offs.start === computeElementOffset(root, block.el).start) {
+          e.preventDefault()
+          handleBackspaceAtListItemStart(root, block.el)
+          afterMutate()
+          return
+        }
+      }
+    }
     // Enterキー＝改行・Ctrl+Enter（Macは⌘+Enter）＝送信（Slackと同じ挙動。ユーザーからの明示的な
     // 要望による変更、従来はEnter単体で即送信・Shift+Enterで改行だった）。
     // バグ修正（ユーザーからの報告「たまにAIが二回応答するときがある」、実機データで原因を特定
@@ -1025,45 +1051,39 @@ export default function Composer({
     // contentEditableではEnterキーの既定挙動（ブロック要素の分割等、ブラウザ間で挙動が
     // 大きく異なる）に任せず、常に自前で処理する（改行はテキストノード内の生の"\n"文字として
     // 挿入し、white-space:pre-wrapで見た目を成立させる。詳細はcomposerEditing.tsの
-    // 冒頭コメント参照）。箇条書きの行でEnterを押すと、次の行にも自動的に「- 」を付けて続ける
-    // （ユーザーからの明示的な要望）。選択範囲がある場合（＝Enterで選択部分を置き換える通常の
-    // 入力）は対象外とし、素朴にカーソル位置のみのケースに絞る。何も入力していない箇条書き行で
-    // Enterを押した場合は、そのままだと空のマーカーが際限なく増えてしまうため、多くのエディタ
-    // （Notion・GitHub等）と同じくマーカーを外して抜ける。
+    // 冒頭コメント参照）。選択範囲がある場合（＝Enterで選択部分を置き換える通常の入力）は
+    // 対象外とし、素朴にカーソル位置のみのケースに絞る。
     //
-    // 引用（2026-09-25、マーカー文字を持たない実DOM構造へ書き換え）は箇条書きと違いテキスト
-    // プレフィックスが無いため、getBlockFormatAtでカーソルが<blockquote>の内側かどうかを
-    // 判定する。継続は<blockquote>の内側に生の"\n"を1文字挿入するだけ（マーカー文字を挿入する
-    // 必要が無い分、以前よりむしろ単純になった）。空行での脱出は、その空行（内部の末尾の"\n"）を
-    // <blockquote>から取り除き、insertTextAfterNodeで<blockquote>の外側（直後）へ新しい
-    // プレーンな行を作る——数値オフセットのsetSelectionOffsetsだけに頼ると、resolveOffsetが
-    // 「その位置より後に何も実体が無い」場合に要素の内側に留まる位置を返してしまう既知の
-    // バイアス（composerEditing.tsのtoggleFormatAtCursorDomのコメント参照）により、外に
-    // 出したはずのカーソルが<blockquote>の内側へ巻き戻ってしまうため。
+    // 箇条書き・引用（2026-09-25、共にマーカー文字を持たない実DOM構造へ書き換え）は
+    // getBlockFormatAtでカーソルがlist-item/<blockquote>の内側かどうかを判定する。箇条書きは
+    // handleEnterInListItem（composerEditing.ts）に委譲——項目が空ならリストを抜け、空でなければ
+    // カーソル以降を新しい項目として切り出す。引用は<blockquote>の内側に生の"\n"を1文字
+    // 挿入するだけで続き行になる（マーカー文字を挿入する必要が無い分、以前よりむしろ単純に
+    // なった）。空行での脱出は、その空行（内部の末尾の"\n"）を<blockquote>から取り除き、
+    // insertTextAfterNodeで<blockquote>の外側（直後）へ新しいプレーンな行を作る——数値
+    // オフセットのsetSelectionOffsetsだけに頼ると、resolveOffsetが「その位置より後に何も
+    // 実体が無い」場合に要素の内側に留まる位置を返してしまう既知のバイアス
+    // （composerEditing.tsのtoggleFormatAtCursorDomのコメント参照）により、外に出したはずの
+    // カーソルが<blockquote>の内側へ巻き戻ってしまうため。
     if (e.key === 'Enter') {
       e.preventDefault()
       const root = editorRef.current
       if (!root) return
       const offs = getSelectionOffsets(root)
       if (offs && offs.start === offs.end && !e.shiftKey) {
-        const text = domToPlainText(root)
         const cursor = offs.start
-        const lineStart = text.lastIndexOf('\n', cursor - 1) + 1
-        const nextNewlineIdx = text.indexOf('\n', cursor)
-        const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
-        const currentLine = text.slice(lineStart, lineEnd)
-        const bulletMatch = /^- (.*)$/.exec(currentLine)
-        if (bulletMatch) {
-          if (bulletMatch[1].trim() === '') {
-            replaceRangeWithText(root, lineStart, lineEnd, '')
-          } else {
-            replaceRangeWithText(root, cursor, cursor, '\n- ')
-          }
+        const block = getBlockFormatAt(root, cursor)
+        if (block?.kind === 'list-item') {
+          handleEnterInListItem(root, block.el, cursor)
           afterMutate()
           return
         }
-        const block = getBlockFormatAt(root, cursor)
         if (block?.kind === 'quote') {
+          const text = domToPlainText(root)
+          const lineStart = text.lastIndexOf('\n', cursor - 1) + 1
+          const nextNewlineIdx = text.indexOf('\n', cursor)
+          const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
+          const currentLine = text.slice(lineStart, lineEnd)
           if (currentLine.trim() === '') {
             replaceRangeWithText(root, lineStart - 1, lineStart, '')
             insertTextAfterNode(block.el, '\n')

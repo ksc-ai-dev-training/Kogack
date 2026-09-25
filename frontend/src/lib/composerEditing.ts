@@ -202,6 +202,17 @@ export function domToPlainText(root: Node): string {
       text += '\n'
       return
     }
+    // 箇条書き（data-block-format="list"）は1行=1つのdata-block-format="list-item"要素という
+    // モデル（本ファイル後方の箇条書きセクション参照）のため、項目の間にだけ仮想的な"\n"を
+    // 補う（項目自体はテキストとして実在する"\n"を持たない——行区切りが要素の境界そのもの）。
+    if ((node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+      const items = Array.from(node.childNodes)
+      items.forEach((item, i) => {
+        if (i > 0) text += '\n'
+        for (const child of Array.from(item.childNodes)) walk(child)
+      })
+      return
+    }
     for (const child of Array.from(node.childNodes)) walk(child)
   }
   for (const child of Array.from(root.childNodes)) walk(child)
@@ -227,6 +238,15 @@ export function domToMarkdown(root: Node): string {
     if (node.nodeType !== Node.ELEMENT_NODE) return ''
     if (isEmojiNode(node)) return `:${node.getAttribute(EMOJI_ATTR)}:`
     if ((node as Element).tagName === 'BR') return '\n'
+    // 箇条書き（data-block-format="list"）は各項目（data-block-format="list-item"）を
+    // 個別に直列化し、"- "を付けて"\n"で連結する（domToPlainTextと同じ「項目の境界=仮想的な
+    // 改行」モデル、本ファイル後方の箇条書きセクション参照）。項目自体の中身は太字等を含みうる
+    // ため、genericなwalkでそのまま再帰する。
+    if ((node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+      return Array.from(node.childNodes)
+        .map((item) => `- ${Array.from(item.childNodes).map(walk).join('')}`)
+        .join('\n')
+    }
     const inner = Array.from(node.childNodes).map(walk).join('')
     const kind = (node as Element).getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR) as ToggleFormatKind | null
     if (kind && inner) {
@@ -352,6 +372,27 @@ function resolveOffset(root: Node, targetOffset: number): DomPosition {
       lastPosition = { node: parent, offset: idx + 1 }
       return null
     }
+    // 箇条書き（data-block-format="list"）の項目間には、絵文字img・マーカーspanと同じ
+    // 「原子的な1文字ぶんの仮想区切り」パターンを適用する（本ファイル後方の箇条書きセクション
+    // 参照）。項目自体は普通に再帰するだけで良い（textLength/domToPlainTextと矛盾しないよう、
+    // 項目と項目の間でだけremainingを1消費する）。
+    // バグ修正（実機Playwright検証で発見）: ここまでの分岐はELEMENT_NODEとDOCUMENT_FRAGMENT_NODEの
+    // 両方を通す（前方のコメント参照、書式の入れ子処理がcontainerとしてDocumentFragmentも渡す
+    // ため）。DocumentFragmentにはgetAttributeが存在しないため、nodeType===ELEMENT_NODEを
+    // 確認してから呼ぶ必要がある（確認しないと"node.getAttribute is not a function"で
+    // 例外になり、箇条書きボタン等の操作全体が失敗していた）。 */
+    if (node.nodeType === Node.ELEMENT_NODE && (node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+      const items = Array.from(node.childNodes)
+      for (let i = 0; i < items.length; i++) {
+        const found = walk(items[i])
+        if (found) return found
+        if (i < items.length - 1) {
+          remaining -= 1
+          lastPosition = { node, offset: i + 1 }
+        }
+      }
+      return null
+    }
     for (const child of Array.from(node.childNodes)) {
       const found = walk(child)
       if (found) return found
@@ -373,6 +414,11 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
     if (n.nodeType !== Node.ELEMENT_NODE) return 0
     if (isEmojiNode(n)) return (n.getAttribute(EMOJI_ATTR) as string).length + 2
     if ((n as Element).tagName === 'BR') return 1
+    // 箇条書き（resolveOffsetの同名コメント参照）: 項目間の仮想的な"\n"ぶんを加算する。
+    if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+      const items = Array.from(n.childNodes)
+      return items.reduce((sum, item, i) => sum + (i > 0 ? 1 : 0) + lengthOf(item), 0)
+    }
     let sum = 0
     for (const child of Array.from(n.childNodes)) sum += lengthOf(child)
     return sum
@@ -382,6 +428,9 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
     if (n === node) {
       if (n.nodeType === Node.TEXT_NODE) {
         total += nodeOffset
+      } else if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+        const items = Array.from(n.childNodes)
+        for (let i = 0; i < nodeOffset && i < items.length; i++) total += (i > 0 ? 1 : 0) + lengthOf(items[i])
       } else {
         const children = Array.from(n.childNodes)
         for (let i = 0; i < nodeOffset && i < children.length; i++) total += lengthOf(children[i])
@@ -400,6 +449,14 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
     }
     if ((n as Element).tagName === 'BR') {
       total += 1
+      return false
+    }
+    if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+      const items = Array.from(n.childNodes)
+      for (let i = 0; i < items.length; i++) {
+        if (i > 0) total += 1
+        if (walk(items[i])) return true
+      }
       return false
     }
     for (const child of Array.from(n.childNodes)) {
@@ -983,6 +1040,249 @@ function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
   range.insertNode(wrapper)
 }
 
+// 箇条書き（「- 」）のライブプレビュー（2026-09-25、「入力している時点で送信後の表示を反映させたい
+// （記号なしで）」という要望を受けて新規追加）。引用・コードブロックと違い、箇条書きは送信後に
+// 行ごとに実際の黒丸（<li>）が付くため、「1コンテナに複数行の生テキスト」というモデルでは
+// 行ごとの黒丸を表現できない。そのため箇条書きだけは「1行=1つのdata-block-format="list-item"
+// 要素」という別モデルを採る（data-block-format="list"の親要素が複数のlist-itemを子に持つ）。
+// 項目と項目の間は本ファイル前方のdomToPlainText/resolveOffset/domPositionToOffset/domToMarkdown
+// で「原子的な1文字ぶんの仮想区切り」として扱う（絵文字img・マーカーspanと同じパターンを
+// コンテナレベルに適用しただけ）。黒丸はCSSの::before疑似要素で付ける（display:list-item は
+// マーカーボックスがRange/Selection APIの挙動に干渉するリスクがあるため避けた。疑似要素は
+// DOM/Rangeツリーに一切含まれないため安全）。
+const LIST_CLASSNAME = 'my-1 space-y-0.5'
+const LIST_ITEM_CLASSNAME = "relative pl-5 before:absolute before:left-1.5 before:content-['•'] before:text-ink-subtle"
+const BULLET_LINE_REGEX = /^- (.+)$/
+
+interface BulletRange {
+  start: number
+  end: number
+}
+
+/** 連続する「- 」行を1つの範囲としてまとめて返す（collectQuoteRangesと全く同じアルゴリズム）。 */
+function collectBulletRanges(text: string, excludeRanges: { start: number; end: number }[]): BulletRange[] {
+  const ranges: BulletRange[] = []
+  let lineStart = 0
+  let blockStart: number | null = null
+  const closeBlock = (lineEndExclusive: number) => {
+    if (blockStart === null) return
+    const start = blockStart
+    const end = lineEndExclusive
+    blockStart = null
+    if (!excludeRanges.some((r) => start < r.end && r.start < end)) {
+      ranges.push({ start, end })
+    }
+  }
+  for (const line of text.split('\n')) {
+    if (BULLET_LINE_REGEX.test(line)) {
+      if (blockStart === null) blockStart = lineStart
+    } else {
+      closeBlock(lineStart === 0 ? 0 : lineStart - 1)
+    }
+    lineStart += line.length + 1
+  }
+  closeBlock(text.length)
+  return ranges
+}
+
+function buildListItemElement(content: Node): HTMLDivElement {
+  const item = document.createElement('div')
+  item.setAttribute(BLOCK_FORMAT_ATTR, 'list-item')
+  item.className = LIST_ITEM_CLASSNAME
+  item.appendChild(content)
+  return item
+}
+
+/** [start,end)の範囲（複数行）を、行ごとに独立したlist-item要素へ詰め替えた
+ * data-block-format="list"でまとめて置き換える。太字等が既に実要素化済みでも（行の境界を
+ * またがない限り）正しく保持される。ボタン駆動（Composer.tsxのinsertBulletList）・手打ち
+ * 検出（wrapBulletRange）の両方から使う共通の構築ロジック。 */
+export function convertLinesToListItems(root: HTMLElement, start: number, end: number): void {
+  // start===endは「何も入力されていない行」で箇条書きボタンを押した場合（ユーザーからの要望
+  // 「何も入力されていない行で箇条書きボタンを押しても箇条書きのマークが出てくるようにしたい」、
+  // insertQuoteの空行対応と同じ）に、cursor位置のRangeをそのまま切り出す（空のfragment→
+  // domToPlainTextが""→split('\n')が['']になり、下のループが自然に1つの空項目を作る）。
+  // 呼び出し元（wrapBulletRange）は常にstart<endの非空範囲しか渡さないため、この経路が
+  // 実際に使われるのはComposer.tsxのボタン駆動の空行ケースのみ。
+  if (start > end) return
+  const startPos = resolveOffset(root, start)
+  const endPos = resolveOffset(root, end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const fragment = range.extractContents()
+
+  const lineTexts = domToPlainText(fragment).split('\n')
+  const lineStarts: number[] = []
+  let pos = 0
+  for (const line of lineTexts) {
+    lineStarts.push(pos)
+    pos += line.length + 1
+  }
+
+  // 末尾の行から処理する（先に処理した行より後方のオフセットを崩さないため、
+  // consumeRawMarkdownSyntax等と同じ理由）。各行の直後に残る区切りの"\n"は、要素境界が
+  // その役割を引き継ぐため不要——行の中身を切り出す前に先に取り除く（中身を切り出した後だと
+  // 残りのfragmentが縮んでオフセットがずれるため、順序が重要）。
+  const items: HTMLDivElement[] = []
+  for (let i = lineTexts.length - 1; i >= 0; i--) {
+    const lineStart = lineStarts[i]
+    const lineEnd = lineStart + lineTexts[i].length
+    if (i < lineTexts.length - 1) {
+      deleteRangeInContainer(fragment, lineEnd, lineEnd + 1)
+    }
+    const lStartPos = resolveOffset(fragment, lineStart)
+    const lEndPos = resolveOffset(fragment, lineEnd)
+    const lineRange = document.createRange()
+    lineRange.setStart(lStartPos.node, lStartPos.offset)
+    lineRange.setEnd(lEndPos.node, lEndPos.offset)
+    items.unshift(buildListItemElement(lineRange.extractContents()))
+  }
+
+  const listEl = document.createElement('div')
+  listEl.setAttribute(BLOCK_FORMAT_ATTR, 'list')
+  listEl.className = LIST_CLASSNAME
+  for (const item of items) listEl.appendChild(item)
+  range.insertNode(listEl)
+}
+
+/** 検出済みの箇条書き範囲をconvertLinesToListItemsで構築する。syncLiveFormattingの
+ * 手打ち検出パイプラインから使う（collectBulletRanges参照）。 */
+/** 検出済みの箇条書き範囲の各行頭の「- 」を削除してからconvertLinesToListItemsで構築する
+ * （wrapQuoteRangeの「> 」削除と全く同じロジック——降順で処理しないと、先に削除した行より
+ * 後方のオフセットが崩れる）。convertLinesToListItems自体はボタン駆動（マーカー文字を
+ * 経由しない）とこの手打ち検出の両方から共有されるため、マーカー削除はこの関数の責務にする。 */
+function wrapBulletRange(root: HTMLElement, bulletRange: BulletRange): void {
+  const { start, end } = bulletRange
+  if (start >= end) return
+  const lineTexts = domToPlainText(root).slice(start, end).split('\n')
+  const markerOffsets: number[] = []
+  let pos = start
+  for (const line of lineTexts) {
+    markerOffsets.push(pos)
+    pos += line.length + 1
+  }
+  for (const off of [...markerOffsets].reverse()) deleteRangeInContainer(root, off, off + 2)
+  convertLinesToListItems(root, start, end - markerOffsets.length * 2)
+}
+
+/** data-block-format="list"要素を解除し、各項目の中身を実在の"\n"区切りの生テキストへ戻す
+ * （convertLinesToListItemsの逆操作）。Composer.tsxのinsertBulletList（既存の箇条書きを
+ * 解除する方向）・handleBackspaceAtListItemStart（先頭項目でのBackspace脱出）から使う。 */
+export function ungroupListElement(listEl: HTMLElement): void {
+  const parent = listEl.parentNode
+  if (!parent) return
+  const items = Array.from(listEl.children)
+  const frag = document.createDocumentFragment()
+  items.forEach((item, i) => {
+    if (i > 0) frag.appendChild(document.createTextNode('\n'))
+    while (item.firstChild) frag.appendChild(item.firstChild)
+  })
+  parent.insertBefore(frag, listEl)
+  parent.removeChild(listEl)
+}
+
+/** list-item内でEnterを押した結果を処理する。Composer.tsxのhandleKeyDownが、cursorが
+ * getBlockFormatAtで'list-item'と判定された場合にのみ呼ぶ。項目が空ならリストを抜ける
+ * （Notion・GitHub等と同じ、既存の引用の「空行で抜ける」と同じ考え方）。空でなければ
+ * カーソル以降の既入力内容を新しい項目として直後に挿入する（前回セッションの
+ * toggleFormatAtCursorDomの「内側でない書式解除」で使った“末尾を切り出して兄弟として
+ * 挿入”と同じパターンの再利用）。
+ *
+ * バグ修正（実機Playwright検証で発見）: 分割で新しく作った項目にはCARET_MARKER（下記参照）が
+ * 実在するが、Enterキーはネイティブのinputイベントを経由しない（handleKeyDownが自前で
+ * preventDefaultして処理する）ため、通常なら次の入力のたびにhandleInputの冒頭が片付ける
+ * CARET_MARKERがEnterキー連打では片付かないまま残ってしまい、続けてEnterを押すと「項目の
+ * 中身はCARET_MARKERの1文字だけ＝空ではない」と誤判定されてしまっていた（空行のはずなのに
+ * 分割が続いてしまう）。呼び出しの冒頭で明示的に片付け、その後の絶対オフセットも
+ * （マーカー除去で1文字ぶんずれるため）ライブなSelectionから読み直す。 */
+export function handleEnterInListItem(root: HTMLElement, itemEl: HTMLElement, cursor: number): void {
+  removeCaretMarkerFromDom(root)
+  cursor = getSelectionOffsets(root)?.start ?? cursor
+  const itemRange = computeElementOffset(root, itemEl)
+  const listEl = itemEl.parentElement as HTMLElement
+
+  if (itemRange.start === itemRange.end) {
+    itemEl.remove()
+    if (listEl.children.length === 0) {
+      const parent = listEl.parentNode as Node
+      const anchor = listEl.nextSibling
+      listEl.remove()
+      const marker = document.createTextNode('\n')
+      parent.insertBefore(marker, anchor)
+      const range = document.createRange()
+      range.setStart(marker, marker.length)
+      range.collapse(true)
+      const sel = window.getSelection()
+      if (sel) {
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
+    } else {
+      insertTextAfterNode(listEl, '\n')
+    }
+    // 引用の空行脱出（Composer.tsxのhandleKeyDown）と全く同じ理由: 末尾の孤立した改行の
+    // 直後にブラウザが正しくキャレットを計測できない既知の問題への対処
+    const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
+    ensureTrailingNewlineCaretMarker(root)
+    setSelectionOffsets(root, pos)
+    return
+  }
+
+  const startPos = resolveOffset(root, cursor)
+  const endPos = resolveOffset(root, itemRange.end)
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  const tail = range.extractContents()
+  const newItem = buildListItemElement(tail)
+  listEl.insertBefore(newItem, itemEl.nextSibling)
+  // バグ修正（実機Playwright検証で発見）: cursor（分割前の絶対オフセット、＝新しい項目の
+  // 先頭と数値上は同じ値）をそのままsetSelectionOffsetsへ渡すと、resolveOffsetが「その位置は
+  // 直前の項目の末尾でも表現できる」という既知のバイアス（ties resolve to the end of the
+  // preceding content、toggleFormatAtCursorDomのコメント参照）により、新しい項目の内側では
+  // なく直前の項目の内側に留まってしまう——新しい項目の要素参照を直接使ってSelectionを
+  // 明示的に置いても、この直後にComposer.tsxのafterMutateが呼ぶsyncLiveFormatting自身が
+  // 選択範囲を数値オフセットで保存・復元し直すため、同じ問題がもう一度再発する（restoreした
+  // 瞬間にresolveOffsetの同じバイアスを踏む）。toggleFormatAtCursorDom・restoreSelectionFromMarkers
+  // と同じ対処として、新しい項目の先頭にCARET_MARKER（ゼロ幅スペース）を実在させ、その直後へ
+  // Selectionを置く（中身が空でない実在のテキストノードとして退出点を確実に生き残らせる）。
+  const marker = document.createTextNode(CARET_MARKER)
+  newItem.insertBefore(marker, newItem.firstChild)
+  const newRange = document.createRange()
+  newRange.setStart(marker, marker.length)
+  newRange.collapse(true)
+  const sel = window.getSelection()
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(newRange)
+  }
+}
+
+/** list-itemの絶対オフセット0（項目の先頭）でBackspaceを押した結果を処理する。
+ * Composer.tsxのhandleKeyDownが、cursorがちょうど項目の先頭と一致する場合にのみ呼ぶ
+ * （それ以外のBackspaceは今まで通りネイティブ処理に任せ、一切介入しない）。項目またぎの
+ * ブロック要素の結合はブラウザ間の挙動が大きく異なるため、Enterと同じ理由で自前実装する
+ * （ファイル冒頭の設計判断コメント参照）。直前に項目があれば現項目の中身を直前の項目の
+ * 末尾へ移動して現項目を削除する。直前の項目が無い（先頭かつ唯一の項目）ならリストごと
+ * 平文へ戻す。 */
+export function handleBackspaceAtListItemStart(root: HTMLElement, itemEl: HTMLElement): void {
+  const listEl = itemEl.parentElement as HTMLElement
+  const prevItem = itemEl.previousElementSibling as HTMLElement | null
+
+  if (!prevItem) {
+    const cursor = getSelectionOffsets(root)?.start
+    ungroupListElement(listEl)
+    if (cursor !== undefined) setSelectionOffsets(root, cursor)
+    return
+  }
+
+  const mergeAt = computeElementOffset(root, prevItem).end
+  while (itemEl.firstChild) prevItem.appendChild(itemEl.firstChild)
+  itemEl.remove()
+  setSelectionOffsets(root, mergeAt)
+}
+
 /** 太字・斜体・下線・取り消し線の実要素（TOGGLE_FORMAT_ELEMENT_ATTR）のうち、中身が空文字に
  * なったもの（Backspace/Deleteで最後の1文字を消しきった等）を取り除く。ブラウザはBackspace等で
  * 最後の文字を消しても空の<strong></strong>を自動では片付けないため、消さずに放置すると
@@ -1071,10 +1371,21 @@ export function syncLiveFormatting(root: HTMLElement): void {
   // consumeRawMarkdownSyntaxからは保護されている）で、正しく検出できる。
   const codeBlockRanges = findCodeBlockProtectedRanges(text)
 
-  // 引用（行頭「> 」の連続行）を処理する。行単位のブロック構造のため、文字位置ベースの
-  // consumeRawMarkdownSyntaxとは別立てで扱う。
+  // 引用（行頭「> 」の連続行）・箇条書き（行頭「- 」の連続行）を処理する。行単位のブロック
+  // 構造のため、文字位置ベースのconsumeRawMarkdownSyntaxとは別立てで扱う。1行が両方の
+  // プレフィックスに同時にマッチすることは無いため範囲は重ならないが、どちらも「マーカーを
+  // 消して文字数を縮める」処理のため、開始位置の降順（後の範囲から）でまとめて処理しないと、
+  // 先に処理した範囲より前方のオフセットが崩れる（consumeRawMarkdownSyntax等と同じ理由）。
   const quoteRanges = collectQuoteRanges(text, codeBlockRanges)
-  for (const q of quoteRanges) wrapQuoteRange(root, q)
+  const bulletRanges = collectBulletRanges(text, codeBlockRanges)
+  const blockRanges = [
+    ...quoteRanges.map((r) => ({ ...r, kind: 'quote' as const })),
+    ...bulletRanges.map((r) => ({ ...r, kind: 'list' as const })),
+  ].sort((a, b) => b.start - a.start)
+  for (const r of blockRanges) {
+    if (r.kind === 'quote') wrapQuoteRange(root, r)
+    else wrapBulletRange(root, r)
+  }
 
   // コードブロックは最後に処理する（引用の検出がまだ生の```マーカーを必要とするため）。
   consumeCodeBlockMatches(root)
@@ -1091,7 +1402,7 @@ export function syncLiveFormatting(root: HTMLElement): void {
 // 書式トグルボタン（太字・斜体・下線・取り消し線、ユーザーからの明示的な要望）。以下はDOM
 // 構造を直接組み立てる関数群（本ファイル前方の書式セクションの冒頭コメント参照）。
 
-function computeElementOffset(root: HTMLElement, el: Element): { start: number; end: number } {
+export function computeElementOffset(root: HTMLElement, el: Element): { start: number; end: number } {
   const parent = el.parentNode as Node
   const idx = indexOfChild(el)
   const start = domPositionToOffset(root, parent, idx)
