@@ -31,6 +31,7 @@ import {
   toggleFormatOnSelectionDom,
   isCursorInsideActiveFormats,
   getBlockFormatAt,
+  getInlineCodeElementAt,
   convertLinesToListItems,
   ungroupListElement,
   handleEnterInListItem,
@@ -1124,6 +1125,34 @@ export default function Composer({
             ensureTrailingNewlineCaretMarker(root)
             setSelectionOffsets(root, pos)
           }
+          afterMutate()
+          return
+        }
+        // バグ修正（ユーザーからの報告「コード表記で入力しているときに、途中でEnterを押して
+        // 改行してから（2行以上にしてから）送信すると、チャンネル会話上でコード表示ではなく
+        // なってしまう」）: インラインコード（`` ` ``、TOGGLE_FORMAT_ELEMENT_ATTR="code"）は
+        // list-item/quoteと違いgetBlockFormatAtの対象外（BLOCK_FORMAT_ATTRではない）のため、
+        // 何もしなければ下のジェネリックな分岐がそのままインラインコード要素の中へ生の"\n"を
+        // 挿入してしまっていた。送信Markdownは改行入りの`` `...\n...` ``になり、コードブロック
+        // （```の対）にもインラインコード（改行を含められない単一`` ` ``、MessageList.tsxの
+        // INLINE_CODE_REGEX参照）にも一致せず、生の記号付きプレーンテキストとして表示されて
+        // いた。wrapCode（選択範囲に改行を含む場合の自動切り替え）と同じ考え方で、カーソルが
+        // インラインコードの内側にいる状態でEnterが押されたらコードブロックへ自動アップグレード
+        // する。
+        const inlineCode = getInlineCodeElementAt(root, cursor)
+        if (inlineCode) {
+          const codeRange = computeElementOffset(root, inlineCode)
+          const parent = inlineCode.parentNode
+          if (parent) {
+            while (inlineCode.firstChild) parent.insertBefore(inlineCode.firstChild, inlineCode)
+            parent.removeChild(inlineCode)
+            root.normalize()
+          }
+          setActiveFormats((prev) => prev.filter((f) => f !== 'code'))
+          const pos = replaceRangeWithText(root, cursor, cursor, '\n')
+          wrapRangeAsCodeBlock(root, codeRange.start, codeRange.end + 1)
+          ensureTrailingNewlineCaretMarker(root)
+          setSelectionOffsets(root, pos)
           afterMutate()
           return
         }

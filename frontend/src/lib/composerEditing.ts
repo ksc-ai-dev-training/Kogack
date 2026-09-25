@@ -826,6 +826,29 @@ export function getBlockFormatAt(root: HTMLElement, cursor: number): { el: HTMLE
   return null
 }
 
+/** カーソル位置（プレーンテキストオフセット）を包むインラインコード実要素
+ * （TOGGLE_FORMAT_ELEMENT_ATTR="code"）があれば返す。太字・斜体・下線・取り消し線と違い
+ * インラインコードだけは改行を含められない（MessageList.tsxのINLINE_CODE_REGEXが
+ * `` `[^`\n]+` ``で改行を除外しているため）——バグ修正（ユーザーからの報告「コード表記で
+ * 入力しているときに、途中でEnterを押して改行してから送信すると、コード表示ではなくなる」）:
+ * Composer.tsxのEnterハンドラは従来、カーソルがインラインコードの内側にいるかどうかを一切
+ * 見ておらず、生の"\n"をそのままインラインコード要素の中へ挿入していた。送信時のMarkdownは
+ * 改行を含む`` `...\n...` ``になり、送信側・受信側どちらの正規表現にも一致せず（コード
+ * ブロックの```でもインラインコードの単一`` ` ``でもない）、生の記号付きプレーンテキストとして
+ * 表示されてしまっていた。Enterハンドラがこの関数でカーソル位置を判定し、該当すればコード
+ * ブロックへ自動アップグレードする（Composer.tsxのwrapCodeが選択範囲に改行を含む場合と
+ * 同じ「GitHubのコメント欄と同じ挙動」の考え方を、ボタンではなく生タイプ時にも広げたもの）。 */
+export function getInlineCodeElementAt(root: HTMLElement, cursor: number): HTMLElement | null {
+  const pos = resolveOffset(root, cursor)
+  let node: HTMLElement | null =
+    pos.node.nodeType === Node.TEXT_NODE ? ((pos.node as Text).parentElement as HTMLElement | null) : (pos.node as HTMLElement)
+  while (node && node !== root) {
+    if (node.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR) === 'code') return node
+    node = node.parentElement
+  }
+  return null
+}
+
 // MessageList.tsxのBOLD_REGEX/ITALIC_REGEX/UNDERLINE_REGEX/STRIKE_REGEXと同じ定義（1文字以上
 // 必須）。手打ちの生Markdown（consumeRawMarkdownSyntax）を検出するためのもので、送信後の
 // 実際の解釈と完全に一致させる（かつてのLIVE_*_REGEXは「ボタンで開いた空のマーカー対」を
