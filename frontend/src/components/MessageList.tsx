@@ -1373,9 +1373,61 @@ export function MessageContextMenu({
 // ホバー時のカスタムツールチップ（黒い吹き出し）で見られるようにした（ユーザーからの明示的な
 // 要望「黒い吹き出しで文字も大きくして見やすいようにしたい」、2026-09-11。従来はブラウザ標準の
 // title属性を使っており、文字が小さく表示までの遅延・見た目の一貫性がOS/ブラウザ依存だった）。
-// `group/reaction`（ボタン自身、発言行全体が持つ無名groupと衝突しないよう名前付き。下記コメント
-// 参照）＋`invisible/opacity-0`→`group-hover/reaction:visible/opacity-100`のCSSのみの実装
-// （JS側の開閉状態管理は不要）。`absolute`配置のため通常のレイアウトフローには影響しない
+// 吹き出しの想定最大幅（実際の描画は`w-max max-w-[TOOLTIP_MAX_WIDTH]px`で内容に応じて縮む。
+// 画面端クランプ計算にはこの最大値を使う＝内容が短い時は余裕を持ってクランプされるだけで、
+// はみ出しは発生しない）
+const REACTION_TOOLTIP_MAX_WIDTH = 220
+
+// リアクションピルにカーソルを合わせたときの、誰がリアクションしたか＋絵文字の拡大図を出す吹き出し。
+// バグ修正（ユーザーからの報告「吹き出しがサイドバーにかぶさって見えなくなる」、2026-09-25）:
+// 従来は発言行の中に`absolute`配置していたため、EmojiGridPopover・ProfileCardと同じ理由
+// （会話ログのoverflow-x-hidden/overflow-y-autoスクロール領域でクリップされる）でサイドバー際の
+// ピルの吹き出しが見えなくなっていた。同じ考え方で`document.bodyへポータル配置し、anchor
+// （ホバーしたボタンのgetBoundingClientRect）を基準にposition: fixedで配置」する方式に変更した
+// （常にピルの上に開くため上下判定は不要。`bottom`基準で配置すれば高さ未確定でも上方向に伸びる）
+function ReactionTooltip({
+  anchor,
+  emoji,
+  customUrl,
+  userNames,
+}: {
+  anchor: DOMRect
+  emoji: string
+  customUrl: string | null
+  userNames: string[]
+}) {
+  // UI全体ズーム（lib/uiZoom.ts）分の補正はEmojiGridPopover・ProfileCardと同じ理屈
+  // （anchorは常に画面上の実座標を返す一方、このポータルもズーム済みsubtreeの子孫のため
+  // 描画時にもう一度scale倍される）
+  const scale = currentUiZoomScale()
+  const marginPx = 8 * scale
+  const edgePaddingPx = 8 * scale
+  const maxWidthPx = REACTION_TOOLTIP_MAX_WIDTH * scale
+  const centerOnScreen = anchor.left + anchor.width / 2
+  const leftOnScreen = Math.min(
+    Math.max(centerOnScreen - maxWidthPx / 2, edgePaddingPx),
+    window.innerWidth - maxWidthPx - edgePaddingPx,
+  )
+  const style: CSSProperties = {
+    position: 'fixed',
+    left: leftOnScreen / scale,
+    bottom: (window.innerHeight - anchor.top + marginPx) / scale,
+  }
+  return createPortal(
+    <span
+      role="tooltip"
+      style={style}
+      className="pointer-events-none z-50 flex w-max max-w-[220px] flex-col items-center gap-1 whitespace-normal break-words rounded-lg bg-ink px-2.5 py-1.5 text-center text-[13px] font-medium leading-snug text-white shadow-[0_8px_20px_rgba(16,24,40,0.25)]"
+    >
+      <span className="flex h-11 w-11 items-center justify-center rounded-md bg-white">
+        {customUrl ? <img src={customUrl} alt={emoji} className="h-8 w-8 object-contain" /> : <span className="text-3xl leading-none">{emoji}</span>}
+      </span>
+      <span>{userNames.join('、')}</span>
+    </span>,
+    document.body,
+  )
+}
+
 export function ReactionPills({
   reactions,
   onToggle,
@@ -1386,7 +1438,9 @@ export function ReactionPills({
   // カスタム絵文字（2026-09-17）はr.emojiが`:name:`形式のときのみ画像として描画し、それ以外
   // （Unicode絵文字・未知のショートコード）は従来どおり文字列のまま表示する
   const { customEmoji } = useCustomEmoji()
+  const [hovered, setHovered] = useState<{ emoji: string; anchor: DOMRect } | null>(null)
   if (!reactions || reactions.length === 0) return null
+  const hoveredReaction = hovered ? reactions.find((r) => r.emoji === hovered.emoji) : undefined
   return (
     <div className="mt-1.5 flex flex-wrap gap-1">
       {reactions.map((r) => {
@@ -1396,20 +1450,13 @@ export function ReactionPills({
           key={r.emoji}
           type="button"
           onClick={() => onToggle(r.emoji)}
+          onMouseEnter={(e) => setHovered({ emoji: r.emoji, anchor: e.currentTarget.getBoundingClientRect() })}
+          onMouseLeave={() => setHovered((h) => (h?.emoji === r.emoji ? null : h))}
           // ホバーで少し拡大・クリック中は少し縮小するマイクロインタラクション
           // （ユーザーからの明示的な要望「カーソルを合わせると少しだけ枠が大きくなる」
           // 「クリックしたら一瞬小さくなってクリックした感を出す」）。active:はマウスの
           // 押下中〜離すまでの間だけ適用されるため、追加のstate管理無しで「一瞬」の縮小を表現できる
-          //
-          // バグ修正（ユーザーからの報告「発言にカーソルを合わせるとすべてのスタンプから吹き出しが
-          // 出てしまう」、2026-09-11）: このボタンの外側（発言行全体）が既にホバー時アクションバー
-          // 表示用の無名`group`を持っているため、ここでも無名`group`を使うと、TailwindのCSSセレクタ
-          // （`.group:hover .group-hover\:visible`）が「入れ子の中で一番近い group」ではなく
-          // 「祖先のどこかにある.groupがホバーされているか」を見る仕様上、発言行全体をホバーした
-          // 時点で全ピルのツールチップが同時に反応してしまっていた。`group/reaction`という名前付き
-          // groupにし、対応するツールチップ側も`group-hover/reaction:`で同じ名前を指定することで、
-          // 「このピル自身がホバーされているか」だけに判定を限定した
-          className={`group/reaction relative flex scale-100 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] transition-transform duration-150 hover:scale-110 active:scale-90 ${
+          className={`relative flex scale-100 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] transition-transform duration-150 hover:scale-110 active:scale-90 ${
             r.reacted_by_me
               ? 'border-accent-600 bg-accent-50 text-accent-700'
               : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-subtle'
@@ -1417,18 +1464,17 @@ export function ReactionPills({
         >
           {customUrl ? <img src={customUrl} alt={r.emoji} className="h-3.5 w-3.5 object-contain" /> : <span>{r.emoji}</span>}
           <span className="text-[11px] font-semibold">{r.count}</span>
-          <span
-            role="tooltip"
-            className="pointer-events-none invisible absolute bottom-full left-1/2 z-20 mb-2 flex w-max max-w-[220px] -translate-x-1/2 flex-col items-center gap-1 whitespace-normal break-words rounded-lg bg-ink px-2.5 py-1.5 text-center text-[13px] font-medium leading-snug text-white opacity-0 shadow-[0_8px_20px_rgba(16,24,40,0.25)] transition-opacity duration-150 group-hover/reaction:visible group-hover/reaction:opacity-100 after:absolute after:left-1/2 after:top-full after:-ml-1 after:border-4 after:border-transparent after:border-t-ink"
-          >
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-white">
-              {customUrl ? <img src={customUrl} alt={r.emoji} className="h-6 w-6 object-contain" /> : <span className="text-2xl leading-none">{r.emoji}</span>}
-            </span>
-            <span>{r.user_names.join('、')}</span>
-          </span>
         </button>
         )
       })}
+      {hovered && hoveredReaction && (
+        <ReactionTooltip
+          anchor={hovered.anchor}
+          emoji={hoveredReaction.emoji}
+          customUrl={/^:[a-zA-Z0-9_+-]{2,24}:$/.test(hoveredReaction.emoji) ? findCustomEmojiUrl(hoveredReaction.emoji, customEmoji) : null}
+          userNames={hoveredReaction.user_names}
+        />
+      )}
     </div>
   )
 }
