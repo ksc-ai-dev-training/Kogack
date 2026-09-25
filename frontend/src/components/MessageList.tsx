@@ -607,13 +607,30 @@ export function renderMessageBody(
     splitLineBlocks(seg.content).forEach((ls, lsIdx) => {
       if (ls.type === 'list') {
         nodes.push(
-          <ul key={`list-${segIdx}-${lsIdx}`} className="my-1 list-disc space-y-0.5 pl-5">
+          <div key={`list-${segIdx}-${lsIdx}`} className="my-1 space-y-0.5">
             {ls.items.map((item, ii) => (
-              <li key={ii}>
+              // バグ修正（ユーザーからの報告「箇条書きの発言をコピー＆ペーストすると黒丸（●）
+              // ではなく-になってしまう」）: 従来は<ul class="list-disc"><li>で、黒丸自体は
+              // ブラウザのCSS（list-style）が描くマーカーであり実際のDOMテキストではなかった。
+              // コピーしたときのプレーンテキストにはこのマーカーが一切含まれず（実機検証で
+              // 確認済み）、貼り付け先（Slack・Word等、<li>をMarkdown風の"- "へ変換する
+              // アプリが多い）側の変換に委ねる形になっていた。黒丸の文字（•）自体を実際の
+              // DOMテキストとして描画すれば、コピー時のプレーンテキストにもそのまま含まれる
+              // （投稿欄の箇条書きボタンのアイコンと同じ「•」を使い、見た目の統一感も保つ）。
+              // display:flexで黒丸とテキストを別のspanに分けると、選択範囲をコピーした際に
+              // ブラウザがflexの子要素ごとに改行を挟んでしまい（実機検証で確認、「•」と
+              // 本文が別々の行になる）、結局コピー結果が崩れることが分かったため、flexは使わず
+              // 1つのブロック内の地続きのインライン内容として描画し、text-indent（負の値）+
+              // padding-leftの「ぶら下げインデント」で見た目だけを箇条書き風に整える
+              // （本文が折り返した2行目以降は黒丸の位置ではなくpadding-leftの位置に揃う）。
+              <div key={ii} className="indent-[-1.15em] pl-[1.15em]">
+                <span className="text-ink-subtle" aria-hidden="true">
+                  •{' '}
+                </span>
                 {renderInlineSegment(item, mentionDefs, usedMentionNeedles, aiPersonaName, `${segIdx}-${lsIdx}-li${ii}`, customEmoji, jumbo)}
-              </li>
+              </div>
             ))}
-          </ul>,
+          </div>,
         )
       } else if (ls.type === 'quote') {
         nodes.push(
