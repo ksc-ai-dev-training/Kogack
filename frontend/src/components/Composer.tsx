@@ -35,6 +35,7 @@ import {
   focusEmptyCodeBlock,
   getInlineCodeElementAt,
   convertLinesToListItems,
+  convertLinesToQuote,
   ungroupListElement,
   handleEnterInListItem,
   handleBackspaceAtListItemStart,
@@ -949,8 +950,12 @@ export default function Composer({
   // なったため、「外す」方向はテキストの「> 」プレフィックス判定（変換後は既に存在しない）ではなく
   // getBlockFormatAtでカーソルが既存の<blockquote>の内側かどうかを直接見て判定する。内側なら
   // ブロックごと解除（unwrapするだけ——外側の"\n"境界には触れないため前後の行は影響を受けない）。
-  // 「付ける」方向は従来どおり行頭に「> 」をテキストとして挿入し、直後のsyncLiveFormattingの
-  // 自動検出（手打ちと同じ経路）に変換を任せる。
+  // 「付ける」方向は、以前は行頭に「> 」をテキストとして挿入しsyncLiveFormattingの自動検出
+  // （手打ちと同じ経路）に変換を委ねていたが、その経路は空行で「> 」が実在の文字として残るだけで
+  // 引用表示に変換されなかった（QUOTE_LINE_REGEXが「> 」の後に1文字以上を要求するため）。
+  // ユーザーからの要望「引用ボタンを押した時点で引用の表示が出るようにしたい」を受け、
+  // insertBulletListと同じ考え方でconvertLinesToQuoteに直接DOM構築を任せる（空行でも即座に
+  // 空のblockquoteを作る）。
   const insertQuote = () => {
     const root = editorRef.current
     if (!root) return
@@ -977,13 +982,11 @@ export default function Composer({
     const lineStart = text.lastIndexOf('\n', start - 1) + 1
     const nextNewline = text.indexOf('\n', end)
     const lineEnd = nextNewline === -1 ? text.length : nextNewline
-    const lines = text.slice(lineStart, lineEnd).split('\n')
-    const nextLines = lines.map((l) => {
-      if (l.trim() === '') return lines.length === 1 ? '> ' : l
-      return l.startsWith('> ') ? l : `> ${l}`
-    })
-    const nextBlock = nextLines.join('\n')
-    replaceRangeWithText(root, lineStart, lineEnd, nextBlock)
+    convertLinesToQuote(root, lineStart, lineEnd)
+    // insertBulletListと同じ理由: start<endの非空行はconvertLinesToQuoteがマーカー文字を
+    // 経由しないため変換前後で文字数が変わらず、start/endの数値をそのまま使い回せる
+    // （空行のケースはconvertLinesToQuote内のCARET_MARKER処理に任せる）。
+    if (lineStart !== lineEnd) setSelectionOffsets(root, start, end)
     setPickerQuery(null)
     afterMutate()
   }

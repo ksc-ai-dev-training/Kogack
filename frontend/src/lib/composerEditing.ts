@@ -1175,14 +1175,14 @@ function deleteRangeInContainer(container: Node, start: number, end: number): vo
   range.deleteContents()
 }
 
-/** 引用範囲を<blockquote data-block-format="quote">で包む。各行の「> 」マーカーは（太字等と
- * 同じく）隠すのではなく削除する。太字・インラインコード等はこの関数が呼ばれる時点で
- * （syncLiveFormattingの並び上）既にconsumeRawMarkdownSyntaxによって文書全体に対して実要素へ
- * 変換済みのため、ここで改めて検出する必要は無い（以前はapplyNestedFormatsで引用の中だけ
- * 別途コード検出をやり直していたが、その二度手間が不要になった）。 */
-function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
-  const { start, end } = quoteRange
-  if (start >= end) return
+/** [start,end)の範囲を<blockquote data-block-format="quote">で直接包む（マーカー文字「> 」の
+ * 存在を前提にしない）。Composer.tsxのinsertQuote（ボタン駆動）・wrapQuoteRange（手打ち検出）の
+ * 両方から使う共通の構築ロジック（convertLinesToListItemsと同じ役割分担）。 */
+export function convertLinesToQuote(root: HTMLElement, start: number, end: number): void {
+  // start===endは「何も入力されていない行」で引用ボタンを押した場合（ユーザーからの要望
+  // 「引用ボタンを押した時点で引用の表示が出るようにしたい」、convertLinesToListItemsの
+  // 空行対応と同じ）に、cursor位置のRangeをそのまま切り出して空のblockquoteを作る。
+  if (start > end) return
   const startPos = resolveOffset(root, start)
   const endPos = resolveOffset(root, end)
   const range = document.createRange()
@@ -1190,24 +1190,43 @@ function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
   range.setEnd(endPos.node, endPos.offset)
   const fragment = range.extractContents()
 
-  // fragmentは（collectQuoteRangesの定義上）「> 」で始まる行だけで構成されているはずなので、
-  // 各行の先頭2文字の位置を求めて削除する。降順（末尾の行から）で処理しないと、先に削除した
-  // 行より後方の行のオフセットが2文字ぶんずつ崩れる（consumeRawMarkdownSyntaxが生Markdownの
-  // マッチを開始位置の降順で処理しているのと全く同じ理由）。
-  const innerText = domToPlainText(fragment)
-  const markerOffsets: number[] = []
-  let pos = 0
-  for (const line of innerText.split('\n')) {
-    markerOffsets.push(pos)
-    pos += line.length + 1
-  }
-  for (const off of [...markerOffsets].reverse()) deleteRangeInContainer(fragment, off, off + 2)
-
   const wrapper = document.createElement('blockquote')
   wrapper.setAttribute(BLOCK_FORMAT_ATTR, 'quote')
   wrapper.className = QUOTE_BLOCKQUOTE_CLASSNAME
   wrapper.appendChild(fragment)
   range.insertNode(wrapper)
+
+  // convertLinesToListItemsの空項目キャレット処理と同じ理由（extractContents/insertNodeで
+  // 元のSelectionが道連れで無効化されるため、CARET_MARKERを実在させて明示的にキャレットを置く）。
+  if (start === end) {
+    const marker = document.createTextNode(CARET_MARKER)
+    wrapper.appendChild(marker)
+    const caretRange = document.createRange()
+    caretRange.setStart(marker, marker.length)
+    caretRange.collapse(true)
+    const sel = window.getSelection()
+    if (sel) {
+      sel.removeAllRanges()
+      sel.addRange(caretRange)
+    }
+  }
+}
+
+/** 検出済みの引用範囲（collectQuoteRanges）の各行頭の「> 」マーカーを削除してから
+ * convertLinesToQuoteで構築する（wrapBulletRangeの「- 」削除と全く同じロジック——降順で
+ * 処理しないと、先に削除した行より後方のオフセットが崩れる）。 */
+function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
+  const { start, end } = quoteRange
+  if (start >= end) return
+  const lineTexts = domToPlainText(root).slice(start, end).split('\n')
+  const markerOffsets: number[] = []
+  let pos = start
+  for (const line of lineTexts) {
+    markerOffsets.push(pos)
+    pos += line.length + 1
+  }
+  for (const off of [...markerOffsets].reverse()) deleteRangeInContainer(root, off, off + 2)
+  convertLinesToQuote(root, start, end - markerOffsets.length * 2)
 }
 
 // 箇条書き（「- 」）のライブプレビュー（2026-09-25、「入力している時点で送信後の表示を反映させたい
