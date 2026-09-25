@@ -35,6 +35,7 @@ import {
   getInlineCodeElementAt,
   convertLinesToListItems,
   convertLinesToQuote,
+  removeLineFromQuote,
   ungroupListElement,
   handleEnterInListItem,
   handleBackspaceAtListItemStart,
@@ -1153,6 +1154,32 @@ export default function Composer({
           handleBackspaceAtListItemStart(root, block.el)
           afterMutate()
           return
+        }
+      }
+    }
+    // 引用の行頭（絶対オフセットがその行の開始位置と一致する場合）でのDeleteは自前で処理する。
+    // ユーザーからの報告「引用タグ内の行の先頭でDeleteキーを押すと、その行が消えて一個上の行に
+    // 戻ってしまう。そうではなく、その行だけの引用タグを消すような動きにしてほしい」への対処
+    // （removeLineFromQuoteのコメント参照——ネイティブ処理に任せると境界タイのバイアスで区切りの
+    // "\n"ごと消えて上の行に吸収されてしまう）。Backspaceの箇条書き処理と同じくCARET_MARKERを
+    // 先に片付けてから判定する。
+    if (e.key === 'Delete') {
+      const root = editorRef.current
+      if (root) removeCaretMarkerFromDom(root)
+      const offs = root ? getSelectionOffsets(root) : null
+      if (root && offs && offs.start === offs.end) {
+        const block = getBlockFormatAt(root, offs.start)
+        if (block?.kind === 'quote') {
+          const text = domToPlainText(root)
+          const lineStart = text.lastIndexOf('\n', offs.start - 1) + 1
+          if (offs.start === lineStart) {
+            const nextNewlineIdx = text.indexOf('\n', offs.start)
+            const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
+            e.preventDefault()
+            removeLineFromQuote(root, block.el, lineStart, lineEnd)
+            afterMutate()
+            return
+          }
         }
       }
     }

@@ -1212,6 +1212,76 @@ export function convertLinesToQuote(root: HTMLElement, start: number, end: numbe
   }
 }
 
+/** カーソルが引用（<blockquote data-block-format="quote">）内のある行の先頭にあるときにDelete
+ * キーを押した場合の処理（Composer.tsxのhandleKeyDownから使う）。ユーザーからの報告「引用タグ
+ * 内の行の先頭でDeleteキーを押すと、その行が消えて一個上の行に戻ってしまう」への対処: 行の
+ * 先頭という位置はblockEl内部のテキストノード上では直前の行の末尾（＝区切りの実在する"\n"の
+ * 直前）と等価な境界にあたり、本ファイル各所で繰り返し扱っている「境界タイのバイアス」と同様の
+ * 理由でネイティブのDelete処理が区切りの"\n"自体を消してしまい、この行が上の行へ吸収されて
+ * いた。求められている挙動は「その行だけ引用を解除する」（前後に別の引用行が残っていれば
+ * それぞれ独立した<blockquote>として維持し、この行だけをプレーンテキストの1行として抜き出す）
+ * ため、ネイティブ処理に任せず直接DOM操作する。
+ *
+ * blockEl（引用全体）の中身は常に区切りの実在する"\n"で連結された複数行のプレーンな内容
+ * （wrapQuoteRange/convertLinesToQuote参照）なので、lineStart/lineEndをblockEl基準の相対
+ * オフセットへ変換し、対象行を境に「前半」「対象行」「後半」の3つへ分割する。前半・後半が
+ * 存在すればそれぞれ独立した<blockquote>として残し、対象行はプレーンテキスト（内部の書式
+ * 要素を含めてそのまま）として間（または前半・後半が無ければ元の位置そのもの）へ差し込む。
+ * 区切りの"\n"を「引用内部の1文字」から「兄弟ノードの1文字」へ役割を変えるだけで文字数の
+ * 総和自体は変化しないため、対象行の絶対オフセット（lineStart）はこの操作の前後で変わらず、
+ * そのままカーソル位置に使える。前半・後半のどちらも存在しない場合（引用がこの1行だけだった
+ * 場合）は自然に「blockEl全体を外す」動作に帰着する。 */
+export function removeLineFromQuote(root: HTMLElement, blockEl: HTMLElement, lineStart: number, lineEnd: number): void {
+  const { start: bStart } = computeElementOffset(root, blockEl)
+  const totalLen = textLength(blockEl)
+  const relLineStart = lineStart - bStart
+  const relLineEnd = lineEnd - bStart
+  const hasBefore = relLineStart > 0
+  const hasAfter = relLineEnd < totalLen
+
+  const parent = blockEl.parentNode
+  if (!parent) return
+  const referenceNode = blockEl.nextSibling
+
+  let afterBlockEl: HTMLElement | null = null
+  if (hasAfter) {
+    const startPos = resolveOffset(blockEl, relLineEnd + 1)
+    const endPos = resolveOffset(blockEl, totalLen)
+    const afterRange = document.createRange()
+    afterRange.setStart(startPos.node, startPos.offset)
+    afterRange.setEnd(endPos.node, endPos.offset)
+    const afterFragment = afterRange.extractContents()
+    deleteRangeInContainer(blockEl, relLineEnd, relLineEnd + 1)
+    afterBlockEl = document.createElement('blockquote')
+    afterBlockEl.setAttribute(BLOCK_FORMAT_ATTR, 'quote')
+    afterBlockEl.className = QUOTE_BLOCKQUOTE_CLASSNAME
+    afterBlockEl.appendChild(afterFragment)
+  }
+
+  const lineStartPos = resolveOffset(blockEl, relLineStart)
+  const lineEndPos = resolveOffset(blockEl, relLineEnd)
+  const lineRange = document.createRange()
+  lineRange.setStart(lineStartPos.node, lineStartPos.offset)
+  lineRange.setEnd(lineEndPos.node, lineEndPos.offset)
+  const lineFragment = lineRange.extractContents()
+
+  if (hasBefore) {
+    deleteRangeInContainer(blockEl, relLineStart - 1, relLineStart)
+  } else {
+    parent.removeChild(blockEl)
+  }
+
+  if (hasBefore) parent.insertBefore(document.createTextNode('\n'), referenceNode)
+  parent.insertBefore(lineFragment, referenceNode)
+  if (afterBlockEl) {
+    parent.insertBefore(document.createTextNode('\n'), referenceNode)
+    parent.insertBefore(afterBlockEl, referenceNode)
+  }
+
+  root.normalize()
+  setSelectionOffsets(root, lineStart)
+}
+
 /** 検出済みの引用範囲（collectQuoteRanges）の各行頭の「> 」マーカーを削除してから
  * convertLinesToQuoteで構築する（wrapBulletRangeの「- 」削除と全く同じロジック——降順で
  * 処理しないと、先に削除した行より後方のオフセットが崩れる）。 */
