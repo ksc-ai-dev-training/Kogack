@@ -805,6 +805,15 @@ export default function Composer({
     const nextNewline = text.indexOf('\n', end)
     const lineEnd = nextNewline === -1 ? text.length : nextNewline
     convertLinesToListItems(root, lineStart, lineEnd)
+    // バグ修正（ユーザーからの報告「箇条書きの記法ができなくなっている」）: convertLinesToListItems
+    // はrange.extractContents/insertNodeでDOMを組み替えるだけでSelectionには一切触れないため、
+    // 呼び出し元がここで明示的に置き直さないと、元のSelectionが道連れで無効化され、続けて
+    // 入力した文字がリストの外に入ってしまっていた（空行のケースはconvertLinesToListItems内の
+    // CARET_MARKER処理に任せる——start===endではボタン押下前後でオフセットが変わらないため、
+    // ここでも一応setSelectionOffsetsするが空要素内では効かず、内部のCARET_MARKER配置が優先される）。
+    // start<endの非空行は、この経路がマーカー文字を経由しないため変換前後で文字数が変わらず、
+    // start/endの数値をそのまま使い回せる。
+    if (lineStart !== lineEnd) setSelectionOffsets(root, start, end)
     setPickerQuery(null)
     afterMutate()
   }

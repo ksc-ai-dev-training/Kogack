@@ -1161,6 +1161,29 @@ export function convertLinesToListItems(root: HTMLElement, start: number, end: n
   listEl.className = LIST_CLASSNAME
   for (const item of items) listEl.appendChild(item)
   range.insertNode(listEl)
+
+  // バグ修正（ユーザーからの報告「箇条書きの記法ができなくなっている」、jsdomでの再現テストで
+  // 発見）: start===end（何も入力されていない行でボタンを押した場合）は唯一の項目が完全に
+  // 空になる。この関数はSelectionに一切触れないため、range.extractContents/insertNodeで
+  // 元の位置を指していたSelectionが道連れで無効化され、handleEnterInListItemの空項目分岐と
+  // 同じ「resolveOffsetの境界タイのバイアス」により、続けて入力した文字がこの空項目の内側
+  // ではなくリストの外（直前）へ入ってしまっていた。CARET_MARKER（ゼロ幅スペース）を空項目に
+  // 実在させ、その直後へ明示的にキャレットを置く（handleEnterInListItemと同じ手法）。
+  // start<end（非空行の変換、Composer.tsxのinsertBulletList）は呼び出し元がstart/end自体を
+  // そのままsetSelectionOffsetsへ渡せば正しく解決するため、ここでは何もしない。
+  if (start === end) {
+    const item = listEl.firstElementChild as HTMLElement
+    const marker = document.createTextNode(CARET_MARKER)
+    item.appendChild(marker)
+    const caretRange = document.createRange()
+    caretRange.setStart(marker, marker.length)
+    caretRange.collapse(true)
+    const sel = window.getSelection()
+    if (sel) {
+      sel.removeAllRanges()
+      sel.addRange(caretRange)
+    }
+  }
 }
 
 /** 検出済みの箇条書き範囲をconvertLinesToListItemsで構築する。syncLiveFormattingの
