@@ -1382,14 +1382,26 @@ export function ungroupListElement(listEl: HTMLElement): void {
  * Backspace/Deleteキーを押しても点を消せない」への対応）の両方から使う共通処理。呼び出し元は
  * itemElの中身が本当に空（CARET_MARKER除去済み）であることを保証してから呼ぶこと。リストの
  * 最後の項目がこれだけだった場合はリスト自体を消し、その場をプレーンな空行に置き換える。 */
-function exitEmptyListItem(root: HTMLElement, itemEl: HTMLElement): void {
+function exitEmptyListItem(itemEl: HTMLElement): void {
   const listEl = itemEl.parentElement as HTMLElement
   itemEl.remove()
   if (listEl.children.length === 0) {
+    // バグ修正（ユーザーからの報告「箇条書きの黒点を表示している行で何も入力せずEnterで
+    // 改行すると、なぜか一行分のスペースが開いて次の行に行く」）: この分岐（唯一の項目を
+    // 削除してリスト自体が空になった場合）も、以前はリストを取り除いた場所へ実在の"\n"文字を
+    // 置いていた。下のコメントで説明する「ブロック要素の直後の改行文字が二重になる」現象は、
+    // 実は「ブロックの直後」に限らず「何も無い行の先頭（＝まだ何の文字も置かれていない、
+    // 生成されたばかりの行）に実在の改行文字を置く」場合全般で起きることをisolate.htmlの
+    // 追加検証（先行する兄弟が何も無いケース）で確認した。リストがまだ他の項目を持つ場合と
+    // 同じ対処（実在の"\n"を置かず、キャレット表示用のCARET_MARKERだけを置く）をここでも行う。
+    // このリストの直前に何かがあった場合、それは必ず（Enter押下やbulletRange検出の性質上）
+    // 実在の"\n"で終わっているか、さもなくば本文の先頭であるため、送信用Markdownを組み立てる
+    // domToMarkdown側での区切りの補完（箇条書きが他の項目を残す場合の分岐で行っているもの）は
+    // ここでは不要——直前の内容が既に正しく行を終えている。
     const parent = listEl.parentNode as Node
     const anchor = listEl.nextSibling
     listEl.remove()
-    const marker = document.createTextNode('\n')
+    const marker = document.createTextNode(CARET_MARKER)
     parent.insertBefore(marker, anchor)
     const range = document.createRange()
     range.setStart(marker, marker.length)
@@ -1399,11 +1411,6 @@ function exitEmptyListItem(root: HTMLElement, itemEl: HTMLElement): void {
       sel.removeAllRanges()
       sel.addRange(range)
     }
-    // 引用の空行脱出（Composer.tsxのhandleKeyDown）と全く同じ理由: 末尾の孤立した改行の
-    // 直後にブラウザが正しくキャレットを計測できない既知の問題への対処
-    const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
-    ensureTrailingNewlineCaretMarker(root)
-    setSelectionOffsets(root, pos)
     return
   }
   // バグ修正（ユーザーからの報告「箇条書きで黒点を消すと不自然な空行ができる」、isolate.htmlでの
@@ -1455,7 +1462,7 @@ export function handleEnterInListItem(root: HTMLElement, itemEl: HTMLElement, cu
   const listEl = itemEl.parentElement as HTMLElement
 
   if (itemRange.start === itemRange.end) {
-    exitEmptyListItem(root, itemEl)
+    exitEmptyListItem(itemEl)
     return
   }
 
@@ -1510,7 +1517,7 @@ export function handleBackspaceAtListItemStart(root: HTMLElement, itemEl: HTMLEl
   const itemRange = computeElementOffset(root, itemEl)
 
   if (itemRange.start === itemRange.end && prevItem) {
-    exitEmptyListItem(root, itemEl)
+    exitEmptyListItem(itemEl)
     return
   }
 
