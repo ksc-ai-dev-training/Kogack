@@ -275,6 +275,23 @@ export function domToMarkdown(root: Node): string {
   return stripCaretMarker(stripSelectionMarkers(text))
 }
 
+/** バグ修正（ユーザーからの報告「コードブロックを入力するときに、途中で改行した状態で送信すると、
+ * コードブロックの表示がなくなる」）: コードブロックは閉じる``` をまだ打っていない（＝
+ * findCodeBlockProtectedRanges等が「入力中」として保護している）間はまだ生テキストのままで
+ * <pre>へ変換されない（consumeCodeBlockMatchesは開始・終了の対になった```しか変換しない、
+ * 前方のコメント参照）。複数行のコードを書いている最中は改行を挟むのが普通の操作であり、
+ * 閉じる``` を打つ前にCtrl+Enterで送信してしまうと、本文には対になっていない生の```が
+ * そのまま残る。受信側（MessageList.tsxのCODE_BLOCK_REGEX）は開始・終了のペアが揃って
+ * いないと一致しないため、コードブロックとして整形されず生の```が可視化されてしまっていた。
+ * 送信直前のMarkdown文字列に対して、```の出現数が奇数（＝閉じられていない）なら末尾へ
+ * 1つ補って強制的に閉じる。Composer.tsxのsend()からdomToMarkdownの直後に呼ぶ想定
+ * （下書き保存にはあえて適用しない——まだ入力を続けるかもしれない下書きの生テキストを
+ * 勝手に書き換えると、続きを打ったときの意図しない変換につながるため）。 */
+export function closeDanglingCodeFence(text: string): string {
+  const fenceCount = (text.match(/```/g) ?? []).length
+  return fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text
+}
+
 /** テキストを絵文字ショートコード解釈ありでDocumentFragmentへ変換する。下書き復元と、
  * 読み込み待ちだったcustomEmojiが到着した後の追いかけ変換の2箇所でのみ使う（通常の
  * プログラム的な挿入=書式マーカーやリンク構文・メンション名にはこの解釈をかけない。

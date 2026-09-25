@@ -9,6 +9,7 @@ import { useToast } from './Toast'
 import {
   domToPlainText,
   domToMarkdown,
+  closeDanglingCodeFence,
   deserializeFromText,
   getSelectionOffsets,
   setSelectionOffsets,
@@ -570,7 +571,7 @@ export default function Composer({
 
   const confirmSchedule = async () => {
     const root = editorRef.current
-    const text = (root ? domToMarkdown(root) : '').trim()
+    const text = (root ? closeDanglingCodeFence(domToMarkdown(root)) : '').trim()
     if (!text) {
       toast('本文を入力してください', 'error')
       return
@@ -956,7 +957,7 @@ export default function Composer({
     if (sendingRef.current) return
     const root = editorRef.current
     if (!root) return
-    const text = domToMarkdown(root).trim()
+    const text = closeDanglingCodeFence(domToMarkdown(root)).trim()
     if (!text) return
     sendingRef.current = true
     setSending(true)
