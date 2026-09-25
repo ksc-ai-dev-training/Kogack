@@ -446,8 +446,18 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
       if (n.nodeType === Node.TEXT_NODE) {
         total += nodeOffset
       } else if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+        // バグ修正（Playwrightでの箇条書きBackspace検証中に発見）: 項目間の区切りを表す仮想的な
+        // "\n"1文字ぶんは、消費した項目の数（i>0の項目ごとに+1）ではなく「これから到達する
+        // 子要素インデックス（nodeOffset）の手前まで何個の区切りを通過したか」で決まる。例えば
+        // 2項目のリストでnodeOffset=1（2項目目の先頭）を求める場合、ループはi=0（1項目目）
+        // しか回らずi>0の分岐に一度も入れないため、1項目目と2項目目の間にある区切り自体が
+        // 数え落とされ、2項目目の先頭オフセットが実際より1小さく計算されてしまっていた
+        // （computeElementOffsetがこの関数を使うため、2項目目以降でのBackspace/Enterの
+        // 「カーソルが項目の先頭と一致するか」判定が常にずれて成立しなくなる不具合の原因）。
+        // 通過した区切りの数はnodeOffset自体（末尾を指す場合は項目数-1が上限）に等しい。
         const items = Array.from(n.childNodes)
-        for (let i = 0; i < nodeOffset && i < items.length; i++) total += (i > 0 ? 1 : 0) + lengthOf(items[i])
+        for (let i = 0; i < nodeOffset && i < items.length; i++) total += lengthOf(items[i])
+        if (nodeOffset > 0) total += Math.min(nodeOffset, items.length - 1)
       } else {
         const children = Array.from(n.childNodes)
         for (let i = 0; i < nodeOffset && i < children.length; i++) total += lengthOf(children[i])
@@ -1309,6 +1319,40 @@ export function ungroupListElement(listEl: HTMLElement): void {
   parent.removeChild(listEl)
 }
 
+/** 空のlist-item（黒点だけで中身が無い項目）をリストから外し、その場をプレーンな空行に
+ * 差し替える（Notion・GitHub等と同じ「黒点だけを消して行自体は残す」脱出操作）。
+ * handleEnterInListItem（空項目でEnterを確定した場合）・handleBackspaceAtListItemStart
+ * （空項目の先頭でBackspaceを押した場合、ユーザーからの報告「箇条書きの黒点だけの行で
+ * Backspace/Deleteキーを押しても点を消せない」への対応）の両方から使う共通処理。呼び出し元は
+ * itemElの中身が本当に空（CARET_MARKER除去済み）であることを保証してから呼ぶこと。リストの
+ * 最後の項目がこれだけだった場合はリスト自体を消し、その場をプレーンな空行に置き換える。 */
+function exitEmptyListItem(root: HTMLElement, itemEl: HTMLElement): void {
+  const listEl = itemEl.parentElement as HTMLElement
+  itemEl.remove()
+  if (listEl.children.length === 0) {
+    const parent = listEl.parentNode as Node
+    const anchor = listEl.nextSibling
+    listEl.remove()
+    const marker = document.createTextNode('\n')
+    parent.insertBefore(marker, anchor)
+    const range = document.createRange()
+    range.setStart(marker, marker.length)
+    range.collapse(true)
+    const sel = window.getSelection()
+    if (sel) {
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+  } else {
+    insertTextAfterNode(listEl, '\n')
+  }
+  // 引用の空行脱出（Composer.tsxのhandleKeyDown）と全く同じ理由: 末尾の孤立した改行の
+  // 直後にブラウザが正しくキャレットを計測できない既知の問題への対処
+  const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
+  ensureTrailingNewlineCaretMarker(root)
+  setSelectionOffsets(root, pos)
+}
+
 /** list-item内でEnterを押した結果を処理する。Composer.tsxのhandleKeyDownが、cursorが
  * getBlockFormatAtで'list-item'と判定された場合にのみ呼ぶ。項目が空ならリストを抜ける
  * （Notion・GitHub等と同じ、既存の引用の「空行で抜ける」と同じ考え方）。空でなければ
@@ -1330,29 +1374,7 @@ export function handleEnterInListItem(root: HTMLElement, itemEl: HTMLElement, cu
   const listEl = itemEl.parentElement as HTMLElement
 
   if (itemRange.start === itemRange.end) {
-    itemEl.remove()
-    if (listEl.children.length === 0) {
-      const parent = listEl.parentNode as Node
-      const anchor = listEl.nextSibling
-      listEl.remove()
-      const marker = document.createTextNode('\n')
-      parent.insertBefore(marker, anchor)
-      const range = document.createRange()
-      range.setStart(marker, marker.length)
-      range.collapse(true)
-      const sel = window.getSelection()
-      if (sel) {
-        sel.removeAllRanges()
-        sel.addRange(range)
-      }
-    } else {
-      insertTextAfterNode(listEl, '\n')
-    }
-    // 引用の空行脱出（Composer.tsxのhandleKeyDown）と全く同じ理由: 末尾の孤立した改行の
-    // 直後にブラウザが正しくキャレットを計測できない既知の問題への対処
-    const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
-    ensureTrailingNewlineCaretMarker(root)
-    setSelectionOffsets(root, pos)
+    exitEmptyListItem(root, itemEl)
     return
   }
 
@@ -1392,10 +1414,24 @@ export function handleEnterInListItem(root: HTMLElement, itemEl: HTMLElement, cu
  * ブロック要素の結合はブラウザ間の挙動が大きく異なるため、Enterと同じ理由で自前実装する
  * （ファイル冒頭の設計判断コメント参照）。直前に項目があれば現項目の中身を直前の項目の
  * 末尾へ移動して現項目を削除する。直前の項目が無い（先頭かつ唯一の項目）ならリストごと
- * 平文へ戻す。 */
+ * 平文へ戻す。
+ *
+ * バグ修正（ユーザーからの報告「箇条書きの黒点だけの行でBackspace/Deleteキーを押しても
+ * 点を消せない（黒点が無い行を作りたい）」）: 項目の中身が本当に空（何も入力していない黒点
+ * だけの行）で、かつ直前に項目がある場合は、直前の項目へ「結合」するのではなく、
+ * handleEnterInListItemが空項目のEnterで抜けるときと同じexitEmptyListItem（黒点を消して
+ * その場をプレーンな空行に差し替える）を使う。中身が空でない項目（カーソルは項目の先頭に
+ * あるが後ろに文字が続いている、通常の「行頭でBackspaceして前の行と連結する」ケース）は
+ * 従来どおり直前の項目へ結合する。 */
 export function handleBackspaceAtListItemStart(root: HTMLElement, itemEl: HTMLElement): void {
   const listEl = itemEl.parentElement as HTMLElement
   const prevItem = itemEl.previousElementSibling as HTMLElement | null
+  const itemRange = computeElementOffset(root, itemEl)
+
+  if (itemRange.start === itemRange.end && prevItem) {
+    exitEmptyListItem(root, itemEl)
+    return
+  }
 
   if (!prevItem) {
     const cursor = getSelectionOffsets(root)?.start

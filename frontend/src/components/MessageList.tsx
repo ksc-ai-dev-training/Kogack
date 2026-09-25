@@ -7,6 +7,7 @@ import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { apiFetch, ApiError, uploadAttachment } from '../lib/api'
 import {
   continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapInlineCodeText, wrapCodeBlockText, wrapSelectionText,
+  trimMessageBody,
 } from '../lib/textFormatting'
 import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
@@ -327,7 +328,9 @@ function splitLineBlocks(text: string): LineBlock[] {
     quoteBuf = []
   }
   for (const line of text.split('\n')) {
-    const listMatch = /^- (.+)$/.exec(line)
+    // 中身が空の箇条書き項目（"- "のみの行、投稿欄で末尾の黒点に何も入力せず送信した場合）も
+    // 一致させる必要がある（.+だと不一致になり、下のelse分岐でただの文字列"- "として表示されてしまう）。
+    const listMatch = /^- (.*)$/.exec(line)
     const quoteMatch = /^> (.+)$/.exec(line)
     if (listMatch) {
       flushText()
@@ -1713,7 +1716,7 @@ export default function MessageList({
   const savingEditRef = useRef(false)
   const saveEdit = async (m: Message) => {
     if (savingEditRef.current) return
-    const trimmed = editBody.trim()
+    const trimmed = trimMessageBody(editBody)
     if (!trimmed) {
       toast('本文を入力してください', 'error')
       return

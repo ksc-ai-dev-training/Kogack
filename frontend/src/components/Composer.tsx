@@ -41,6 +41,7 @@ import {
   computeElementOffset,
   type ToggleFormatKind,
 } from '../lib/composerEditing'
+import { trimMessageBody } from '../lib/textFormatting'
 import type { AttachmentPayload, MentionPayload, ScheduleTarget } from '../types'
 
 const MIN_ROWS = 2
@@ -1100,7 +1101,7 @@ export default function Composer({
     if (sendingRef.current) return
     const root = editorRef.current
     if (!root) return
-    const text = closeDanglingCodeFence(domToMarkdown(root)).trim()
+    const text = trimMessageBody(closeDanglingCodeFence(domToMarkdown(root)))
     if (!text) return
     sendingRef.current = true
     setSending(true)
@@ -1176,8 +1177,18 @@ export default function Composer({
     // 自前で処理する。項目またぎのブロック要素の結合はブラウザ間の挙動が大きく異なるため
     // （Enterキー処理と同じ理由、ファイル冒頭の設計判断コメント参照）。それ以外のBackspace
     // （項目の途中・項目が無い等）は一切介入せず、今まで通りネイティブ処理に任せる。
+    //
+    // バグ修正（ユーザーからの報告「箇条書きの黒点だけの行でBackspace/Deleteキーを押しても
+    // 点を消せない」）: Enterで新しく分割された空項目（handleEnterInListItemの分岐参照）には
+    // 退出点を保持するためのCARET_MARKER（見えないゼロ幅スペース）が実在のテキストとして
+    // 残っている。これを片付けずにoffs.start===項目開始位置の判定を行うと、CARET_MARKERの
+    // 1文字ぶんカーソルが項目開始位置よりも後ろにずれているため判定が常に外れ、最初の
+    // Backspace押下はこの自前処理に一切入らずネイティブ処理へ委ねられてしまう（＝見えない
+    // マーカー文字だけが消え、黒点は何も変化しないまま残る）。handleEnterInListItem自身が
+    // 同じ理由で冒頭にremoveCaretMarkerFromDomを呼んでいるのと同じ対処を、判定の前に行う。
     if (e.key === 'Backspace') {
       const root = editorRef.current
+      if (root) removeCaretMarkerFromDom(root)
       const offs = root ? getSelectionOffsets(root) : null
       if (root && offs && offs.start === offs.end) {
         const block = getBlockFormatAt(root, offs.start)
