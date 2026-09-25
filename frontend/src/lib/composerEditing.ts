@@ -163,10 +163,25 @@ export function ensureTrailingNewlineCaretMarker(root: HTMLElement): void {
  * 再びEnter」を連続で行うと、2回目のEnterが正しい位置（"a\nb"の末尾）ではなく本文の先頭に
  * 改行を挿入してしまう不具合が実際に発生した。対処として、削除の前後で選択範囲を
  * 自前のオフセットベースAPI（getSelectionOffsets/setSelectionOffsets）で明示的に保存・
- * 復元する（マーカーが実際に含まれる場合のみ、かつrootの外に選択が無い場合のみ）。 */
+ * 復元する（マーカーが実際に含まれる場合のみ、かつrootの外に選択が無い場合のみ）。
+ *
+ * バグ修正（ユーザーからの報告「箇条書きで黒点を消すと不自然な空行ができ、そこに文字を
+ * 打って送信すると文字が消える」の調査で判明。3項目以上の箇条書きの真ん中の空項目でEnter→
+ * Backspaceする再現手順で実機同様の文字欠落をPlaywrightで確認）: preservedはマーカーを
+ * まだ含んだ状態のオフセット（マーカーの1文字ぶんを数えた値）である一方、この関数はその直後に
+ * マーカー自身を取り除いて全体を1文字短くする。マーカーより後ろの位置を指していたpreservedの
+ * 値をそのまま新しい（1文字短くなった）本文へ setSelectionOffsets すると、実質的に本来の
+ * 位置よりも1文字分後ろにカーソルを置いてしまう。取り除かれる直前のマーカーの位置を
+ * 覚えておき、preservedがその位置より後ろだった場合だけ1を引いて補正する（マーカーが
+ * 本文の末尾にあり、かつ以後に何も続かない場合は、この補正をしなくてもsetSelectionOffsets内の
+ * クランプ処理が偶然同じ結果になるため今まで表面化しなかった——マーカーの後ろに実際の文字列が
+ * 続く場合にだけ、その先頭の1文字が誤って"消費"され、Backspace等の後続処理がその文字の手前
+ * ではなく直後を「項目の先頭」と誤認識し、結果としてネイティブ処理が本来消してはいけない
+ * その1文字を削除してしまっていた）。 */
 export function removeCaretMarkerFromDom(root: HTMLElement): void {
   if (!root.textContent || !root.textContent.includes(CARET_MARKER)) return
   const preserved = getSelectionOffsets(root)
+  const markerOffset = preserved ? findCaretMarkerOffset(root) : -1
   const walk = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
       const t = node as Text
@@ -177,7 +192,32 @@ export function removeCaretMarkerFromDom(root: HTMLElement): void {
     for (const child of Array.from(node.childNodes)) walk(child)
   }
   for (const child of Array.from(root.childNodes)) walk(child)
-  if (preserved) setSelectionOffsets(root, preserved.start, preserved.end)
+  if (preserved) {
+    const adjust = (v: number) => (markerOffset !== -1 && v > markerOffset ? v - 1 : v)
+    setSelectionOffsets(root, adjust(preserved.start), adjust(preserved.end))
+  }
+}
+
+/** CARET_MARKERを含むテキストノードを探し、マーカー自身の直前（＝マーカーが無くなった後の
+ * 本文で、それが占めていた1文字ぶんの境界）の絶対オフセットを返す。見つからなければ-1。
+ * removeCaretMarkerFromDomの位置補正専用（マーカーを取り除く前に呼ぶこと）。 */
+function findCaretMarkerOffset(root: HTMLElement): number {
+  let result = -1
+  const walk = (node: Node): boolean => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const idx = (node as Text).data.indexOf(CARET_MARKER)
+      if (idx === -1) return false
+      result = domPositionToOffset(root, node, idx)
+      return true
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return false
+    for (const child of Array.from(node.childNodes)) {
+      if (walk(child)) return true
+    }
+    return false
+  }
+  walk(root)
+  return result
 }
 
 /** シリアライズ: DOM→プレーンテキスト。テキストノードはそのまま、原子絵文字imgは`:name:`へ、
