@@ -311,7 +311,23 @@ export function domToMarkdown(root: Node): string {
     }
     return inner
   }
-  const text = Array.from(root.childNodes).map(walk).join('')
+  const children = Array.from(root.childNodes)
+  const parts = children.map(walk)
+  // バグ修正（ユーザーからの報告「箇条書きで黒点を消すと不自然な空行ができる」）: 箇条書き
+  // （data-block-format="list"）の直後に実在する"\n"を置くと、ブロック要素の直後でwhite-space:
+  // pre-wrapが改行を二重に数えてしまう（詳細はexitEmptyListItemのコメント参照）ため、
+  // 箇条書きを抜けた直後のプレーンな行はDOM上に実在の"\n"を持たない（CARET_MARKERのみを
+  // 置く）方式に変更した。そのため送信用Markdownを組み立てるここでだけ、箇条書きの直後に
+  // 実際の文字列が続く場合に"\n"を1つ補う（DOMに実在の"\n"が既にある場合は二重に足さない
+  // ——手打ちの"- "検出等、他の経路で既に区切られているケースまで壊さないため）。
+  for (let i = 0; i < parts.length - 1; i++) {
+    const child = children[i]
+    const isListBlock = child.nodeType === Node.ELEMENT_NODE && (child as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list'
+    if (!isListBlock) continue
+    const next = stripCaretMarker(parts[i + 1])
+    if (next && !next.startsWith('\n')) parts[i + 1] = '\n' + parts[i + 1]
+  }
+  const text = parts.join('')
   return stripCaretMarker(stripSelectionMarkers(text))
 }
 
@@ -1383,14 +1399,39 @@ function exitEmptyListItem(root: HTMLElement, itemEl: HTMLElement): void {
       sel.removeAllRanges()
       sel.addRange(range)
     }
-  } else {
-    insertTextAfterNode(listEl, '\n')
+    // 引用の空行脱出（Composer.tsxのhandleKeyDown）と全く同じ理由: 末尾の孤立した改行の
+    // 直後にブラウザが正しくキャレットを計測できない既知の問題への対処
+    const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
+    ensureTrailingNewlineCaretMarker(root)
+    setSelectionOffsets(root, pos)
+    return
   }
-  // 引用の空行脱出（Composer.tsxのhandleKeyDown）と全く同じ理由: 末尾の孤立した改行の
-  // 直後にブラウザが正しくキャレットを計測できない既知の問題への対処
-  const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
-  ensureTrailingNewlineCaretMarker(root)
-  setSelectionOffsets(root, pos)
+  // バグ修正（ユーザーからの報告「箇条書きで黒点を消すと不自然な空行ができる」、isolate.htmlでの
+  // 検証で判明）: リストが他の項目を残して続く場合、以前はここで実在の"\n"文字をリストの直後へ
+  // 挿入していた。ブロック要素（<div data-block-format="list">、display:blockでそれ自体が
+  // 既に新しい行を作る）の直後に実在の"\n"を置くと、white-space:pre-wrap下では「ブロックの
+  // 直後で既に新しい行が始まっている」うえに、その"\n"自体もさらに改行を1つ作るため、
+  // 実機検証（isolate.html、4パターンの高さ比較）で改行1個ぶん（約20px）よけいに背が高くなる
+  // ことを確認した（<br>に置き換えても同じ結果で、要素の種類の問題ではなく「ブロック直後の
+  // 改行文字は常に二重になる」というwhite-space:pre-wrapの一般的な性質だと判明）。
+  // 対策として、ここでは実在の"\n"を一切挿入せず、キャレット表示用のCARET_MARKERだけを
+  // リストの直後へ置く（ブロックの直後で改行文字が無ければ二重にならないことも同じ検証で
+  // 確認済み）。この結果、DOM上はリストの直後に実在の"\n"を持たなくなるため、
+  // domToPlainText（カーソル位置計算やDOM操作と一致させる必要がある値のため、意図的に
+  // このブロックの実装は変更しない）は箇条書きとその直後の文章を区切り無しで返すが、
+  // 送信直前のMarkdown文字列を作るdomToMarkdownの側だけで、ブロックの直後に実際に何か
+  // 文字が続く場合に"\n"を1つ補う（詳細は同関数のコメント参照）。
+  const marker = document.createTextNode(CARET_MARKER)
+  const parent = listEl.parentNode as Node
+  parent.insertBefore(marker, listEl.nextSibling)
+  const range = document.createRange()
+  range.setStart(marker, marker.length)
+  range.collapse(true)
+  const sel = window.getSelection()
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
 }
 
 /** list-item内でEnterを押した結果を処理する。Composer.tsxのhandleKeyDownが、cursorが
