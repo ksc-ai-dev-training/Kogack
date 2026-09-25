@@ -1142,6 +1142,18 @@ export default function Composer({
         const inlineCode = getInlineCodeElementAt(root, cursor)
         if (inlineCode) {
           const codeRange = computeElementOffset(root, inlineCode)
+          // バグ修正（ユーザーからの報告「1回目のEnterはコードブロックへの変換だけにとどまり、
+          // 肝心の改行はもう一回Enterを押さないと起きない」）: 以前はinlineCodeを先にunwrap
+          // （要素ごと取り除きテキストだけ残す）してから、root全体に対する絶対オフセットで
+          // "\n"を挿入し直していた。この順序だと、unwrap直後のDOM構造（隣接テキストノードの
+          // 有無等）次第でresolveOffsetの「境界タイのバイアス」（本ファイル各所のコメント
+          // 参照）を踏み、"\n"が意図した位置（inlineCodeの中）ではなく境界の外側に挿入されて
+          // しまう場合があった——1行のままコードボックス化だけが起き、改行は次のEnterまで
+          // 反映されないように見えていた。inlineCodeがまだ実在し、他の兄弟から独立している
+          // うちに、その要素自身をスコープにした相対オフセットで"\n"を挿入すれば、この
+          // あいまいさが生じる余地が無い（挿入先がinlineCodeの中の一点に一意に定まる）。
+          const relativeOffset = cursor - codeRange.start
+          replaceRangeWithText(inlineCode, relativeOffset, relativeOffset, '\n')
           const parent = inlineCode.parentNode
           if (parent) {
             while (inlineCode.firstChild) parent.insertBefore(inlineCode.firstChild, inlineCode)
@@ -1149,10 +1161,9 @@ export default function Composer({
             root.normalize()
           }
           setActiveFormats((prev) => prev.filter((f) => f !== 'code'))
-          const pos = replaceRangeWithText(root, cursor, cursor, '\n')
           wrapRangeAsCodeBlock(root, codeRange.start, codeRange.end + 1)
           ensureTrailingNewlineCaretMarker(root)
-          setSelectionOffsets(root, pos)
+          setSelectionOffsets(root, cursor + 1)
           afterMutate()
           return
         }
