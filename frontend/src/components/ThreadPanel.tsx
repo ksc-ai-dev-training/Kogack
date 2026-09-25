@@ -243,31 +243,35 @@ export default function ThreadPanel({
           resizingThread ? 'bg-accent-600/40' : 'hover:bg-accent-600/25'
         }`}
       />
+      {/* バグ修正（ユーザーからの報告「チャンネル名が長いとき、要約ボタンが右へ押しやられ✕ボタンに
+          かぶさってくる」）: 以前はタイトル側に`min-w-0`だけ・要約ボタン側に`ml-auto`だけを付け、
+          要約ボタンと✕ボタンをそれぞれ独立した並びの要素として配置していた。要約ボタンと✕ボタンを
+          1つの`flex-none`なグループにまとめて常に一体で右端に留まるようにし、タイトル側は
+          `flex-1`（＋既存のmin-w-0・truncate）で「残り幅ぶんだけ縮む」ことを明示することで、
+          どちらの余白計算に頼るかを曖昧にしない構成にした。 */}
       <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-4">
-        <div className="flex min-w-0 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <span className="text-sm font-bold text-ink">スレッド</span>
           <span className="truncate text-[11px] text-ink-subtle">{headerSub}</span>
         </div>
-        {parentMessage?.channel_id && (
-          <div className="ml-auto">
+        <div className="flex flex-none items-center gap-2.5">
+          {parentMessage?.channel_id && (
             <SummarizeRangeButton
               summarizing={summarizing}
               onSummarize={summarizeThread}
               mainButtonTitle="このスレッド全体を要約します（F-14。▾から対象期間を指定できます）"
               size="thread"
             />
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          title="閉じる"
-          className={`flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted ${
-            parentMessage?.channel_id ? '' : 'ml-auto'
-          }`}
-        >
-          ✕
-        </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            title="閉じる"
+            className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       <div ref={bodyRef} className="flex-1 overflow-y-auto overflow-x-hidden py-1.5">
