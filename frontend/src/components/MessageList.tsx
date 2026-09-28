@@ -14,6 +14,7 @@ import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
+import { GuardedLink } from './GuardedLink'
 import { EMOJI_LIST } from './Composer'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import type {
@@ -142,6 +143,48 @@ function findUrlMatches(text: string): { start: number; end: number; url: string
     if (url.length > 0) results.push({ start: m.index ?? 0, end, url })
   }
   return results
+}
+
+// 発言リンク（右クリックメニュー「リンクをコピー」、ユーザーからの明示的な要望「文面のコピー
+// だけでなく、リンクもはれるようにしてほしい」）。S-05横断検索のハイライトジャンプと同じ
+// `?highlight=`（スレッド返信なら`thread=`も）付きURLにすることで、開いた側はそのまま該当発言まで
+// スクロール・ハイライトされる。貼られたリンクはAIエージェントも前後の会話ごと読み取る
+// （backend/services/message_link_context.py）
+export function messageLinkFor(m: Pick<Message, 'id' | 'channel_id' | 'dm_id' | 'thread_parent_id'>): string | null {
+  const base = m.channel_id ? `/channels/${m.channel_id}` : m.dm_id ? `/dms/${m.dm_id}` : null
+  if (!base) return null
+  const params = new URLSearchParams()
+  if (m.thread_parent_id) params.set('thread', m.thread_parent_id)
+  params.set('highlight', m.id)
+  return `${window.location.origin}${base}?${params.toString()}`
+}
+
+// Kogack自身のチャンネル・DMへのリンクは新しいタブではなく画面内遷移で開く（発言リンクを
+// クリックするたびにタブが増えていくのを避ける）。該当しなければnull
+function toInternalAppPath(url: string): string | null {
+  try {
+    const u = new URL(url)
+    if (u.origin !== window.location.origin || !/^\/(channels|dms)\/\d+/.test(u.pathname)) return null
+    return `${u.pathname}${u.search}${u.hash}`
+  } catch {
+    return null
+  }
+}
+
+function renderLink(key: string, url: string, label: string, className: string) {
+  const internal = toInternalAppPath(url)
+  if (internal) {
+    return (
+      <GuardedLink key={key} to={internal} className={className}>
+        {label}
+      </GuardedLink>
+    )
+  }
+  return (
+    <a key={key} href={url} target="_blank" rel="noopener noreferrer" className={className}>
+      {label}
+    </a>
+  )
 }
 
 // 表示文字を指定したリンク（ユーザーからの明示的な要望「リンクを張れるようになると嬉しい。
@@ -393,17 +436,7 @@ function renderInlineSegment(
       start: l.start,
       end: l.end,
       priority: 1,
-      render: (key) => (
-        <a
-          key={key}
-          href={l.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-accent-700 underline hover:text-accent-800"
-        >
-          {l.label}
-        </a>
-      ),
+      render: (key) => renderLink(key, l.url, l.label, 'text-accent-700 underline hover:text-accent-800'),
     })
   }
   // URL（priority 2）はコード・名前付きリンクの次に優先する。太字・斜体・下線・取り消し線の記号
@@ -417,17 +450,7 @@ function renderInlineSegment(
       start: u.start,
       end: u.end,
       priority: 2,
-      render: (key) => (
-        <a
-          key={key}
-          href={u.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="break-all text-accent-700 underline hover:text-accent-800"
-        >
-          {u.url}
-        </a>
-      ),
+      render: (key) => renderLink(key, u.url, u.url, 'break-all text-accent-700 underline hover:text-accent-800'),
     })
   }
   for (const m of text.matchAll(BOLD_REGEX)) {
@@ -1666,7 +1689,12 @@ export default function MessageList({
   // messagesが更新されるたびに毎回スクロールされて読んでいる位置が飛ぶのを防ぐ）
   const scrolledFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!highlightMessageId || scrolledFor.current === highlightMessageId) return
+    // ハイライト解除後に同じ発言リンクをもう一度開いたときも再スクロールできるよう記録を消す
+    if (!highlightMessageId) {
+      scrolledFor.current = null
+      return
+    }
+    if (scrolledFor.current === highlightMessageId) return
     const el = document.getElementById(`message-${highlightMessageId}`)
     if (!el) return
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1681,6 +1709,17 @@ export default function MessageList({
     try {
       await navigator.clipboard.writeText(body)
       toast('メッセージをコピーしました')
+    } catch {
+      toast('コピーに失敗しました', 'error')
+    }
+  }
+
+  const copyMessageLink = async (m: Message) => {
+    const link = messageLinkFor(m)
+    if (!link) return
+    try {
+      await navigator.clipboard.writeText(link)
+      toast('リンクをコピーしました')
     } catch {
       toast('コピーに失敗しました', 'error')
     }
@@ -2397,6 +2436,7 @@ export default function MessageList({
                     ...(showReplyButton ? [{ label: '返信する', onClick: () => onOpenThread!(m.id) }] : []),
                     ...(canEdit && !isEditing ? [{ label: '編集する', onClick: () => startEdit(m) }] : []),
                     { label: 'コピーする', onClick: () => copyMessageText(m.body) },
+                    { label: 'リンクをコピー', onClick: () => copyMessageLink(m) },
                     ...(canDelete
                       ? [{ label: '削除する', danger: true, onClick: () => deleteMessage(m.id) }]
                       : []),

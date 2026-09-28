@@ -82,7 +82,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from database import get_pool
-from services import ai_client, app_help_search, channel_history_search, doc_search
+from services import ai_client, app_help_search, channel_history_search, doc_search, message_link_context
 
 JST = ZoneInfo("Asia/Tokyo")  # F-14要約の対象期間指定（今日/今週/今月等）をJSTの暦日で解釈する
 # （routers/search.pyのF-42日付モディファイアと同じ考え方・同じタイムゾーン）
@@ -1219,6 +1219,14 @@ async def _generate_and_post(
                 ),
             }
         ]
+        # 会話中に貼られた発言リンク（右クリック「リンクをコピー」）の中身と前後の会話を添える
+        # （ユーザーからの明示的な要望、services/message_link_context.py参照）。直近の履歴に
+        # 残っている間は追加の質問にも答えられるよう、今回の発言に限らず履歴全体から新しい順に拾う
+        link_section = await message_link_context.build_section(
+            channel_id, [r["body"] for r in reversed(history_rows) if r["sender_type"] == "human"]
+        )
+        if link_section:
+            messages.append({"role": "system", "content": link_section})
         messages += _rows_to_chat_messages(history_rows, names, include_timestamps=True)
 
         model = ai_client.resolve_model(settings.get("ai_model"))
