@@ -39,6 +39,10 @@ import {
   ungroupListElement,
   handleEnterInListItem,
   handleBackspaceAtListItemStart,
+  getEmptyListItemAtSelection,
+  getEmptyQuoteAtSelection,
+  removeEmptyQuote,
+  handleDeleteInEmptyListItem,
   computeElementOffset,
   type ToggleFormatKind,
 } from '../lib/composerEditing'
@@ -1143,9 +1147,31 @@ export default function Composer({
     // Backspace押下はこの自前処理に一切入らずネイティブ処理へ委ねられてしまう（＝見えない
     // マーカー文字だけが消え、黒点は何も変化しないまま残る）。handleEnterInListItem自身が
     // 同じ理由で冒頭にremoveCaretMarkerFromDomを呼んでいるのと同じ対処を、判定の前に行う。
+    // 全文を選択した状態でのBackspace/Deleteは投稿欄を丸ごと空にする。ネイティブ処理に任せると
+    // 先頭のブロック（箇条書きの項目・引用）が中身だけ消えて枠ごと残り、黒点等が消えない
+    // （実機Playwrightで確認、Ctrl+A→Backspaceで空の黒点が1つ残っていた）。
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      const root = editorRef.current
+      const offs = root ? getSelectionOffsets(root) : null
+      if (root && offs && offs.start === 0 && offs.end > 0 && offs.end >= domToPlainText(root).length) {
+        e.preventDefault()
+        root.replaceChildren()
+        afterMutate()
+        return
+      }
+    }
     if (e.key === 'Backspace') {
       const root = editorRef.current
       if (root) removeCaretMarkerFromDom(root)
+      // 中身の空の引用でのBackspaceは枠ごと取り除く（ネイティブ処理では空の枠が残り続ける、
+      // removeEmptyQuoteのコメント参照）
+      const emptyQuote = root ? getEmptyQuoteAtSelection(root) : null
+      if (root && emptyQuote) {
+        e.preventDefault()
+        removeEmptyQuote(root, emptyQuote)
+        afterMutate()
+        return
+      }
       const offs = root ? getSelectionOffsets(root) : null
       if (root && offs && offs.start === offs.end) {
         const block = getBlockFormatAt(root, offs.start)
@@ -1166,6 +1192,15 @@ export default function Composer({
     if (e.key === 'Delete') {
       const root = editorRef.current
       if (root) removeCaretMarkerFromDom(root)
+      // 中身の空の箇条書き項目でのDeleteも自前で処理する（ネイティブ処理では黒点が消えずに残る、
+      // handleDeleteInEmptyListItemのコメント参照）
+      const emptyItem = root ? getEmptyListItemAtSelection(root) : null
+      if (emptyItem) {
+        e.preventDefault()
+        handleDeleteInEmptyListItem(emptyItem)
+        afterMutate()
+        return
+      }
       const offs = root ? getSelectionOffsets(root) : null
       if (root && offs && offs.start === offs.end) {
         const block = getBlockFormatAt(root, offs.start)

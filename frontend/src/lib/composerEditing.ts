@@ -445,6 +445,21 @@ function resolveOffset(root: Node, targetOffset: number): DomPosition {
       lastPosition = { node: parent, offset: idx + 1 }
       return null
     }
+    // バグ修正（ユーザーからの報告「箇条書きの最後の項目をBackspaceで空にすると、カーソルが空の
+    // 項目ではなくリストの下の行の先頭へ飛ぶ（続けてDeleteを押すと黒点ではなく下の行の1文字目が
+    // 消える）」、実機Playwrightで原因を特定）: ブラウザは中身を消し切った項目に<br>を1つ置く。
+    // 逆写像のdomPositionToOffset・domToPlainTextは<br>を1文字（"\n"）と数えるのに、ここでは
+    // 子を持たない要素として0文字で素通りしていたため、空項目の先頭を指すオフセットが<br>を
+    // 飛び越えて次の内容（リストの直後の行）の先頭に解決されていた。絵文字と同じ原子的な1文字
+    // として扱う（ちょうど手前を指すなら<br>の直前、それ以外は消費して先へ進む）。
+    if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === 'BR') {
+      const parent = node.parentNode as Node
+      const idx = indexOfChild(node)
+      if (remaining === 0) return { node: parent, offset: idx }
+      remaining -= 1
+      lastPosition = { node: parent, offset: idx + 1 }
+      return null
+    }
     // 箇条書き（data-block-format="list"）の項目間には、絵文字img・マーカーspanと同じ
     // 「原子的な1文字ぶんの仮想区切り」パターンを適用する（本ファイル後方の箇条書きセクション
     // 参照）。項目自体は普通に再帰するだけで良い（textLength/domToPlainTextと矛盾しないよう、
@@ -739,10 +754,14 @@ export function enforceMaxLength(root: HTMLElement, max: number): void {
 
 /** 空のcontentEditableへフォーカスするとChromeが単独の<br>を自動挿入することがある既知の挙動への
  * 対処（プレースホルダのCSS `:empty::before` が確実に効くよう、論理的に空のときはDOMも
- * 本当に空にする）。 */
+ * 本当に空にする）。改行はテキストノード内の生の"\n"で表現する（ファイル冒頭参照）ため、<br>は
+ * ブラウザが置くプレースホルダでしかない。引用・箇条書きを消し切った後には複数個残ることもある
+ * （実機Playwrightで確認、`<br><br>`）ため、<br>と空のテキストノードだけなら丸ごと空にする。 */
 export function removeStrayEmptyBr(root: HTMLElement): void {
-  if (root.childNodes.length === 1 && root.firstChild?.nodeName === 'BR') {
-    root.removeChild(root.firstChild)
+  const nodes = Array.from(root.childNodes)
+  if (nodes.length === 0) return
+  if (nodes.every((n) => n.nodeName === 'BR' || (n.nodeType === Node.TEXT_NODE && (n as Text).data === ''))) {
+    root.replaceChildren()
   }
 }
 
@@ -1458,6 +1477,10 @@ export function ungroupListElement(listEl: HTMLElement): void {
   const frag = document.createDocumentFragment()
   items.forEach((item, i) => {
     if (i > 0) frag.appendChild(document.createTextNode('\n'))
+    // 中身を消し切った項目にブラウザが置くプレースホルダの<br>は持ち出さない（持ち出すと
+    // 生テキスト側では実在の改行1文字になり、空の投稿欄に<br>が残って以後の箇条書きボタンが
+    // 効かなくなる、実機Playwrightで確認）。項目の区切りは上の"\n"が担う。
+    if (item.childNodes.length === 1 && item.firstChild?.nodeName === 'BR') return
     while (item.firstChild) frag.appendChild(item.firstChild)
   })
   parent.insertBefore(frag, listEl)
@@ -1621,6 +1644,142 @@ export function handleBackspaceAtListItemStart(root: HTMLElement, itemEl: HTMLEl
   while (itemEl.firstChild) prevItem.appendChild(itemEl.firstChild)
   itemEl.remove()
   setSelectionOffsets(root, mergeAt)
+}
+
+/** カーソル（折りたたまれた選択範囲）が中身の空のlist-item（黒点だけの行）の内側にあれば、
+ * その要素を返す。ブラウザはDeleteで中身を消し切った項目に<br>を1つ置くことがあり、これは
+ * domToPlainText上"\n"1文字として数えられるため、computeElementOffsetの幅では空と判定できない
+ * ——<br>・空のテキストノードしか持たない項目を空とみなす。getCodeBlockElementAtSelectionと
+ * 同じ理由（幅0の要素には整数オフセット経由では入れない）で、ライブなSelectionを直接読む。
+ * 呼び出し元はCARET_MARKERを除去してから呼ぶこと。 */
+export function getEmptyListItemAtSelection(root: HTMLElement): HTMLElement | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null
+  const range = sel.getRangeAt(0)
+  let node: Node | null = range.startContainer
+  if (!root.contains(node)) return null
+  // 最後の1文字を消した直後は、afterMutateの数値オフセット復元によりSelectionがリスト要素の
+  // 直前（root自身, offset=0等）に置かれることがある（実機Playwrightで確認）。見た目上カーソルは
+  // その先頭項目の行にあるため、直後の子がリストなら先頭項目の内側にあるものとして扱う。
+  const child = node.nodeType === Node.ELEMENT_NODE ? node.childNodes[range.startOffset] : undefined
+  if (child && child.nodeType === Node.ELEMENT_NODE && (child as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+    node = child.firstChild
+  } else if (node.nodeType === Node.ELEMENT_NODE && (node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
+    // 末尾に空項目が残っている場合は、項目と項目の間（リスト要素自身, offset=n）に置かれる
+    // ことがある。Deleteは前方を消す操作のため、その境界の直前の項目の末尾にいるものとして扱う。
+    node = node.childNodes[range.startOffset - 1] ?? node.firstChild
+  }
+  while (node && node !== root) {
+    if (node.nodeType === Node.ELEMENT_NODE && (node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list-item') {
+      const item = node as HTMLElement
+      return isBlockContentEmpty(item) ? item : null
+    }
+    node = node.parentNode
+  }
+  return null
+}
+
+/** ブロック要素（箇条書きの項目・引用）の中身が、ブラウザが置くプレースホルダの<br>と空の
+ * テキストノードだけか（＝見た目上は空か）。 */
+function isBlockContentEmpty(el: HTMLElement): boolean {
+  return Array.from(el.childNodes).every(
+    (c) => (c.nodeType === Node.TEXT_NODE && (c as Text).data === '') || c.nodeName === 'BR',
+  )
+}
+
+/** カーソル（折りたたまれた選択範囲）が中身の空の引用（<blockquote data-block-format="quote">）の
+ * 内側にあれば、その要素を返す。呼び出し元はCARET_MARKERを除去してから呼ぶこと。 */
+export function getEmptyQuoteAtSelection(root: HTMLElement): HTMLElement | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null
+  const range = sel.getRangeAt(0)
+  let node: Node | null = range.startContainer
+  if (!root.contains(node)) return null
+  // 引用の最後の1文字を消した直後は、数値オフセットの復元が「直前の内容の末尾」を優先する既知の
+  // バイアス（resolveOffset参照）により、Selectionが引用の中ではなく直前のテキストの末尾
+  // （あるいは親要素上の引用の直前）に置かれる（実機Playwrightで確認）。数値上は引用の先頭と
+  // 同じ位置のため、直後に隣接するのが空の引用ならその内側にいるものとして扱う。
+  const next =
+    node.nodeType === Node.TEXT_NODE
+      ? range.startOffset === (node as Text).data.length
+        ? node.nextSibling
+        : null
+      : node.childNodes[range.startOffset]
+  if (next && next.nodeType === Node.ELEMENT_NODE && (next as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'quote') {
+    node = next
+  }
+  while (node && node !== root) {
+    if (node.nodeType === Node.ELEMENT_NODE && (node as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'quote') {
+      const quote = node as HTMLElement
+      return isBlockContentEmpty(quote) ? quote : null
+    }
+    node = node.parentNode
+  }
+  return null
+}
+
+/** 中身の空の引用（getEmptyQuoteAtSelectionで取得）でBackspaceを押した結果を処理する。
+ * バグ修正（ユーザーからの報告「引用の中身をBackspace長押しで全部消すと、空の引用の枠が残る」、
+ * 実機Playwrightで再現）: 引用の後ろに通常の行がある状態で末尾からBackspaceを押し続けると、
+ * 引用の中身を消し切った時点で<blockquote><br></blockquote>が残り、ネイティブのBackspaceは
+ * そこから先に何もしないため枠が消えなかった。空行でのBackspaceと同じく、引用の行を前後の区切りの
+ * "\n"ごと消して直前の行の末尾へカーソルを置く。引用だけを取り除いて区切りの"\n"を残すと、
+ * 投稿欄の末尾に表示もされずカーソルも置けない"\n"が残り、以後どうやっても消せなくなる（実機
+ * Playwrightで確認）。投稿欄に残るのがブラウザのプレースホルダの<br>だけならそれも片付ける
+ * （removeStrayEmptyBr）。 */
+export function removeEmptyQuote(root: HTMLElement, quoteEl: HTMLElement): void {
+  const parent = quoteEl.parentNode as Node
+  const prev = quoteEl.previousSibling
+  const next = quoteEl.nextSibling
+  let caret: { node: Node; offset: number } = { node: parent, offset: indexOfChild(quoteEl) }
+  quoteEl.remove()
+  if (prev?.nodeType === Node.TEXT_NODE && (prev as Text).data.endsWith('\n')) {
+    const t = prev as Text
+    t.deleteData(t.data.length - 1, 1)
+    caret = { node: t, offset: t.data.length }
+  } else if (next?.nodeType === Node.TEXT_NODE && (next as Text).data.startsWith('\n')) {
+    ;(next as Text).deleteData(0, 1)
+  }
+  removeStrayEmptyBr(root)
+  if (!root.contains(caret.node)) caret = { node: root, offset: 0 }
+  const maxOffset = caret.node.nodeType === Node.TEXT_NODE ? (caret.node as Text).data.length : caret.node.childNodes.length
+  const range = document.createRange()
+  range.setStart(caret.node, Math.min(caret.offset, maxOffset))
+  range.collapse(true)
+  const sel = window.getSelection()
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+}
+
+/** 中身の空のlist-item（getEmptyListItemAtSelectionで取得）でDeleteを押した結果を処理する。
+ * バグ修正（ユーザーからの報告「箇条書きが二行以上あるときに、全部消そうとDeleteキーを長押しすると、
+ * 一行目の黒点だけ消せずに残ることがある」、実機Playwrightで再現）: 先頭項目の行頭からDeleteを
+ * 押し続けると、後続の項目はネイティブ処理で先頭項目へ結合されていくが、最後に中身の無くなった
+ * 先頭項目（<br>だけ、あるいは末尾の空項目が別に残ることもある）に対してはネイティブのDeleteが
+ * 何もしないため、黒点がどうやっても消えずに残っていた。直後に項目があればこの空項目を取り除いて
+ * 次の項目の先頭へカーソルを移し（＝次の行が上に詰まる、通常のDeleteと同じ見た目）、直後に
+ * 項目が無ければBackspaceの空項目と同じexitEmptyListItemで黒点を消してプレーンな空行にする。 */
+export function handleDeleteInEmptyListItem(itemEl: HTMLElement): void {
+  const nextItem = itemEl.nextElementSibling as HTMLElement | null
+  if (!nextItem) {
+    exitEmptyListItem(itemEl)
+    return
+  }
+  itemEl.remove()
+  // 次の項目の先頭は直前の内容の末尾と数値オフセット上同じ位置になる（resolveOffsetのバイアス、
+  // handleEnterInListItemのコメント参照）ため、CARET_MARKERを実在させてその直後へ置く。
+  const marker = document.createTextNode(CARET_MARKER)
+  nextItem.insertBefore(marker, nextItem.firstChild)
+  const range = document.createRange()
+  range.setStart(marker, marker.length)
+  range.collapse(true)
+  const sel = window.getSelection()
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
 }
 
 /** 太字・斜体・下線・取り消し線の実要素（TOGGLE_FORMAT_ELEMENT_ATTR）のうち、中身が空文字に
