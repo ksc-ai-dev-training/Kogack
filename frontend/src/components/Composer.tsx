@@ -45,6 +45,9 @@ import {
   getBlankBrLineAtSelection,
   removeBlankLineBetweenLists,
   insertBlankLineAfterBrLine,
+  insertCaretLineAfterBlock,
+  getQuoteStartAtSelection,
+  removeFirstLineFromQuote,
   isListBlockNode,
   handleDeleteInEmptyListItem,
   computeElementOffset,
@@ -1187,6 +1190,17 @@ export default function Composer({
         afterMutate()
         return
       }
+      // 引用の先頭（1行目の行頭）でのBackspaceは、その行だけ引用を外す（Deleteの行頭処理と同じ
+      // removeLineFromQuote）。ネイティブ処理に任せると、引用の中身が直前の行へ結合される際に
+      // ブラウザが引用の文字色をインラインstyle付きの<span>として持ち込み、壊れたDOMになっていた
+      // （実機Playwrightで確認）。
+      const quoteAtStart = root ? getQuoteStartAtSelection(root) : null
+      if (root && quoteAtStart) {
+        e.preventDefault()
+        removeFirstLineFromQuote(root, quoteAtStart)
+        afterMutate()
+        return
+      }
       const offs = root ? getSelectionOffsets(root) : null
       if (root && offs && offs.start === offs.end) {
         const block = getBlockFormatAt(root, offs.start)
@@ -1226,13 +1240,26 @@ export default function Composer({
       }
       const offs = root ? getSelectionOffsets(root) : null
       if (root && offs && offs.start === offs.end) {
+        // 引用の先頭はカーソルが引用の外（直前の行の末尾）に置かれていることがあるため、
+        // getQuoteStartAtSelectionでも補う（Backspace側のコメント参照）
+        const quoteAtStart = getQuoteStartAtSelection(root)
+        if (quoteAtStart) {
+          e.preventDefault()
+          removeFirstLineFromQuote(root, quoteAtStart)
+          afterMutate()
+          return
+        }
         const block = getBlockFormatAt(root, offs.start)
         if (block?.kind === 'quote') {
           const text = domToPlainText(root)
           const lineStart = text.lastIndexOf('\n', offs.start - 1) + 1
           if (offs.start === lineStart) {
             const nextNewlineIdx = text.indexOf('\n', offs.start)
-            const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
+            // 行末は引用の末尾で打ち切る（Enter処理の同じ箇所のコメント参照）
+            const lineEnd = Math.min(
+              nextNewlineIdx === -1 ? text.length : nextNewlineIdx,
+              computeElementOffset(root, block.el).end,
+            )
             e.preventDefault()
             removeLineFromQuote(root, block.el, lineStart, lineEnd)
             afterMutate()
@@ -1266,11 +1293,11 @@ export default function Composer({
     // カーソル以降を新しい項目として切り出す。引用は<blockquote>の内側に生の"\n"を1文字
     // 挿入するだけで続き行になる（マーカー文字を挿入する必要が無い分、以前よりむしろ単純に
     // なった）。空行での脱出は、その空行（内部の末尾の"\n"）を<blockquote>から取り除き、
-    // insertTextAfterNodeで<blockquote>の外側（直後）へ新しいプレーンな行を作る——数値
-    // オフセットのsetSelectionOffsetsだけに頼ると、resolveOffsetが「その位置より後に何も
-    // 実体が無い」場合に要素の内側に留まる位置を返してしまう既知のバイアス
-    // （composerEditing.tsのtoggleFormatAtCursorDomのコメント参照）により、外に出したはずの
-    // カーソルが<blockquote>の内側へ巻き戻ってしまうため。
+    // insertCaretLineAfterBlockで<blockquote>の外側（直後）へ新しいプレーンな行を作り、その行の
+    // CARET_MARKERへ直接カーソルを置く——数値オフセットのsetSelectionOffsetsだけに頼ると、
+    // resolveOffsetが「その位置より後に何も実体が無い」場合に要素の内側に留まる位置を返して
+    // しまう既知のバイアス（composerEditing.tsのtoggleFormatAtCursorDomのコメント参照）により、
+    // 外に出したはずのカーソルが<blockquote>の内側へ巻き戻ってしまうため。
     if (e.key === 'Enter') {
       e.preventDefault()
       const root = editorRef.current
@@ -1296,14 +1323,24 @@ export default function Composer({
           const text = domToPlainText(root)
           const lineStart = text.lastIndexOf('\n', cursor - 1) + 1
           const nextNewlineIdx = text.indexOf('\n', cursor)
-          const lineEnd = nextNewlineIdx === -1 ? text.length : nextNewlineIdx
+          // 行末は引用の末尾で打ち切る。引用の直後の行は区切りの"\n"を持たない規約
+          // （composerEditing.tsのstripLineBreakAfterBlock参照）のため、プレーンテキスト上では
+          // 引用の最終行と直後の行がつながって見え、引用の末尾の空行でEnterを押しても空行と
+          // 判定されず引用を抜けられなかった（実機Playwrightで確認）。
+          const quoteEnd = computeElementOffset(root, block.el).end
+          const lineEnd = Math.min(nextNewlineIdx === -1 ? text.length : nextNewlineIdx, quoteEnd)
           const currentLine = text.slice(lineStart, lineEnd)
           if (currentLine.trim() === '') {
-            replaceRangeWithText(root, lineStart - 1, lineStart, '')
-            insertTextAfterNode(block.el, '\n')
-            const pos = getSelectionOffsets(root)?.start ?? domToPlainText(root).length
-            ensureTrailingNewlineCaretMarker(root)
-            setSelectionOffsets(root, pos)
+            // ユーザーからの報告「引用の空行でEnterを押して引用を抜けると、引用との間に空行が1行
+            // 入ってしまう」: 以前は引用の直後へ区切りの"\n"を挿入していたが、ブロックの直後の
+            // "\n"は空行1行ぶんとして描画されていた。insertCaretLineAfterBlockのコメント参照。
+            removeCaretMarkerFromDom(root)
+            if (lineStart > computeElementOffset(root, block.el).start) {
+              replaceRangeWithText(root, lineStart - 1, lineStart, '')
+            }
+            insertCaretLineAfterBlock(block.el)
+            // 引用ボタンを押した直後にEnterした等、引用に中身が何も無ければ枠ごと取り除く
+            if (domToPlainText(block.el).trim() === '') block.el.remove()
           } else {
             const pos = replaceRangeWithText(root, cursor, cursor, '\n')
             ensureTrailingNewlineCaretMarker(root)

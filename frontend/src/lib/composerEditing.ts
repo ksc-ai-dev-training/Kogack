@@ -45,20 +45,29 @@ function isMarkerNode(node: Node): boolean {
   return node.nodeType === Node.ELEMENT_NODE && (node as Element).hasAttribute(LIVE_FORMAT_MARKER_ATTR)
 }
 
-/** 箇条書きの項目（data-block-format="list-item"）の中身が空のときに置かれるプレースホルダの<br>か
+/** 箇条書きの項目（data-block-format="list-item"）の中身が空のとき・引用の末尾に置かれるプレースホルダの<br>か
  * （項目の唯一の実質的な子で、兄弟は空文字かCARET_MARKERだけのテキストノード）。空の項目が高さ0に
  * 潰れず、resolveOffsetがその内側の位置を返せるようにするための要素で、文字としては数えない
  * （domToPlainText・domToMarkdown・resolveOffset・domPositionToOffsetで共通、1文字の"\n"と
  * 数えると送信Markdownの空項目の後ろに余計な改行が入っていた）。ブラウザもBackspace/Deleteで
  * 中身を消し切った項目にこの<br>を自動で置く。 */
-function isListItemPlaceholderBr(node: Node): boolean {
+function isPlaceholderBr(node: Node): boolean {
   if (node.nodeName !== 'BR') return false
   const parent = node.parentNode
   if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return false
-  if ((parent as Element).getAttribute(BLOCK_FORMAT_ATTR) !== 'list-item') return false
-  return Array.from(parent.childNodes).every(
-    (c) => c === node || (c.nodeType === Node.TEXT_NODE && stripCaretMarker((c as Text).data) === ''),
-  )
+  const kind = (parent as Element).getAttribute(BLOCK_FORMAT_ATTR)
+  const isEmptyText = (c: Node | null) => !!c && c.nodeType === Node.TEXT_NODE && stripCaretMarker((c as Text).data) === ''
+  if (kind === 'list-item') return Array.from(parent.childNodes).every((c) => c === node || isEmptyText(c))
+  // 引用の末尾の<br>も同じくプレースホルダ（ブラウザが中身を消し切った引用や、末尾の改行を
+  // 消した直後の引用に置く）。ブロックの末尾の<br>はそれ自体では行を作らない（直前が"\n"なら
+  // その"\n"が作る空行を見えるようにするだけ）ため、1文字と数えると送信Markdownに余計な
+  // 「> 」行が入っていた（実機Playwrightで確認）。
+  if (kind === 'quote') {
+    let n = node.nextSibling
+    while (isEmptyText(n)) n = n!.nextSibling
+    return n === null
+  }
+  return false
 }
 
 /** ノード配下のテキスト総文字数（原子絵文字・BR等の区別はせず、単純にテキストノードの
@@ -255,7 +264,7 @@ export function domToPlainText(root: Node): string {
       return
     }
     if ((node as Element).tagName === 'BR') {
-      if (!isListItemPlaceholderBr(node)) text += '\n'
+      if (!isPlaceholderBr(node)) text += '\n'
       return
     }
     // 箇条書き（data-block-format="list"）は1行=1つのdata-block-format="list-item"要素という
@@ -293,7 +302,7 @@ export function domToMarkdown(root: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return (node as Text).data
     if (node.nodeType !== Node.ELEMENT_NODE) return ''
     if (isEmojiNode(node)) return `:${node.getAttribute(EMOJI_ATTR)}:`
-    if ((node as Element).tagName === 'BR') return isListItemPlaceholderBr(node) ? '' : '\n'
+    if ((node as Element).tagName === 'BR') return isPlaceholderBr(node) ? '' : '\n'
     // 箇条書き（data-block-format="list"）は各項目（data-block-format="list-item"）を
     // 個別に直列化し、"- "を付けて"\n"で連結する（domToPlainTextと同じ「項目の境界=仮想的な
     // 改行」モデル、本ファイル後方の箇条書きセクション参照）。項目自体の中身は太字等を含みうる
@@ -329,28 +338,26 @@ export function domToMarkdown(root: Node): string {
   }
   const children = Array.from(root.childNodes)
   const parts = children.map(walk)
-  // バグ修正（ユーザーからの報告「箇条書きで黒点を消すと不自然な空行ができる」）: 箇条書き
-  // （data-block-format="list"）の直後に実在する"\n"を置くと、ブロック要素の直後でwhite-space:
-  // pre-wrapが改行を二重に数えてしまう（詳細はexitEmptyListItemのコメント参照）ため、
-  // 箇条書きを抜けた直後のプレーンな行はDOM上に実在の"\n"を持たない（CARET_MARKERのみを
-  // 置く）方式に変更した。そのため送信用Markdownを組み立てるここでだけ、箇条書きの直後に
-  // 何か続く場合に"\n"を1つ補う（詳細はループ内のコメント参照）。
+  // バグ修正（ユーザーからの報告「箇条書きで黒点を消すと不自然な空行ができる」「引用の空行で
+  // Enterを押して抜けると引用との間に空行が入る」等）: ブロック要素（箇条書き・引用）の直後に
+  // 実在する"\n"を置くと、white-space:pre-wrap下では空行1行ぶんとして描画されてしまう（詳細は
+  // exitEmptyListItemのコメント参照）ため、ブロックの直後の行はDOM上に区切りの"\n"を持たない
+  // 規約にしている（stripLineBreakAfterBlock・exitEmptyListItem・removeLineFromQuote・
+  // insertCaretLineAfterBlock参照）。送信用Markdownを組み立てるここでだけ、区切りの"\n"を補う。
+  const isBlockNode = (n: Node | undefined) =>
+    !!n && n.nodeType === Node.ELEMENT_NODE && !!(n as Element).getAttribute(BLOCK_FORMAT_ATTR)
   for (let i = 0; i < parts.length - 1; i++) {
-    const child = children[i]
-    const isListBlock = child.nodeType === Node.ELEMENT_NODE && (child as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list'
-    if (!isListBlock) continue
+    const kind = children[i].nodeType === Node.ELEMENT_NODE ? (children[i] as Element).getAttribute(BLOCK_FORMAT_ATTR) : null
+    if (kind !== 'list' && kind !== 'quote') continue
     // 直後の行の内容は、次のブロック要素の手前までの兄弟（テキスト・<br>等）をまとめて見る
     // （空行はCARET_MARKERのテキストと<br>の2ノードで構成されうるため、exitEmptyListItem参照）。
-    const isBlock = (n: Node | undefined) =>
-      !!n && n.nodeType === Node.ELEMENT_NODE && !!(n as Element).getAttribute(BLOCK_FORMAT_ATTR)
     let j = i + 1
-    while (j < children.length && !isBlock(children[j])) j++
-    // リストの直後の行はDOM上に区切りの"\n"を持たない規約（convertLinesToListItems・
-    // exitEmptyListItem参照）のため、直後に何か続くなら常に"\n"を1つ補う。直後が"\n"で始まる
-    // 場合も、それは画面上に空行として表示されている（ブロック直後の"\n"は空行1行ぶんとして
-    // 描画される）ので補う——以前は「既に区切られている」とみなして補わなかったが、そのせいで
-    // リストの途中の黒点を消して作った空行が送信時に消え、前後のリストが1つにつながっていた。
-    // リストの直後に別のブロックが直接続く場合（2つのリストが隣接した等）も同様に区切る。
+    while (j < children.length && !isBlockNode(children[j])) j++
+    // 直後に何か続くなら常に"\n"を1つ補う。直後が"\n"で始まる場合も、それは画面上に空行として
+    // 表示されている（ブロック直後の"\n"は空行1行ぶんとして描画される）ので補う——以前は「既に
+    // 区切られている」とみなして補わなかったが、そのせいでリストの途中の黒点を消して作った空行が
+    // 送信時に消え、前後のリストが1つにつながっていた。直後に別のブロックが直接続く場合（2つの
+    // リストが隣接した等）も同様に区切る。
     const next = stripCaretMarker(parts.slice(i + 1, j).join(''))
     if (j === i + 1) parts[j] = '\n' + parts[j]
     else if (next) parts[i + 1] = '\n' + parts[i + 1]
@@ -484,8 +491,8 @@ function resolveOffset(root: Node, targetOffset: number): DomPosition {
       const parent = node.parentNode as Node
       const idx = indexOfChild(node)
       if (remaining === 0) return { node: parent, offset: idx }
-      // 空の箇条書き項目のプレースホルダは幅0（isListItemPlaceholderBr参照）
-      if (isListItemPlaceholderBr(node)) return null
+      // 空の箇条書き項目のプレースホルダは幅0（isPlaceholderBr参照）
+      if (isPlaceholderBr(node)) return null
       remaining -= 1
       lastPosition = { node: parent, offset: idx + 1 }
       return null
@@ -531,7 +538,7 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
     if (n.nodeType === Node.TEXT_NODE) return (n as Text).data.length
     if (n.nodeType !== Node.ELEMENT_NODE) return 0
     if (isEmojiNode(n)) return (n.getAttribute(EMOJI_ATTR) as string).length + 2
-    if ((n as Element).tagName === 'BR') return isListItemPlaceholderBr(n) ? 0 : 1
+    if ((n as Element).tagName === 'BR') return isPlaceholderBr(n) ? 0 : 1
     // 箇条書き（resolveOffsetの同名コメント参照）: 項目間の仮想的な"\n"ぶんを加算する。
     if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
       const items = Array.from(n.childNodes)
@@ -576,7 +583,7 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
       return false
     }
     if ((n as Element).tagName === 'BR') {
-      if (!isListItemPlaceholderBr(n)) total += 1
+      if (!isPlaceholderBr(n)) total += 1
       return false
     }
     if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
@@ -1227,6 +1234,28 @@ function deleteRangeInContainer(container: Node, start: number, end: number): vo
 /** [start,end)の範囲を<blockquote data-block-format="quote">で直接包む（マーカー文字「> 」の
  * 存在を前提にしない）。Composer.tsxのinsertQuote（ボタン駆動）・wrapQuoteRange（手打ち検出）の
  * 両方から使う共通の構築ロジック（convertLinesToListItemsと同じ役割分担）。 */
+/** バグ修正（ユーザーからの報告「●1行目/●(空)/●3行目で2行目の黒点を消す」への対応中に、実機
+ * Playwrightで発見）: 最終行の行末の"\n"がブロック（箇条書き・引用）の外（直後）に残ると、ブロック
+ * 要素の直後の"\n"は空行1行ぶんとして描画されるため、複数行を選んで箇条書き/引用ボタンを押した
+ * ときや下書きの復元時に、ブロックとその次の行の間へ余計な空行が表示されていた。ブロックの直後の
+ * 行は"\n"を持たない（exitEmptyListItem・removeLineFromQuoteが作る行と同じ）という規約に揃えて
+ * 取り除き、行の区切りはdomToMarkdownが補う。投稿欄の末尾の"\n"だけの場合（カーソルを置くための
+ * 空行）は残す。取り除いた結果、次のブロックとの間に"\n"だけの空行が残る場合は<br>に置き換える
+ * （Chromeはブロックに挟まれた"\n"だけの行を↑↓キーで素通りしてしまうため、exitEmptyListItem参照）。
+ * convertLinesToListItems・convertLinesToQuoteから使う。 */
+function stripLineBreakAfterBlock(blockEl: HTMLElement): void {
+  const after = blockEl.nextSibling
+  if (after?.nodeType !== Node.TEXT_NODE || !(after as Text).data.startsWith('\n')) return
+  const t = after as Text
+  if (t.data.length > 1 || t.nextSibling) t.deleteData(0, 1)
+  const nextBlock = t.nextSibling
+  if (t.data === '\n' && nextBlock?.nodeType === Node.ELEMENT_NODE && (nextBlock as Element).getAttribute(BLOCK_FORMAT_ATTR)) {
+    t.replaceWith(document.createElement('br'))
+  } else if (t.data === '') {
+    t.remove()
+  }
+}
+
 export function convertLinesToQuote(root: HTMLElement, start: number, end: number): void {
   // start===endは「何も入力されていない行」で引用ボタンを押した場合（ユーザーからの要望
   // 「引用ボタンを押した時点で引用の表示が出るようにしたい」、convertLinesToListItemsの
@@ -1244,6 +1273,7 @@ export function convertLinesToQuote(root: HTMLElement, start: number, end: numbe
   wrapper.className = QUOTE_BLOCKQUOTE_CLASSNAME
   wrapper.appendChild(fragment)
   range.insertNode(wrapper)
+  stripLineBreakAfterBlock(wrapper)
 
   // convertLinesToListItemsの空項目キャレット処理と同じ理由（extractContents/insertNodeで
   // 元のSelectionが道連れで無効化されるため、CARET_MARKERを実在させて明示的にキャレットを置く）。
@@ -1258,6 +1288,32 @@ export function convertLinesToQuote(root: HTMLElement, start: number, end: numbe
       sel.removeAllRanges()
       sel.addRange(caretRange)
     }
+  }
+}
+
+/** ブロック（引用等）の直後に新しい空行を作り、そこへカーソルを置く。引用の空行でEnterを押して
+ * 引用を抜けるときに使う（Composer.tsxのEnter処理）。ブロックの直後の行は区切りの"\n"を持たない
+ * 規約（stripLineBreakAfterBlock参照、"\n"を置くと空行が1行余分に描画される）のため、空行は
+ * CARET_MARKERで表す（数値オフセット上はブロックの末尾と同じ位置になるため、カーソルを確実に
+ * 置く目印を兼ねる）。直後に既存の行が続く場合はその行とつながらないよう"\n"で終え、直後に
+ * 別のブロックが続く場合は<br>で終える（exitEmptyListItemの空行と同じ形）。 */
+export function insertCaretLineAfterBlock(blockEl: HTMLElement): void {
+  const parent = blockEl.parentNode as Node
+  const next = blockEl.nextSibling
+  const marker = document.createTextNode(CARET_MARKER)
+  parent.insertBefore(marker, next)
+  const nextIsBlock =
+    next?.nodeType === Node.ELEMENT_NODE && !!(next as Element).getAttribute(BLOCK_FORMAT_ATTR)
+  const nextHasText = !!next && !nextIsBlock && !isMarkerOnlyText(next)
+  if (nextIsBlock) parent.insertBefore(document.createElement('br'), next)
+  else if (nextHasText) marker.data += '\n'
+  const range = document.createRange()
+  range.setStart(marker, CARET_MARKER.length)
+  range.collapse(true)
+  const sel = window.getSelection()
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(range)
   }
 }
 
@@ -1320,15 +1376,42 @@ export function removeLineFromQuote(root: HTMLElement, blockEl: HTMLElement, lin
     parent.removeChild(blockEl)
   }
 
-  if (hasBefore) parent.insertBefore(document.createTextNode('\n'), referenceNode)
+  // バグ修正（ユーザーからの報告「｜1行目/｜2行目/｜(空行にカーソル)でDeleteを押すと、カーソルが
+  // 2行目の末尾に行ってしまう。引用の下の、引用でない行に移ってほしい」）: 以前は前半の引用と
+  // 対象行の間に区切りの"\n"を置いていたが、ブロック要素の直後の"\n"は空行1行ぶんとして描画される
+  // （exitEmptyListItemのコメント参照）ため、途中の行では引用との間に余計な空行が表示され、最終行
+  // （空行）では投稿欄の末尾に表示されない"\n"だけが残ってカーソルが2行目の末尾に見え、続けて
+  // 入力した文字が送信時に引用の2行目へつながっていた。箇条書きと同じく「ブロックの直後の行は
+  // 区切りの"\n"を持たない」規約に揃え、区切りはdomToMarkdownが補う。この行の先頭は前半の引用の
+  // 末尾と数値オフセット上同じ位置になるため、CARET_MARKERを置いてその直後へカーソルを置く
+  // （handleEnterInListItemと同じ手法）。
+  const marker = document.createTextNode(CARET_MARKER)
+  parent.insertBefore(marker, referenceNode)
   parent.insertBefore(lineFragment, referenceNode)
   if (afterBlockEl) {
     parent.insertBefore(document.createTextNode('\n'), referenceNode)
     parent.insertBefore(afterBlockEl, referenceNode)
+  } else if (
+    referenceNode &&
+    !isMarkerOnlyText(referenceNode) &&
+    !(referenceNode.nodeType === Node.TEXT_NODE && (referenceNode as Text).data.startsWith('\n'))
+  ) {
+    // 引用の最終行を外した場合、引用の直後に続いていた行は区切りの"\n"を持たない（引用の直後の
+    // 行の規約、stripLineBreakAfterBlock参照）ため、外した行とつながらないよう区切りを補う
+    parent.insertBefore(document.createTextNode('\n'), referenceNode)
   }
 
+  // Selectionを先に置いてからnormalizeする（normalizeによるテキストノードの結合でmarkerが別の
+  // ノードへ吸収されても、ライブなRangeである選択範囲は仕様上自動で追従する）
+  const range = document.createRange()
+  range.setStart(marker, CARET_MARKER.length)
+  range.collapse(true)
+  const sel = window.getSelection()
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
   root.normalize()
-  setSelectionOffsets(root, lineStart)
 }
 
 /** 検出済みの引用範囲（collectQuoteRanges）の各行頭の「> 」マーカーを削除してから
@@ -1458,29 +1541,7 @@ export function convertLinesToListItems(root: HTMLElement, start: number, end: n
   for (const item of items) listEl.appendChild(item)
   range.insertNode(listEl)
 
-  // バグ修正（ユーザーからの報告「●1行目/●(空)/●3行目で2行目の黒点を消す」への対応中に、実機
-  // Playwrightで発見）: 最終行の行末の"\n"がリストの外（直後）に残ると、ブロック要素の直後の
-  // "\n"は空行1行ぶんとして描画されるため、複数行を選んで箇条書きボタンを押したときや下書きの
-  // 復元時に、リストとその次の行の間へ余計な空行が表示されていた。リストの直後の行は"\n"を
-  // 持たない（exitEmptyListItemが作る行と同じ）という規約に揃えて取り除き、行の区切りは
-  // domToMarkdownが補う。投稿欄の末尾の"\n"だけの場合（カーソルを置くための空行）は残す。
-  // 取り除いた結果、次のブロックとの間に"\n"だけの空行が残る場合は<br>に置き換える（Chromeは
-  // ブロックに挟まれた"\n"だけの行を↑↓キーで素通りしてしまうため、exitEmptyListItem参照）。
-  const after = listEl.nextSibling
-  if (after?.nodeType === Node.TEXT_NODE && (after as Text).data.startsWith('\n')) {
-    const t = after as Text
-    if (t.data.length > 1 || t.nextSibling) t.deleteData(0, 1)
-    const nextBlock = t.nextSibling
-    if (
-      t.data === '\n' &&
-      nextBlock?.nodeType === Node.ELEMENT_NODE &&
-      (nextBlock as Element).getAttribute(BLOCK_FORMAT_ATTR)
-    ) {
-      t.replaceWith(document.createElement('br'))
-    } else if (t.data === '') {
-      t.remove()
-    }
-  }
+  stripLineBreakAfterBlock(listEl)
 
   // バグ修正（ユーザーからの報告「箇条書きの記法ができなくなっている」、jsdomでの再現テストで
   // 発見）: start===end（何も入力されていない行でボタンを押した場合）は唯一の項目が完全に
@@ -1692,7 +1753,7 @@ export function handleEnterInListItem(root: HTMLElement, itemEl: HTMLElement, cu
   // 項目の先頭でEnterを押した場合（ユーザーからの要望「●1行目/●|2行目でEnterを押したら
   // ●1行目/●/●|2行目にしてほしい」）、中身を丸ごと切り出した元の項目は子を持たない空要素になる。
   // ブラウザが空の項目に置くのと同じプレースホルダの<br>を入れ、resolveOffsetがこの項目の内側の
-  // 位置を返せるようにする（isListItemPlaceholderBr参照。子が無いと幅0の要素に入れず、この空項目での
+  // 位置を返せるようにする（isPlaceholderBr参照。子が無いと幅0の要素に入れず、この空項目での
   // Backspace等の判定がずれていた）。
   if (Array.from(itemEl.childNodes).every((c) => c.nodeType === Node.TEXT_NODE && (c as Text).data === '')) {
     itemEl.replaceChildren(document.createElement('br'))
@@ -1829,6 +1890,41 @@ export function getEmptyQuoteAtSelection(root: HTMLElement): HTMLElement | null 
   return null
 }
 
+/** カーソル（折りたたまれた選択範囲）が引用の先頭（1行目の行頭）にあれば、その引用要素を返す。
+ * 引用の先頭は直前の行の末尾と数値オフセット上同じ位置になるため、Selectionが引用の外（直前の
+ * テキストの末尾、または親要素上の引用の直前）に置かれている場合も、直後に隣接するのが引用なら
+ * その先頭にいるものとして扱う（getEmptyQuoteAtSelectionと同じ）。 */
+export function getQuoteStartAtSelection(root: HTMLElement): HTMLElement | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null
+  const range = sel.getRangeAt(0)
+  const node = range.startContainer
+  if (!root.contains(node)) return null
+  const isQuote = (n: Node | null | undefined): n is HTMLElement =>
+    !!n && n.nodeType === Node.ELEMENT_NODE && (n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'quote'
+  if (node.nodeType === Node.TEXT_NODE) {
+    const t = node as Text
+    if (range.startOffset === t.data.length && isQuote(t.nextSibling)) return t.nextSibling
+    // 引用の内側の先頭のテキストノードの先頭
+    if (range.startOffset === 0 && isQuote(t.parentNode) && t.parentNode.firstChild === t) return t.parentNode
+    return null
+  }
+  const child = node.childNodes[range.startOffset]
+  if (isQuote(child)) return child
+  if (isQuote(node) && range.startOffset === 0) return node
+  return null
+}
+
+/** 引用の1行目だけを引用から外す（getQuoteStartAtSelectionで引用の先頭にカーソルがあると判定した
+ * 場合のBackspace/Delete）。呼び出し元はCARET_MARKERを除去してから呼ぶこと。 */
+export function removeFirstLineFromQuote(root: HTMLElement, quoteEl: HTMLElement): void {
+  const { start } = computeElementOffset(root, quoteEl)
+  const quoteText = domToPlainText(quoteEl)
+  const firstNewline = quoteText.indexOf('\n')
+  const firstLineLen = firstNewline === -1 ? quoteText.length : firstNewline
+  removeLineFromQuote(root, quoteEl, start, start + firstLineLen)
+}
+
 /** 中身の空の引用（getEmptyQuoteAtSelectionで取得）でBackspaceを押した結果を処理する。
  * バグ修正（ユーザーからの報告「引用の中身をBackspace長押しで全部消すと、空の引用の枠が残る」、
  * 実機Playwrightで再現）: 引用の後ろに通常の行がある状態で末尾からBackspaceを押し続けると、
@@ -1844,7 +1940,18 @@ export function removeEmptyQuote(root: HTMLElement, quoteEl: HTMLElement): void 
   const next = quoteEl.nextSibling
   let caret: { node: Node; offset: number } = { node: parent, offset: indexOfChild(quoteEl) }
   quoteEl.remove()
-  if (prev?.nodeType === Node.TEXT_NODE && (prev as Text).data.endsWith('\n')) {
+  // 引用の直後の行は区切りの"\n"を持たない規約（stripLineBreakAfterBlock参照）のため、引用の後ろに
+  // "\n"で始まらない内容（次の行・別のブロック）が続く場合、直前の行末の"\n"はその行との区切りとして
+  // 残し、カーソルだけをその手前（直前の行の末尾）へ置く（消すと前後の行が1行につながってしまう）。
+  const nextHasLine =
+    !!next &&
+    !isMarkerOnlyText(next) &&
+    next.nodeName !== 'BR' &&
+    !(next.nodeType === Node.TEXT_NODE && (next as Text).data.startsWith('\n'))
+  if (prev?.nodeType === Node.TEXT_NODE && (prev as Text).data.endsWith('\n') && nextHasLine) {
+    const t = prev as Text
+    caret = { node: t, offset: t.data.length - 1 }
+  } else if (prev?.nodeType === Node.TEXT_NODE && (prev as Text).data.endsWith('\n')) {
     const t = prev as Text
     t.deleteData(t.data.length - 1, 1)
     caret = { node: t, offset: t.data.length }
@@ -2041,7 +2148,16 @@ function removeEmptyToggleFormatWrappers(root: HTMLElement): void {
 function removeEmptyCodeBlocks(root: HTMLElement): void {
   const blocks = root.querySelectorAll(`[${BLOCK_FORMAT_ATTR}="codeblock"]`)
   blocks.forEach((el) => {
-    if (domToPlainText(el).length === 0) el.remove()
+    // バグ修正（実機Playwrightで発見、空の投稿欄でコードブロックボタンを押しても枠が出なかった）:
+    // ボタンで作った直後の空のコードブロック（wrapRangeAsCodeBlockのstart===end）は、カーソルを
+    // 置くためのCARET_MARKERだけを持つ。domToPlainTextはCARET_MARKERを除外するため空と判定され、
+    // 作った直後のafterMutate（→syncLiveFormatting）で即座に消されていた。CARET_MARKERを持つ
+    // （＝これから入力する）ものは残す。中身を消し切った場合はCARET_MARKERを持たないため従来どおり消える。
+    // 中身の判定はtextContent（<br>を含まない）で行う。ブラウザが中身を消し切ったコードブロックに
+    // 置くプレースホルダの<br>をdomToPlainTextは"\n"1文字と数えるため、中身を全部消しても枠が
+    // 消えなかった（実機Playwrightで確認）。
+    const raw = el.textContent ?? ''
+    if (stripCaretMarker(raw) === '' && !raw.includes(CARET_MARKER) && !el.querySelector('img')) el.remove()
   })
 }
 
