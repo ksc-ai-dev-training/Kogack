@@ -1333,6 +1333,21 @@ export default function Composer({
       send()
       return
     }
+    // 書式のショートカット（Slackと同じ Ctrl+B/I/U、取り消し線は Ctrl+Shift+X）。contentEditable
+    // ではブラウザ標準のCtrl+B等が<b>/<i>/<u>を挿入し、入力中は太字等に見えるのに送信時には
+    // 記法へ変換されず書式が消えていた。書式ボタンと同じ処理へ振り向ける（コード表示中は
+    // ボタンと同じく他の書式を付けられない）
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const key = e.key.toLowerCase()
+      const kind: ToggleFormatKind | null = e.shiftKey
+        ? (key === 'x' ? 'strike' : null)
+        : key === 'b' ? 'bold' : key === 'i' ? 'italic' : key === 'u' ? 'underline' : null
+      if (kind) {
+        e.preventDefault()
+        if (!codeFormatActive) toggleFormatButton(kind)
+        return
+      }
+    }
     // contentEditableではEnterキーの既定挙動（ブロック要素の分割等、ブラウザ間で挙動が
     // 大きく異なる）に任せず、常に自前で処理する（改行はテキストノード内の生の"\n"文字として
     // 挿入し、white-space:pre-wrapで見た目を成立させる。詳細はcomposerEditing.tsの
@@ -1686,7 +1701,7 @@ export default function Composer({
         <button
           type="button"
           disabled={codeFormatActive}
-          title="太字（選択範囲が無ければ、押している間タイプする文字が太字になります）"
+          title="太字 Ctrl+B（選択範囲が無ければ、押している間タイプする文字が太字になります）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('bold')
@@ -1700,7 +1715,7 @@ export default function Composer({
         <button
           type="button"
           disabled={codeFormatActive}
-          title="斜体（選択範囲が無ければ、押している間タイプする文字が斜体になります）"
+          title="斜体 Ctrl+I（選択範囲が無ければ、押している間タイプする文字が斜体になります）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('italic')
@@ -1714,7 +1729,7 @@ export default function Composer({
         <button
           type="button"
           disabled={codeFormatActive}
-          title="下線（選択範囲が無ければ、押している間タイプする文字に下線が付きます）"
+          title="下線 Ctrl+U（選択範囲が無ければ、押している間タイプする文字に下線が付きます）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('underline')
@@ -1728,7 +1743,7 @@ export default function Composer({
         <button
           type="button"
           disabled={codeFormatActive}
-          title="取り消し線（選択範囲が無ければ、押している間タイプする文字に取り消し線が付きます）"
+          title="取り消し線 Ctrl+Shift+X（選択範囲が無ければ、押している間タイプする文字に取り消し線が付きます）"
           onMouseDown={(e) => {
             e.preventDefault()
             toggleFormatButton('strike')
