@@ -56,7 +56,7 @@ async def maybe_trigger(channel_id: int, body: str) -> None:
             if mentions_data:
                 await insert_mention_blocks(
                     conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
-                    channel_id=channel_id,
+                    channel_id=channel_id, body=rule["action_body"],
                 )
         # トランザクションのコミット後に呼ぶ（_dispatch_recurring_postsと同じ順序。ai_agent側は
         # 自身のasyncio.create_taskでAI応答生成を非同期起動するfire-and-forgetのため、この呼び出し

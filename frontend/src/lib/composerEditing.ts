@@ -701,6 +701,27 @@ export function replaceRangeWithMentionSpan(
  * メールアドレス（例: foo@here.com）を誤ってハイライトしないよう、@の直前が英数字・記号類の
  * 場合は対象外にする。後ろの位置から順に置き換えることで、手前の一致のオフセットがずれないようにする。
  * 作成したspanと一致した表示名を文書順で返す（選択範囲の復元は呼び出し元が行う）。 */
+/** cursor（プレーンテキスト上のオフセット）がコード（1行）・コードブロックの中にあるか。
+ * コード内の「@名前」はメンションにしない（ユーザーからの明示的な要望「コード表記の中のものは
+ * メンション反応しないでほしい」、2026-09-28。送信後の判定はバックエンドのmentions.strip_code）。
+ * 実DOMへ変換済みのコード要素に加え、閉じ側の記号をまだ打っていない入力中のコード
+ * （同じ行で閉じていないバッククォート1つ／閉じていない3連バッククォート）も対象にする。 */
+export function isOffsetInCode(root: HTMLElement, cursor: number): boolean {
+  const pos = resolveOffset(root, cursor)
+  let node: HTMLElement | null =
+    pos.node.nodeType === Node.TEXT_NODE ? (pos.node as Text).parentElement : (pos.node as HTMLElement)
+  while (node && node !== root) {
+    if (node.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR) === 'code' || node.getAttribute(BLOCK_FORMAT_ATTR) === 'codeblock') {
+      return true
+    }
+    node = node.parentElement
+  }
+  const before = domToPlainText(root).slice(0, cursor)
+  if ((before.match(/```/g) ?? []).length % 2 === 1) return true
+  const line = before.slice(before.lastIndexOf('\n') + 1).replace(/```/g, '')
+  return (line.match(/`/g) ?? []).length % 2 === 1
+}
+
 export function highlightMentionsInRange(
   root: HTMLElement,
   start: number,
@@ -714,7 +735,7 @@ export function highlightMentionsInRange(
   let i = Math.max(0, start)
   while (i < Math.min(end, text.length)) {
     const hit =
-      text[i] === '@' && !(i > 0 && /[A-Za-z0-9._%+-]/.test(text[i - 1]))
+      text[i] === '@' && !(i > 0 && /[A-Za-z0-9._%+-]/.test(text[i - 1])) && !isOffsetInCode(root, i + 1)
         ? sorted.find((d) => i + d.length <= end && text.startsWith(d, i))
         : undefined
     if (hit) {

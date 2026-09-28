@@ -301,7 +301,7 @@ async def post_reply(
         )
         blocks = await insert_mention_blocks(
             conn, row["id"], body.mentions, channel_id=parent["channel_id"], dm_id=parent["dm_id"],
-            sender_user_id=user.id,
+            sender_user_id=user.id, body=body.body,
         )
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
         # バグ修正（2026-09-14）: 元発言（スレッド元）のthread_reply_countは`_MESSAGES_SELECT`の

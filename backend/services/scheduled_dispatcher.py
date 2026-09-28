@@ -120,7 +120,7 @@ async def _dispatch_due_messages() -> None:
                     # スナップショットから除外するために使う。当時@hereはまだ存在せず未対応だった）
                     await insert_mention_blocks(
                         conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
-                        channel_id=row["channel_id"], sender_user_id=row["sender_user_id"],
+                        channel_id=row["channel_id"], sender_user_id=row["sender_user_id"], body=row["body"],
                     )
             if row["thread_parent_id"] is not None:
                 # バグ修正（2026-09-14）: routers/messages.py post_replyと同じ理由。予約投稿が
@@ -211,7 +211,7 @@ async def _dispatch_recurring_posts() -> None:
             if mentions_data:
                 await insert_mention_blocks(
                     conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
-                    channel_id=row["channel_id"],
+                    channel_id=row["channel_id"], body=row["body"],
                 )
         # 追加（2026-09-15、ユーザーからの明示的な要望「定期投稿でAIをメンションしても
         # AIがいつも通り反応するようにしてほしい」）: 定期投稿の本文がチャンネルAIへの

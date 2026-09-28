@@ -81,6 +81,7 @@ import traceback
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+import mentions
 import polls
 from database import get_pool
 from services import ai_client, app_help_search, channel_history_search, doc_search, message_link_context
@@ -251,7 +252,9 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   3通り。太字・斜体・下線・取り消し線は重ねられるが、コード（1行）は他の書式と組み合わせられない。
   空の箇条書き・引用の行でもう一度Enterを押すと普通の行に戻る。見出し（`#`）・番号付きリスト
   （`1. `）・表・文字色・文字サイズ・箇条書きの入れ子には対応しておらず、記号はそのまま文字として
-  表示される。Slackの`*太字*`（アスタリスク1つ）や`~取り消し~`（チルダ1つ）はKogackでは書式に
+  表示される。コード（1行）・コードブロックの中に書いた「@名前」「@channel」「@here」
+  「@チャンネルAI名」はメンションにならない（通知もAIの応答も起きず、文字はそのままコードとして
+  表示される）ため、メンションせずに書き方だけを示したいときに使える。Slackの`*太字*`（アスタリスク1つ）や`~取り消し~`（チルダ1つ）はKogackでは書式に
   ならないので、Slack・一般的なMarkdownの記法をKogackの記法として案内しないこと。また、
   あなた自身の返信でも見出し（`#`）と表は使わないこと（書式として表示されず記号のまま見える）
 - Kogack（このチャットアプリ自体）の使い方（メッセージの送り方・書式・メンション・
@@ -780,8 +783,11 @@ def detect_mention(body: str, persona_name: str) -> bool:
     """AIメンションの検知は本文中の「@ペルソナ名」の文字列一致のみ（ID参照化しない。
     基本設計書5.22節「設計判断」）。F-41のメンションピッカーの候補にはチャンネル本体・スレッド
     返信のいずれもチャンネルAIを含める（Composer.tsx）が、それでも本文としては同じ「@ペルソナ名」の
-    プレーンテキストが入るだけで、この文字列一致の判定方法自体は変わらない。"""
-    return f"@{persona_name}" in body
+    プレーンテキストが入るだけで、この文字列一致の判定方法自体は変わらない。
+    コード表記（`…`・```…```）の中に書かれた「@ペルソナ名」はメンションとみなさない
+    （ユーザーからの明示的な要望「コード表記の中のものはメンション反応しないでほしい」、
+    2026-09-28。mentions.strip_code参照）"""
+    return f"@{persona_name}" in mentions.strip_code(body)
 
 
 async def _fetch_settings(channel_id: int) -> dict | None:

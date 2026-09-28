@@ -531,7 +531,13 @@ function renderInlineSegment(
   }
   for (const def of mentionDefs) {
     if (usedMentionNeedles.has(def.needle)) continue
-    const idx = text.indexOf(def.needle)
+    // コード（priority 0の候補）の中の「@名前」はメンションではないため読み飛ばし、コードの外の
+    // 最初の出現をハイライトする（ユーザーからの明示的な要望「コード表記の中のものはメンション
+    // 反応しないでほしい」）
+    let idx = text.indexOf(def.needle)
+    while (idx !== -1 && candidates.some((c) => c.priority === 0 && idx < c.end && c.start < idx + def.needle.length)) {
+      idx = text.indexOf(def.needle, idx + 1)
+    }
     if (idx !== -1) {
       usedMentionNeedles.add(def.needle)
       candidates.push({

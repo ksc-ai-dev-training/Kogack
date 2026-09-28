@@ -719,7 +719,7 @@ async def post_message(
             channel_id, user.id, body.body,
         )
         blocks = await insert_mention_blocks(
-            conn, row["id"], body.mentions, channel_id=channel_id, sender_user_id=user.id,
+            conn, row["id"], body.mentions, channel_id=channel_id, sender_user_id=user.id, body=body.body,
         )
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     await trigger_matcher.maybe_trigger(channel_id, body.body)

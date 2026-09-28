@@ -375,7 +375,9 @@ async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser =
                VALUES ($1, 'human', $2, $3) RETURNING *""",
             dm_id, user.id, body.body,
         )
-        blocks = await insert_mention_blocks(conn, row["id"], body.mentions, dm_id=dm_id, sender_user_id=user.id)
+        blocks = await insert_mention_blocks(
+            conn, row["id"], body.mentions, dm_id=dm_id, sender_user_id=user.id, body=body.body,
+        )
         attachments = await insert_attachments(conn, row["id"], user.id, body.attachments)
     # デスクトップ通知②（Web Push、2026-09-11）。投稿完了を待たせないfire-and-forget起動。
     # blocksは通知の絞り込みには使わない（DM本体は常に自分宛てのため'mentions'/'all'は同じ動作、

@@ -3,8 +3,31 @@
 # A-19（dms.py）から呼び出す。AIへのメンション検知（services/ai_agent.py起動）はチャンネルAI自体が
 # チャンネル専用機能のためDMでは対象外のまま（基本設計書8章）。
 import json
+import re
 
 from pydantic import BaseModel, Field
+
+# コード表記（```コードブロック```・`コード（1行）`）。フロントの表示（MessageList.tsxの
+# CODE_BLOCK_REGEX・INLINE_CODE_REGEX）と同じ規則。閉じていない```は投稿欄が送信時に自動で
+# 閉じる（composerEditing.closeDanglingCodeFence）が、念のため文末までをコードとして扱う
+_CODE_BLOCK_RE = re.compile(r"```[\s\S]*?(?:```|$)")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
+def strip_code(body: str) -> str:
+    """本文からコード表記の部分を取り除く（同じ長さの空白に置き換える）。コードの中に書かれた
+    「@名前」「@channel」「@チャンネルAI名」はメンションとして扱わない（ユーザーからの明示的な要望
+    「コード表記の中のものはメンション反応しないでほしい。コード表記の中の文章はそのままで」、
+    2026-09-28）。保存・表示する本文自体は変えず、メンションの判定にだけこの結果を使う
+    （insert_mention_blocks・ai_agent.detect_mention）"""
+    body = _CODE_BLOCK_RE.sub(lambda m: " " * len(m.group(0)), body)
+    return _INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), body)
+
+
+def _needle(m: "MentionInput") -> str:
+    if m.kind in ("channel", "here"):
+        return f"@{m.kind}"
+    return f"@{m.display_name_snapshot}"
 
 # F-41 @here（2026-09-11、ユーザーからの明示的な要望）。在席判定の有効期間（秒）。この秒数以内に
 # users.last_seen_at（A-04ポーリングのたびに更新、routers/auth.py参照）が更新されている参加者を
@@ -32,7 +55,7 @@ def _block_out(row) -> dict:
 
 async def insert_mention_blocks(
     conn, message_id: int, mentions: list[MentionInput], *, channel_id: int | None = None, dm_id: int | None = None,
-    sender_user_id: int | None = None,
+    sender_user_id: int | None = None, body: str | None = None,
 ) -> list[dict]:
     """mentionsのうち当該チャンネル/DMの参加者であるものだけをT-07へ保存する
     （基本設計書5.22節「設計判断」: target_user_idが参加者であることをAPI側で検証）。
@@ -41,7 +64,12 @@ async def insert_mention_blocks(
     sender_user_idは@here（在席判定）で送信者自身を対象から除くために使う。
     バグ修正（2026-09-04）: 従来はchannel_id専用でDMは対象外（呼び出し元がif文で分岐して
     空リストを返すだけ）だったが、ユーザーからの要望でDMでもメンションできるようにするため、
-    direct_message_membersを見る経路を追加した"""
+    direct_message_membersを見る経路を追加した。
+    bodyを渡すと、本文のコード表記の外に「@名前」（@channel/@here）が無いメンションは保存しない
+    （コードの中に書いただけのメンションで通知しない。strip_code参照）"""
+    if body is not None:
+        plain = strip_code(body)
+        mentions = [m for m in mentions if _needle(m) in plain]
     if not mentions:
         return []
     blocks: list[dict] = []

@@ -17,6 +17,7 @@ import {
   replaceRangeWithText,
   replaceRangeWithMentionSpan,
   highlightMentionsInRange,
+  isOffsetInCode,
   insertTextAfterNode,
   insertAtomicEmojiAtCursor,
   tryConvertJustCompletedShortcode,
@@ -485,7 +486,8 @@ export default function Composer({
     if (mentionCandidates) {
       const cursor = getSelectionOffsets(root)?.start ?? 0
       const match = detectMentionQuery(domToPlainText(root), cursor)
-      setPickerQuery(match?.query ?? null)
+      // コード（1行）・コードブロックの中で打った「@」ではメンション候補を出さない
+      setPickerQuery(match && !isOffsetInCode(root, cursor) ? match.query : null)
       setActiveIndex(0)
     }
   }
