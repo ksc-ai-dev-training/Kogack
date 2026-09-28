@@ -605,12 +605,38 @@ def _build_doc_scope_section(out_of_scope_policy: str) -> str:
     return "\n".join(lines)
 
 
+# 口調が未設定（channel_ai_settings.persona_toneが空）のときの既定。従来は「自然な日本語」だけで
+# 文体の指定が無く、1つの返信の中でです・ます調と、だ・である調（「〜まとめる。」「〜できる。」等）が
+# 混ざっていた（ユーザーからの報告「AIの応答の口調が不安定。一回の返答の中で、敬語を使う部分と、
+# だ・である調になる部分がある」、2026-09-28）。既定を明示的なです・ます調にする
+DEFAULT_PERSONA_TONE = "です・ます調の丁寧語（文末は常に「です」「ます」で統一する）"
+
+
+def _style_rules(persona_tone: str) -> str:
+    """文体の統一と、人の名前の敬称についての指示（メンション応答・要約の両方の末尾に置く）。
+    口調の指示は返信全体の語尾に及ぶため、生成直前の最も効きやすい位置に置く（_build_system_prompt
+    末尾の「重要: あなたの現在の口調設定は」と同じ理由）。敬称の既定「さん」はユーザーからの明示的な
+    要望「特に指定が無い場合（デフォルト）にはユーザー名の後に『さん』を付けるようにしてほしい」
+    （2026-09-28）"""
+    return (
+        f'文体の統一: 返信の最初の文から最後の文まで、口調設定「{persona_tone}」の1つの文体だけで'
+        f'書くこと。です・ます調で書く場合は、箇条書きの項目・補足・注意書き・参考情報・締めの一文も'
+        f'含めてすべてです・ます調にし、「〜する。」「〜だ。」「〜である。」「〜できる。」「〜まとめる。」'
+        f'のようなだ・である調の文末を1文も混ぜないこと（箇条書きの項目を名詞で終える体言止めは可）。'
+        f'口調設定がだ・である調やキャラクタの話し方を指定している場合は、逆にそちらで統一すること。\n'
+        f'敬称: 利用者・参加者など人の名前を書くとき（呼びかけ・言及のどちらでも）の敬称は、'
+        f'口調設定「{persona_tone}」または振る舞い定義に呼び方の指定（「くん」付け・「様」付け・'
+        f'呼び捨て等）があれば、必ずその指定に従うこと（その場合は「さん」を使わない）。呼び方の指定が'
+        f'無い場合に限り、氏名の後に必ず「さん」を付けること（例: 山田 太郎さん）。'
+    )
+
+
 def _build_system_prompt(
     settings: dict, auto_response_section: str = "", skills_section: str = "", requester_name: str = "",
     channel_context: dict | None = None, doc_scope_section: str = "", members_section: str = "",
 ) -> str:
     persona_name = settings["persona_name"] or "Kogack AI"
-    persona_tone = settings["persona_tone"] or "自然な日本語"
+    persona_tone = settings["persona_tone"] or DEFAULT_PERSONA_TONE
     behavior = (settings["behavior_prompt"] or "").strip()
     lines = [f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}']
     if channel_context and channel_context.get("name"):
@@ -661,7 +687,8 @@ def _build_system_prompt(
         lines.append(
             f"今あなたに話しかけている利用者の現在の名前は「{requester_name}」です。"
             f"これより前の会話履歴（あなた自身の過去の発言を含む）で別の名前が使われていても、"
-            f"それは名前変更前の古い情報のため使わず、必ず「{requester_name}」と呼んでください。"
+            f"それは名前変更前の古い情報のため使わず、必ず「{requester_name}」という名前で呼んでください"
+            f"（敬称はこのプロンプト末尾の「敬称」の指示に従う）。"
         )
     if behavior:
         lines.append(behavior)
@@ -693,6 +720,7 @@ def _build_system_prompt(
         f'される前の古い発言であり、絶対に真似しないでください。今から書く返信は、最初の文字から'
         f'最後の文字まで一貫して「{persona_tone}」のとおりに書いてください。'
     )
+    lines.append(_style_rules(persona_tone))
     return "\n".join(lines)
 
 
@@ -1413,14 +1441,15 @@ SUMMARY_INSTRUCTION = "ここまでのやりとりを要約してください。
 
 def _build_summary_prompt(settings: dict) -> str:
     persona_name = settings["persona_name"] or "Kogack AI"
-    persona_tone = settings["persona_tone"] or "自然な日本語"
+    persona_tone = settings["persona_tone"] or DEFAULT_PERSONA_TONE
     return (
         f'あなたは「{persona_name}」というチャンネルAIです。口調: {persona_tone}\n'
         "これまでのやりとりの要約を求められています。次の方針に従うこと。\n"
         "- 誰が何を発言・決定したかが分かるよう、要点を箇条書きでまとめる\n"
         "- 未解決の質問や次に必要なアクションがあれば末尾に明記する\n"
         "- 元のやりとりに無い情報を推測・創作しない\n"
-        "- 日本語で簡潔にまとめる（目安400字程度）"
+        "- 日本語で簡潔にまとめる（目安400字程度）\n"
+        + _style_rules(persona_tone)
     )
 
 
