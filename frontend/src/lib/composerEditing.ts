@@ -1925,6 +1925,142 @@ export function removeFirstLineFromQuote(root: HTMLElement, quoteEl: HTMLElement
   removeLineFromQuote(root, quoteEl, start, start + firstLineLen)
 }
 
+/** 引用の2行目以降の行頭でBackspaceを押したとき、その行だけを引用から外す（Deleteの行頭処理と
+ * 同じremoveLineFromQuote）。該当しなければ何もせずfalseを返す。CARET_MARKERの除去もこの関数が
+ * 行うため、呼び出し元は除去前に呼ぶこと。
+ * バグ修正（ユーザーからの報告「｜1行目/｜(空行にカーソル)でBackspace（Macのdeleteキー）を押すと、
+ * 2行目の引用が外れるのではなく1行目の末尾の1文字が消える」）: 空行の目印のCARET_MARKERを
+ * 片付けると、数値オフセットの復元が「直前の内容の末尾」を優先する既知のバイアス（resolveOffset
+ * 参照）でカーソルが区切りの"\n"の手前（1行目の末尾）へ巻き戻り、ネイティブのBackspaceが"\n"では
+ * なく1行目の最後の文字を消していた。行頭かどうかはマーカーを片付ける前のDOM上で判定し、対象行は
+ * 「引用内の何番目の"\n"の直後か」で覚えておいてマーカー除去後に位置を求め直す。 */
+export function removeQuoteLineAtSelection(root: HTMLElement): boolean {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false
+  const range = sel.getRangeAt(0)
+  let quote: Node | null = range.startContainer
+  while (quote && quote !== root && !(quote.nodeType === Node.ELEMENT_NODE && (quote as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'quote')) {
+    quote = quote.parentNode
+  }
+  if (!quote || quote === root) return false
+  const quoteEl = quote as HTMLElement
+  const before = document.createRange()
+  before.setStart(quoteEl, 0)
+  before.setEnd(range.startContainer, range.startOffset)
+  const textBefore = domToPlainText(before.cloneContents())
+  if (!textBefore.endsWith('\n')) return false
+  const lineIndex = textBefore.split('\n').length - 1
+
+  removeCaretMarkerFromDom(root)
+  // lineIndex番目の"\n"（行の区切り）の位置を、マーカー除去後のDOMで数値オフセットとして求める
+  const newlineOffsets: number[] = []
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const data = (node as Text).data
+      for (let i = data.indexOf('\n'); i !== -1; i = data.indexOf('\n', i + 1)) {
+        newlineOffsets.push(domPositionToOffset(root, node, i))
+      }
+      return
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    for (const child of Array.from(node.childNodes)) walk(child)
+  }
+  walk(quoteEl)
+  if (newlineOffsets.length < lineIndex) return false
+  const lineStart = newlineOffsets[lineIndex - 1] + 1
+  const lineEnd = lineIndex < newlineOffsets.length ? newlineOffsets[lineIndex] : computeElementOffset(root, quoteEl).end
+  removeLineFromQuote(root, quoteEl, lineStart, lineEnd)
+  return true
+}
+
+/** カーソルの直前（同じテキストノード内、CARET_MARKERは読み飛ばす）が区切りの"\n"なら、Backspaceと
+ * してその"\n"を自前で消す。該当しなければ何もせずfalseを返す。呼び出し元はCARET_MARKERの除去前に
+ * 呼ぶこと。
+ * バグ修正（引用のBackspace不具合の調査中に発見、実機Playwrightで確認）: 「ab→Enter→Backspace」で
+ * 空行ではなく"b"が消えていた。末尾の"\n"の直後の行はCARET_MARKERがあって初めて描画されるため、
+ * マーカーを片付けてからネイティブのBackspaceに任せると、ブラウザはカーソルを描画上の位置（直前の
+ * 行の末尾）として扱い、"\n"ではなく直前の行の最後の1文字を消してしまう。消した後もカーソルの直前が
+ * "\n"（＝まだ空行の上にいる）なら、Enterと同じくCARET_MARKERを置いてその直後へカーソルを置く。 */
+export function deleteLineBreakBeforeCaret(root: HTMLElement): boolean {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false
+  const range = sel.getRangeAt(0)
+  const t = range.startContainer
+  if (t.nodeType !== Node.TEXT_NODE || !root.contains(t)) return false
+  const text = t as Text
+  const off = range.startOffset
+  let idx = off - 1
+  while (idx >= 0 && text.data[idx] === CARET_MARKER) idx--
+  if (idx < 0 || text.data[idx] !== '\n') return false
+  text.deleteData(idx, off - idx)
+  let caretOffset = idx
+  if (idx > 0 && text.data[idx - 1] === '\n') {
+    if (text.data[idx] !== CARET_MARKER) text.insertData(idx, CARET_MARKER)
+    caretOffset = idx + CARET_MARKER.length
+  }
+  const caret = document.createRange()
+  caret.setStart(text, caretOffset)
+  caret.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(caret)
+  return true
+}
+
+/** 引用・箇条書きの直後の空行（中身が空かCARET_MARKERだけの行）でBackspaceを押したとき、その空行を
+ * 消して引用の最終行（箇条書きなら最後の項目）の末尾へカーソルを置く。該当しなければ何もせずfalseを
+ * 返す。呼び出し元はCARET_MARKERの除去前に呼ぶこと（除去するとカーソルがブロックの内側へ巻き戻って
+ * 判定できない）。ネイティブ処理に任せると、removeQuoteLineAtSelectionと同じ理由でカーソルが
+ * ブロックの末尾へ巻き戻った状態でBackspaceが実行され、空行ではなく引用の最後の1文字（箇条書きでは
+ * 最後の項目の中身）が消えていた（実機Playwrightで確認）。 */
+export function removeEmptyLineAfterBlock(root: HTMLElement): boolean {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false
+  const range = sel.getRangeAt(0)
+  const c = range.startContainer
+  const isBlock = (n: Node | null): n is HTMLElement =>
+    !!n &&
+    n.nodeType === Node.ELEMENT_NODE &&
+    ['quote', 'list'].includes((n as Element).getAttribute(BLOCK_FORMAT_ATTR) ?? '')
+  let first: Node | null
+  if (c === root) first = root.childNodes[range.startOffset] ?? null
+  else if (c.parentNode === root && c.nodeType === Node.TEXT_NODE) {
+    // 空行は「マーカーだけのテキスト」か「"\n"で始まるテキストの先頭」のどちらか
+    const t = c as Text
+    if (!isMarkerOnlyText(t) && !(range.startOffset === 0 && t.data.startsWith('\n'))) return false
+    first = t
+  } else return false
+  // 行の先頭側（直前が引用・箇条書きであること）
+  let prev: Node | null = first ? first.previousSibling : root.lastChild
+  if (c === root && range.startOffset > 0) prev = root.childNodes[range.startOffset - 1]
+  while (isMarkerOnlyText(prev)) prev = prev!.previousSibling
+  if (!isBlock(prev)) return false
+  const target = isListBlockNode(prev) ? (prev.lastElementChild as HTMLElement | null) : prev
+  if (!target) return false
+  // 行の末尾側（空行であること: 後ろが無い・<br>・"\n"で始まるテキスト）
+  const markers: Node[] = []
+  let next: Node | null = first
+  while (isMarkerOnlyText(next)) {
+    markers.push(next!)
+    next = next!.nextSibling
+  }
+  if (next && next.nodeName !== 'BR' && !(next.nodeType === Node.TEXT_NODE && (next as Text).data.startsWith('\n'))) {
+    return false
+  }
+  for (const m of markers) m.parentNode?.removeChild(m)
+  if (next?.nodeName === 'BR' && !next.nextSibling) (next as HTMLElement).remove()
+  else if (next?.nodeType === Node.TEXT_NODE) (next as Text).deleteData(0, 1)
+
+  const caret = document.createRange()
+  const last = target.lastChild
+  if (last?.nodeName === 'BR') caret.setStartBefore(last)
+  else if (last?.nodeType === Node.TEXT_NODE) caret.setStart(last, (last as Text).data.length)
+  else caret.setStart(target, target.childNodes.length)
+  caret.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(caret)
+  return true
+}
+
 /** 中身の空の引用（getEmptyQuoteAtSelectionで取得）でBackspaceを押した結果を処理する。
  * バグ修正（ユーザーからの報告「引用の中身をBackspace長押しで全部消すと、空の引用の枠が残る」、
  * 実機Playwrightで再現）: 引用の後ろに通常の行がある状態で末尾からBackspaceを押し続けると、

@@ -48,6 +48,9 @@ import {
   insertCaretLineAfterBlock,
   getQuoteStartAtSelection,
   removeFirstLineFromQuote,
+  removeQuoteLineAtSelection,
+  removeEmptyLineAfterBlock,
+  deleteLineBreakBeforeCaret,
   isListBlockNode,
   handleDeleteInEmptyListItem,
   computeElementOffset,
@@ -1177,6 +1180,18 @@ export default function Composer({
       if (blankLine && (isListBlockNode(blankLine.prev) || blankLine.prev?.nodeName === 'BR')) {
         e.preventDefault()
         removeBlankLineBetweenLists(blankLine, 'Backspace')
+        afterMutate()
+        return
+      }
+      // 引用の2行目以降の行頭・引用の直後の空行でのBackspaceも、CARET_MARKERを片付けるとカーソルが
+      // 直前の行の末尾へ巻き戻って判定できなくなる（最後の1文字が消えていた）ため、先に処理する
+      // （removeQuoteLineAtSelection・removeEmptyLineAfterBlockのコメント参照）
+      // 空行の区切りの"\n"の直後でのBackspaceも同じ理由で自前で"\n"を消す（deleteLineBreakBeforeCaret参照）
+      if (
+        root &&
+        (removeQuoteLineAtSelection(root) || removeEmptyLineAfterBlock(root) || deleteLineBreakBeforeCaret(root))
+      ) {
+        e.preventDefault()
         afterMutate()
         return
       }
