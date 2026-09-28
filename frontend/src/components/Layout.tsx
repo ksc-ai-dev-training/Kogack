@@ -402,6 +402,16 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               ))}
             </div>
           </div>
+          <GuardedNavLink
+            to="/help"
+            className={({ isActive }) =>
+              `mb-1 flex items-center gap-1.5 rounded-[7px] px-2 py-1.5 text-xs font-medium ${
+                isActive ? 'bg-accent-50 text-accent-700' : 'text-ink-muted hover:bg-surface-muted'
+              }`
+            }
+          >
+            📖 操作マニュアル
+          </GuardedNavLink>
           {me.role === 'admin' && (
             <GuardedNavLink
               to="/admin"

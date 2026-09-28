@@ -161,8 +161,11 @@ export function messageLinkFor(m: Pick<Message, 'id' | 'channel_id' | 'dm_id' | 
 }
 
 // Kogack自身のチャンネル・DMへのリンクは新しいタブではなく画面内遷移で開く（発言リンクを
-// クリックするたびにタブが増えていくのを避ける）。該当しなければnull
+// クリックするたびにタブが増えていくのを避ける）。該当しなければnull。
+// `/help#sec5`のような操作マニュアルへの相対リンク（チャンネルAIが回答末尾に付ける。
+// services/ai_agent.pyの_attach_manual_link参照）も画面内遷移で開く
 function toInternalAppPath(url: string): string | null {
+  if (HELP_PATH_REGEX.test(url)) return url
   try {
     const u = new URL(url)
     if (u.origin !== window.location.origin || !/^\/(channels|dms)\/\d+/.test(u.pathname)) return null
@@ -193,7 +196,8 @@ function renderLink(key: string, url: string, label: string, className: string) 
 // 記法は他の簡易書式（`**太字**`等）と同じくGFM風の`[表示文字](URL)`を採用した（Slack自体の
 // `<url|text>`記法は他の書式と同じ理由で避けた。Composer.tsxの🔗ボタン・URL貼り付け時の
 // 自動変換のいずれもこの記法で本文へ挿入する）。表示文字は`]`・改行を含まない前提の簡易版
-const NAMED_LINK_REGEX = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g
+const HELP_PATH_REGEX = /^\/help(?:#[\w-]*)?$/
+const NAMED_LINK_REGEX = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|\/help(?:#[\w-]*)?)\)/g
 
 function findNamedLinkMatches(text: string): { start: number; end: number; label: string; url: string }[] {
   const results: { start: number; end: number; label: string; url: string }[] = []

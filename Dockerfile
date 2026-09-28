@@ -43,6 +43,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 残りの backend のソースコードをコピーする
 COPY backend/ ./
 
+# 操作マニュアル（アプリ内の /manual/ で配信する。backend/routers/manual.py は
+# 「backend の1つ上の階層にある docs」を読む前提のため、frontend/dist と同じく位置関係を再現する）
+COPY ["docs/06_操作マニュアル.html", "/app/docs/"]
+COPY docs/assets/ /app/docs/assets/
+COPY ["docs/操作マニュアル画像/", "/app/docs/操作マニュアル画像/"]
+
 # コンテナの中を root ユーザーのままにしない（最小権限。もしアプリに
 # 脆弱性があっても、コンテナ内で管理者権限を奪われる被害を抑える）。
 # ただし参照ドキュメント用のFly Volume（/data）はroot所有のままマウントされるため、

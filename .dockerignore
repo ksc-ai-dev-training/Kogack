@@ -32,7 +32,12 @@ frontend/dist
 backend/uploads
 
 # ---- 設計ドキュメント・研修資料・エディタ設定。アプリの実行そのものには不要 ----
-docs
+# ただし操作マニュアル（本体・共通スタイル・画面キャプチャ）だけはアプリ内で配信するため含める
+# （backend/routers/manual.py）
+docs/*
+!docs/06_操作マニュアル.html
+!docs/assets
+!docs/操作マニュアル画像
 検討資料
 .claude
 CLAUDE.md

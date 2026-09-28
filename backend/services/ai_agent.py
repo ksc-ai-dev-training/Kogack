@@ -300,6 +300,14 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   ください。」とだけ答えること（このAIが過去に実際に、無関係な検索結果しか得られない
   状況で、いかにも実在しそうな具体的なボタン名・絵文字を作文して案内してしまった
   ことがあるため、特に注意すること）**
+- **Kogack（このチャットアプリ自体）の機能・使い方・操作手順について答えた返信は、上記の
+  個別の事実（チャンネル作成・ログアウト・アンケート・書式など）に基づいて答えた場合も含め、
+  必ず最後を「詳しくは操作マニュアルをご確認ください。」という1文で締めくくること。**
+  この1文にはURLやリンク記法を付けず、この文言のまま書くこと（操作マニュアルへのリンクは
+  システムが自動で付ける）。Kogackの使い方と関係の無い返信（雑談、業務の質問、参照ドキュメント・
+  会話履歴に基づく回答、アンケートの結果の集計など）には付けないこと。なお操作マニュアル自体は、
+  画面左下のサイドバー（文字サイズの切り替えの下）にある「📖 操作マニュアル」からアプリ内で
+  いつでも開ける
 - これまでの会話履歴の各発言には、冒頭に`[YYYY-MM-DD HH:MM]`の形式で投稿日時（日本時間）が
   付いている。「これは何時の発言？」のように投稿時刻を尋ねられた場合は、この値をそのまま使って
   答えること。この日時が付いていない発言（要約結果や一部の引用等）については、時刻を推測で
@@ -1005,6 +1013,28 @@ def _strip_leaked_timestamp_prefix(text: str) -> str:
     return _LEAKED_TIMESTAMP_PREFIX_RE.sub("", text)
 
 
+# 操作マニュアルへのリンク（ユーザーからの明示的な要望「AIにチャットアプリの機能について聞いたときに、
+# 文末に『詳しくは操作マニュアルをご確認ください。』みたいな感じでマニュアルのリンクを送ってくれる
+# ようにしてほしい」、2026-09-28）。「Kogackの使い方の質問かどうか」の判断はモデルに任せ
+# （FIXED_RULESで該当する返信をこの定型文で締めるよう指示）、リンク自体はモデルに書かせず
+# ここで機械的に付ける（URLの書き間違い・章番号のでっち上げを防ぐため。タイムスタンプ除去と同じく
+# プロンプト指示だけに頼らない方針）。リンク先はアプリ内の/help（HelpView.tsx）で、
+# search_app_manualの検索結果の先頭（チャンクの1行目が「5. メッセージを送る」のような章見出し、
+# app_help_indexer参照）から章が分かれば、その章（docs/06_操作マニュアル.htmlのid="sec5"）へ直接飛ばす。
+# モデルが既に[操作マニュアル](…)と書いていた場合は二重にリンクしない（直前の「[」で判定）
+MANUAL_LINK_PHRASE_RE = re.compile(r"(?<!\[)操作マニュアル(?=をご確認|をご覧|をお読み|を参照)")
+_MANUAL_CHAPTER_RE = re.compile(r"^(\d+)\.\s")
+
+
+def _attach_manual_link(text: str, manual_hits: list[str]) -> str:
+    anchor = ""
+    if manual_hits:
+        m = _MANUAL_CHAPTER_RE.match(manual_hits[-1])
+        if m:
+            anchor = f"#sec{m.group(1)}"
+    return MANUAL_LINK_PHRASE_RE.sub(f"[操作マニュアル](/help{anchor})", text)
+
+
 async def maybe_trigger(
     channel_id: int, body: str, requested_by: int, thread_id: int | None = None, force_mention: bool = False,
 ) -> None:
@@ -1084,6 +1114,7 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
 
 async def _run_chat_with_tools(
     messages: list[dict], model: str, channel_id: int, use_doc_tools: bool,
+    manual_hits: list[str] | None = None,
 ) -> tuple[str, dict, list[dict]]:
     """search_documents・search_channel_history・search_app_manualのFunction Callingを扱い
     ながら1回の応答生成を完了させる（Slice 3・2026-09-09でsearch_documentsのみ実装、
@@ -1199,6 +1230,10 @@ async def _run_chat_with_tools(
                 )
             elif tc.function.name == "search_app_manual":
                 results = await app_help_search.search(query) if query else []
+                # 回答末尾の操作マニュアルへのリンクの章決め用（_attach_manual_link参照）。
+                # 最も類似度の高いチャンクの見出し行だけを呼び出し元へ渡す
+                if results and manual_hits is not None:
+                    manual_hits.append(results[0]["content"].split("\n", 1)[0])
                 content = (
                     "\n\n---\n\n".join(r["content"] for r in results)
                     if results
@@ -1295,8 +1330,10 @@ async def _generate_and_post(
         )
 
         model = ai_client.resolve_model(settings.get("ai_model"))
-        reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_doc_tools)
+        manual_hits: list[str] = []
+        reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_doc_tools, manual_hits)
         reply = _strip_leaked_timestamp_prefix(reply)
+        reply = _attach_manual_link(reply, manual_hits)
 
         # WHERE generation_status='generating' は、生成の完了とほぼ同時にcancel_generationが
         # 呼ばれた場合の競合対策（cancel_generation側が既にキャンセル済みメッセージへ更新していれば

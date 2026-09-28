@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 import database
 from routers import (
-    admin, ai_settings, attachments, auth, channels, custom_emoji, dms, icons, messages, polls, push,
+    admin, ai_settings, attachments, auth, channels, custom_emoji, dms, icons, manual, messages, polls, push,
     recurring_posts, scheduled_messages, search, trigger_rules, users,
 )
 from services import ai_agent, app_help_indexer, scheduled_dispatcher
@@ -41,6 +41,7 @@ app.include_router(channels.router)
 app.include_router(custom_emoji.router)
 app.include_router(dms.router)
 app.include_router(icons.router)
+app.include_router(manual.router)
 app.include_router(messages.router)
 app.include_router(polls.router)
 app.include_router(push.router)
@@ -95,7 +96,7 @@ if FRONTEND_DIST.is_dir():
     async def spa_fallback(full_path: str):
         """SPAフォールバック。/api 配下以外はビルド済みの index.html を返し、
         クライアントサイドルーティング（react-router）に委ねる。"""
-        if full_path.startswith("api/"):
+        if full_path.startswith("api/") or full_path.startswith("manual/"):
             raise HTTPException(404, detail="Not Found")
         candidate = (FRONTEND_DIST / full_path).resolve()
         # ディレクトリトラバーサル対策: dist配下に収まる実在ファイルのみ直接返す

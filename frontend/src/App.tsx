@@ -10,6 +10,7 @@ import ChannelSettings from './pages/ChannelSettings'
 import DmView from './pages/DmView'
 import SearchView from './pages/SearchView'
 import AdminConsole from './pages/AdminConsole'
+import HelpView from './pages/HelpView'
 
 // ルーティング・認証ガード（詳細設計書 総論5.1節・5.9節、画面設計11.3節）。
 // このスライスはS-01ログイン＋S-02サイドバー＋S-03チャンネル会話＋DM＋S-04スレッド表示＋S-05横断検索＋S-06チャンネル設定＋S-08管理コンソール。
@@ -84,6 +85,7 @@ export default function App() {
         <Route path="/dms/:dmId" element={<DmView />} />
         <Route path="/search" element={<SearchView />} />
         <Route path="/admin" element={<AdminConsole />} />
+        <Route path="/help" element={<HelpView />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

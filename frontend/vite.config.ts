@@ -44,6 +44,8 @@ export default defineConfig({
       // ポート（ブラウザが実際に見ているアドレス）で登録されているため、これが一致しないと
       // ローカルでのGoogle認証がredirect_uri_mismatchで失敗する）。
       '/api': { target: `http://localhost:${backendPort}`, changeOrigin: false },
+      // 操作マニュアル（backend/routers/manual.py、アプリ内の/helpがiframeで表示する）
+      '/manual': { target: `http://localhost:${backendPort}`, changeOrigin: false },
     },
   },
 })
