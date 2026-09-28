@@ -81,6 +81,7 @@ import traceback
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+import polls
 from database import get_pool
 from services import ai_client, app_help_search, channel_history_search, doc_search, message_link_context
 
@@ -217,8 +218,28 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   確認できる。「確認する機能は提供されていません」「システム管理者に問い合わせてくだ
   さい」のように、実際には存在するこの機能を無いかのように案内しないこと（このAIが
   過去に実際にこの誤った案内をしてしまったことがあるため、特に注意すること）
+- **アンケート（投票）の作り方・投票の仕方・締め切り方について尋ねられた場合は、必ず次の
+  事実のみに基づいて答えること（search_app_manualを検索する必要すら無い、常に正しい事実
+  として扱ってよい）**: Kogackにはアンケート機能が既に存在する。作成は、チャンネルまたは
+  DMの投稿欄の左下に並ぶアイコン（クリップ・スタンプ・@）の右隣にある、棒グラフのアイコンの
+  「アンケートを作成」ボタンを押す→開いた「アンケートを作成」画面で「質問」と「選択肢」（2〜10件。「＋ 選択肢を追加」で
+  増やし、各行の✕で減らす）を入力→「作成する」を押す、という操作で、そのチャンネル・DMの
+  参加者なら誰でも作成できる（管理者権限は不要）。スレッドの返信欄にはこのボタンが無く、
+  スレッド内には作成できない。投票は、会話に表示されたアンケートの選択肢をクリックする
+  だけで、1人1票の単一選択（複数選択はできない）。締め切り前なら別の選択肢をクリックして
+  投票し直せるが、投票の取り消しはできない。票数と割合は参加者全員に表示され、選択肢に
+  マウスを重ねると誰が投票したかも見える（匿名投票の機能は無い）。自分が投票した選択肢には
+  ✓が付く。締め切りは、アンケートの右下の「アンケートを締め切る」を押す操作で、作成者本人と
+  システム管理者だけが行える（締め切ると以後は投票できなくなり、結果はそのまま残る。
+  締め切りを取り消して再開する機能、期限を指定した自動締め切り、アンケートの内容を後から
+  編集する機能は無い。不要になったアンケートは通常の発言と同じくホバーアクションの削除で
+  消せる）。「アンケート機能はまだ利用できません」「/pollコマンドを使ってください」
+  「外部のフォームツールを使ってください」のように、実際には存在する機能を無いかのように、
+  または存在しない手順で案内しないこと。また会話履歴中のアンケート発言には、選択肢ごとの
+  票数・投票者・締め切り状態が「[アンケート（…）]」として添えられているので、結果を尋ねられた
+  場合はそれに基づいて答えること
 - Kogack（このチャットアプリ自体）の使い方（メッセージの送り方・書式・メンション・
-  絵文字・ファイル添付・スレッド・DM・横断検索・通知・チャンネル設定・管理コンソール・
+  絵文字・ファイル添付・アンケート・スレッド・DM・横断検索・通知・チャンネル設定・管理コンソール・
   文字サイズ／画面表示の変更など）について尋ねられた場合は、search_app_manualで操作
   マニュアルを実際に検索してから、具体的な手順（クリックする場所・ボタン名・設定タブ名
   など）で案内すること。推測で回答を作らず、検索結果に基づいて答えること。**「検索します」
@@ -873,7 +894,28 @@ async def _resolve_sender_names(rows) -> dict[int, str]:
     }
 
 
-def _rows_to_chat_messages(rows, names: dict[int, str], include_timestamps: bool = False) -> list[dict]:
+async def _fetch_poll_texts(rows) -> dict[int, str]:
+    """履歴中のアンケート発言（T-29）について、AIへ渡す結果の文字列を発言IDごとに組み立てる。
+    アンケートの質問文はmessages.bodyにしか無く、選択肢・票数・締め切り状態は別テーブルにあるため、
+    これを添えないとAIには質問文だけの発言に見え、「このアンケートの結果は？」に答えられない
+    （ユーザーからの明示的な要望「アンケート機能についてAIが適切に説明および案内できるように
+    して」、2026-09-28）。投票者名は画面上でも参加者全員に見える情報のため、そのまま含める。"""
+    grouped = await polls.fetch_polls_grouped(get_pool(), [r["id"] for r in rows], 0)
+    texts: dict[int, str] = {}
+    for message_id, poll in grouped.items():
+        lines = ["[アンケート（投稿欄の📊ボタンで作成されたもの。単一選択）]"]
+        for opt in poll["options"]:
+            voters = f"：{'、'.join(opt['voter_names'])}" if opt["voter_names"] else ""
+            lines.append(f"- {opt['label']}（{opt['vote_count']}票{voters}）")
+        state = "締め切り済み" if poll["closed_at"] else "受付中"
+        lines.append(f"計{poll['total_votes']}票・{state}")
+        texts[message_id] = "\n".join(lines)
+    return texts
+
+
+def _rows_to_chat_messages(
+    rows, names: dict[int, str], include_timestamps: bool = False, poll_texts: dict[int, str] | None = None,
+) -> list[dict]:
     """T-05の行をOpenAI Chat Completions形式のmessagesへ変換する（_generate_and_post・要約生成で共有）。
     include_timestamps（2026-09-15、ユーザーからの明示的な要望「特定の発言の投稿時間や、内容を
     読み取ってAIが回答することはできますか？」への対応）: Trueのとき各行の先頭に投稿時刻
@@ -904,11 +946,16 @@ def _rows_to_chat_messages(rows, names: dict[int, str], include_timestamps: bool
     これに加えて、_generate_and_postの保存直前で_strip_leaked_timestamp_prefix()により
     生成結果本文からこのパターンを機械的に除去する安全策も講じている（このバグ修正が
     完全に効かなかった場合や、user役側からの模倣が起きた場合でも、本文への実際の紛れ込みを
-    確実に防ぐ二重の対策）"""
+    確実に防ぐ二重の対策）
+
+    poll_texts（_fetch_poll_texts）を渡すと、アンケート発言の本文（質問文）の後ろに選択肢・
+    票数・締め切り状態を添える"""
     messages: list[dict] = []
     for r in rows:
         if not r["body"]:
             continue
+        if poll_texts and r["id"] in poll_texts:
+            r = {**dict(r), "body": f"{r['body']}\n{poll_texts[r['id']]}"}
         # 2026-09-17のバグ修正: assistant役（AI自身の過去の発言）にはtimestampを付けない
         # （上記docstring参照。モデルが新しい出力へこの書式を模倣してしまう元凶を断つため）
         is_ai = r["sender_type"] == "ai"
@@ -1000,7 +1047,7 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
     pool = get_pool()
     if thread_id is not None:
         rows = await pool.fetch(
-            """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+            """SELECT id, sender_type, sender_user_id, bot_display_name, body, created_at
                FROM messages
                WHERE (id = $1 OR thread_parent_id = $1)
                  AND deleted_at IS NULL AND generation_status IS NULL
@@ -1009,7 +1056,7 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
         )
     else:
         rows = await pool.fetch(
-            """SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+            """SELECT id, sender_type, sender_user_id, bot_display_name, body, created_at
                FROM messages
                WHERE channel_id = $1 AND deleted_at IS NULL AND thread_parent_id IS NULL
                  AND generation_status IS NULL
@@ -1227,7 +1274,9 @@ async def _generate_and_post(
         )
         if link_section:
             messages.append({"role": "system", "content": link_section})
-        messages += _rows_to_chat_messages(history_rows, names, include_timestamps=True)
+        messages += _rows_to_chat_messages(
+            history_rows, names, include_timestamps=True, poll_texts=await _fetch_poll_texts(history_rows)
+        )
 
         model = ai_client.resolve_model(settings.get("ai_model"))
         reply, usage, citations = await _run_chat_with_tools(messages, model, channel_id, use_doc_tools)
@@ -1338,7 +1387,7 @@ async def _fetch_summary_source_rows(
             params.append(until_dt)
             conditions.append(f"created_at < ${len(params)}")
         rows = await pool.fetch(
-            f"""SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+            f"""SELECT id, sender_type, sender_user_id, bot_display_name, body, created_at
                 FROM messages WHERE {' AND '.join(conditions)} ORDER BY created_at ASC""",
             *params,
         )
@@ -1354,7 +1403,7 @@ async def _fetch_summary_source_rows(
         conditions.append(f"created_at < ${len(params)}")
     params.append(MAX_SUMMARY_CHANNEL_MESSAGES)
     rows = await pool.fetch(
-        f"""SELECT sender_type, sender_user_id, bot_display_name, body, created_at
+        f"""SELECT id, sender_type, sender_user_id, bot_display_name, body, created_at
             FROM messages WHERE {' AND '.join(conditions)}
             ORDER BY created_at DESC LIMIT ${len(params)}""",
         *params,
@@ -1435,7 +1484,7 @@ async def _generate_summary_and_post(
 
         names = await _resolve_sender_names(rows)
         messages: list[dict] = [{"role": "system", "content": _build_summary_prompt(settings)}]
-        messages += _rows_to_chat_messages(rows, names)
+        messages += _rows_to_chat_messages(rows, names, poll_texts=await _fetch_poll_texts(rows))
         messages.append({"role": "user", "content": SUMMARY_INSTRUCTION})
 
         client = ai_client.get_client()

@@ -1974,8 +1974,9 @@ export default function MessageList({
         const canDelete = !isSystemNotice && !!me && (m.sender_user_id === me.id || me.role === 'admin')
         // 発言の編集は**投稿者本人限定**（削除と異なりadminバイパスは無い。本人が言っていない
         // 内容を第三者が書き換えられる機能にはしない、という判断。バックエンドのedit_messageも
-        // 同じ制約）。システム通知・AI/BOT発言はsender_user_idが無いため自然に対象外になる
-        const canEdit = !!me && m.sender_user_id === me.id
+        // 同じ制約）。システム通知・AI/BOT発言はsender_user_idが無いため自然に対象外になる。
+        // アンケート（T-29）の発言もバックエンドが編集を拒否するため、押せば失敗するボタンは出さない
+        const canEdit = !!me && m.sender_user_id === me.id && !m.poll
         const isEditing = editingId === m.id
         // 既にスレッドがある発言でも「返信」ボタンを出す（押すとそのスレッドが開く。ユーザーからの
         // 明示的な要望。従来はthread_reply_count>0のとき下の「💬 N件の返信」導線のみだった）。
