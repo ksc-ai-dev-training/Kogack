@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useThread } from '../hooks/useThread'
+import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, votePoll, closePoll } from '../lib/api'
@@ -188,6 +189,8 @@ export default function ThreadPanel({
   // ハイライト対象がこのスレッドの返信一覧に実在する間は、末尾自動スクロールを止める
   // （MessageList側のscrollIntoViewと競合させないため。ChannelView本体と同じ考え方）
   const highlightInReplies = !!highlightMessageId && replies.some((r) => r.id === highlightMessageId)
+  // ChannelViewと同じ（途中の返信の高さが変わっても一番下に留まる。ハイライト中は止める）
+  const bodyCallbackRef = useStickToBottom(bodyRef, !highlightInReplies)
 
   useEffect(() => {
     if (highlightInReplies) return
@@ -274,7 +277,7 @@ export default function ThreadPanel({
         </div>
       </div>
 
-      <div ref={bodyRef} className="flex-1 overflow-y-auto overflow-x-hidden py-1.5">
+      <div ref={bodyCallbackRef} className="flex-1 overflow-y-auto overflow-x-hidden py-1.5">
         {parentMessage && (
           <div className="group relative flex gap-2.5 border-b border-line px-4 py-3">
             <Avatar

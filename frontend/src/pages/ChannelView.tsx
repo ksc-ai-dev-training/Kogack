@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useMessages } from '../hooks/useMessages'
+import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError, createPoll } from '../lib/api'
@@ -68,6 +69,8 @@ export default function ChannelView() {
     me?.id,
   )
   const listRef = useRef<HTMLDivElement>(null)
+  // 一番下を見ている間は、途中の発言へのリアクション等で高さが変わっても一番下に留まる
+  const listCallbackRef = useStickToBottom(listRef, !(highlightId && !threadId))
   const [membersModalTab, setMembersModalTab] = useState<'info' | 'members' | null>(null)
   const [summarizing, setSummarizing] = useState(false)
   const toast = useToast()
@@ -313,7 +316,7 @@ export default function ChannelView() {
           )}
         </div>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto overflow-x-hidden py-3">
+        <div ref={listCallbackRef} className="flex-1 overflow-y-auto overflow-x-hidden py-3">
           {hasOlder && (
             <div className="mb-2 flex justify-center">
               <button

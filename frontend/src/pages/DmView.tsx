@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useDms } from '../hooks/useDms'
 import { useMessages } from '../hooks/useMessages'
+import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, createPoll } from '../lib/api'
@@ -37,6 +38,8 @@ export default function DmView() {
   } = useMessages(dmId ? `/api/dms/${dmId}` : undefined, anchorMessageId)
   const unreadDividerMessageId = useUnreadDivider(dmId, dm?.unread_count, messages, me?.id)
   const listRef = useRef<HTMLDivElement>(null)
+  // ChannelViewと同じ（途中の発言の高さが変わっても一番下に留まる）
+  const listCallbackRef = useStickToBottom(listRef, !(highlightId && !threadId))
 
   useEffect(() => {
     // ChannelViewと同じ理由でハイライトジャンプ中は末尾自動スクロールを止める
@@ -169,7 +172,7 @@ export default function DmView() {
           )}
         </div>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto overflow-x-hidden py-3">
+        <div ref={listCallbackRef} className="flex-1 overflow-y-auto overflow-x-hidden py-3">
           {hasOlder && (
             <div className="mb-2 flex justify-center">
               <button
