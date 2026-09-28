@@ -854,7 +854,12 @@ export default function Composer({
     const total = domToPlainText(root).length
     const start = offs?.start ?? total
     const end = offs?.end ?? start
-    const pasted = e.clipboardData.getData('text/plain')
+    // バグ修正（ユーザーからの報告「箇条書きの文章をコピー＆ペーストすると最後の行以外が
+    // 『-ああああ』のように記号のまま残る」）: Windowsのクリップボードは改行をCRLFで返すため、
+    // 最後の行以外の末尾に"\r"が残り、行単位の記法判定（箇条書き・引用の正規表現は"."が"\r"に
+    // 一致しない）が最後の行でしか成立していなかった。本文の改行は常に"\n"で扱う設計のため、
+    // 挿入前にLFへ正規化する。
+    const pasted = e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n')
     const trimmed = pasted.trim()
     let pasteEnd = -1
     if (start !== end && LINK_PASTE_URL_RE.test(trimmed)) {
