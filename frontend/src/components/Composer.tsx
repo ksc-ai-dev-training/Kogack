@@ -42,6 +42,10 @@ import {
   getEmptyListItemAtSelection,
   getEmptyQuoteAtSelection,
   removeEmptyQuote,
+  getBlankBrLineAtSelection,
+  removeBlankLineBetweenLists,
+  insertBlankLineAfterBrLine,
+  isListBlockNode,
   handleDeleteInEmptyListItem,
   computeElementOffset,
   type ToggleFormatKind,
@@ -1162,6 +1166,17 @@ export default function Composer({
     }
     if (e.key === 'Backspace') {
       const root = editorRef.current
+      // リストの途中の黒点を消して作った空行（exitEmptyListItem参照）でのBackspaceは、空行を
+      // 消して上のリストへ結合し直す（removeBlankLineBetweenListsのコメント参照）。空行の目印の
+      // CARET_MARKERを片付けるとカーソルが上の項目の末尾へ吸い寄せられて判定できなくなるため、
+      // 下のremoveCaretMarkerFromDomより先に判定する。
+      const blankLine = root ? getBlankBrLineAtSelection(root) : null
+      if (blankLine && (isListBlockNode(blankLine.prev) || blankLine.prev?.nodeName === 'BR')) {
+        e.preventDefault()
+        removeBlankLineBetweenLists(blankLine, 'Backspace')
+        afterMutate()
+        return
+      }
       if (root) removeCaretMarkerFromDom(root)
       // 中身の空の引用でのBackspaceは枠ごと取り除く（ネイティブ処理では空の枠が残り続ける、
       // removeEmptyQuoteのコメント参照）
@@ -1191,6 +1206,14 @@ export default function Composer({
     // 先に片付けてから判定する。
     if (e.key === 'Delete') {
       const root = editorRef.current
+      // リストの直前の空行でのDeleteは、空行を消して下のリストを詰める（Backspace側と同じ理由で、CARET_MARKERを片付ける前に判定する）
+      const blankLine = root ? getBlankBrLineAtSelection(root) : null
+      if (blankLine && isListBlockNode(blankLine.next)) {
+        e.preventDefault()
+        removeBlankLineBetweenLists(blankLine, 'Delete')
+        afterMutate()
+        return
+      }
       if (root) removeCaretMarkerFromDom(root)
       // 中身の空の箇条書き項目でのDeleteも自前で処理する（ネイティブ処理では黒点が消えずに残る、
       // handleDeleteInEmptyListItemのコメント参照）
@@ -1252,6 +1275,14 @@ export default function Composer({
       e.preventDefault()
       const root = editorRef.current
       if (!root) return
+      // リストの途中の黒点を消して作った空行（exitEmptyListItem参照）でのEnterは、同じ形の空行を
+      // 直後にもう1つ作る（insertBlankLineAfterBrLineのコメント参照）
+      const blankLine = !e.shiftKey ? getBlankBrLineAtSelection(root) : null
+      if (blankLine && (isListBlockNode(blankLine.prev) || isListBlockNode(blankLine.next))) {
+        insertBlankLineAfterBrLine(blankLine)
+        afterMutate()
+        return
+      }
       const offs = getSelectionOffsets(root)
       if (offs && offs.start === offs.end && !e.shiftKey) {
         const cursor = offs.start

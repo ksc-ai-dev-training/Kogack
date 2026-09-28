@@ -318,14 +318,26 @@ export function domToMarkdown(root: Node): string {
   // pre-wrapが改行を二重に数えてしまう（詳細はexitEmptyListItemのコメント参照）ため、
   // 箇条書きを抜けた直後のプレーンな行はDOM上に実在の"\n"を持たない（CARET_MARKERのみを
   // 置く）方式に変更した。そのため送信用Markdownを組み立てるここでだけ、箇条書きの直後に
-  // 実際の文字列が続く場合に"\n"を1つ補う（DOMに実在の"\n"が既にある場合は二重に足さない
-  // ——手打ちの"- "検出等、他の経路で既に区切られているケースまで壊さないため）。
+  // 何か続く場合に"\n"を1つ補う（詳細はループ内のコメント参照）。
   for (let i = 0; i < parts.length - 1; i++) {
     const child = children[i]
     const isListBlock = child.nodeType === Node.ELEMENT_NODE && (child as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list'
     if (!isListBlock) continue
-    const next = stripCaretMarker(parts[i + 1])
-    if (next && !next.startsWith('\n')) parts[i + 1] = '\n' + parts[i + 1]
+    // 直後の行の内容は、次のブロック要素の手前までの兄弟（テキスト・<br>等）をまとめて見る
+    // （空行はCARET_MARKERのテキストと<br>の2ノードで構成されうるため、exitEmptyListItem参照）。
+    const isBlock = (n: Node | undefined) =>
+      !!n && n.nodeType === Node.ELEMENT_NODE && !!(n as Element).getAttribute(BLOCK_FORMAT_ATTR)
+    let j = i + 1
+    while (j < children.length && !isBlock(children[j])) j++
+    // リストの直後の行はDOM上に区切りの"\n"を持たない規約（convertLinesToListItems・
+    // exitEmptyListItem参照）のため、直後に何か続くなら常に"\n"を1つ補う。直後が"\n"で始まる
+    // 場合も、それは画面上に空行として表示されている（ブロック直後の"\n"は空行1行ぶんとして
+    // 描画される）ので補う——以前は「既に区切られている」とみなして補わなかったが、そのせいで
+    // リストの途中の黒点を消して作った空行が送信時に消え、前後のリストが1つにつながっていた。
+    // リストの直後に別のブロックが直接続く場合（2つのリストが隣接した等）も同様に区切る。
+    const next = stripCaretMarker(parts.slice(i + 1, j).join(''))
+    if (j === i + 1) parts[j] = '\n' + parts[j]
+    else if (next) parts[i + 1] = '\n' + parts[i + 1]
   }
   const text = parts.join('')
   return stripCaretMarker(stripSelectionMarkers(text))
@@ -1423,6 +1435,30 @@ export function convertLinesToListItems(root: HTMLElement, start: number, end: n
   for (const item of items) listEl.appendChild(item)
   range.insertNode(listEl)
 
+  // バグ修正（ユーザーからの報告「●1行目/●(空)/●3行目で2行目の黒点を消す」への対応中に、実機
+  // Playwrightで発見）: 最終行の行末の"\n"がリストの外（直後）に残ると、ブロック要素の直後の
+  // "\n"は空行1行ぶんとして描画されるため、複数行を選んで箇条書きボタンを押したときや下書きの
+  // 復元時に、リストとその次の行の間へ余計な空行が表示されていた。リストの直後の行は"\n"を
+  // 持たない（exitEmptyListItemが作る行と同じ）という規約に揃えて取り除き、行の区切りは
+  // domToMarkdownが補う。投稿欄の末尾の"\n"だけの場合（カーソルを置くための空行）は残す。
+  // 取り除いた結果、次のブロックとの間に"\n"だけの空行が残る場合は<br>に置き換える（Chromeは
+  // ブロックに挟まれた"\n"だけの行を↑↓キーで素通りしてしまうため、exitEmptyListItem参照）。
+  const after = listEl.nextSibling
+  if (after?.nodeType === Node.TEXT_NODE && (after as Text).data.startsWith('\n')) {
+    const t = after as Text
+    if (t.data.length > 1 || t.nextSibling) t.deleteData(0, 1)
+    const nextBlock = t.nextSibling
+    if (
+      t.data === '\n' &&
+      nextBlock?.nodeType === Node.ELEMENT_NODE &&
+      (nextBlock as Element).getAttribute(BLOCK_FORMAT_ATTR)
+    ) {
+      t.replaceWith(document.createElement('br'))
+    } else if (t.data === '') {
+      t.remove()
+    }
+  }
+
   // バグ修正（ユーザーからの報告「箇条書きの記法ができなくなっている」、jsdomでの再現テストで
   // 発見）: start===end（何も入力されていない行でボタンを押した場合）は唯一の項目が完全に
   // 空になる。この関数はSelectionに一切触れないため、range.extractContents/insertNodeで
@@ -1496,7 +1532,51 @@ export function ungroupListElement(listEl: HTMLElement): void {
  * 最後の項目がこれだけだった場合はリスト自体を消し、その場をプレーンな空行に置き換える。 */
 function exitEmptyListItem(itemEl: HTMLElement): void {
   const listEl = itemEl.parentElement as HTMLElement
+  const prevItem = itemEl.previousElementSibling
+  const nextItem = itemEl.nextElementSibling
   itemEl.remove()
+  // 要望対応（ユーザーからの報告「●1行目/●(空)/●3行目で2行目の黒点を消すと、空行が3行目の下へ
+  // 移ってカーソルもそこへ行ってしまう。1行目と3行目の間の、その場で空行になってほしい」）:
+  // 後ろに項目が続く場合は、リストをこの位置で2つに分割し、その間に空行を置く。空行は
+  // 「CARET_MARKER」のテキストノード＋<br>にする（実機Playwrightで候補を比較して決定）:
+  // - 行末を<br>にするのは、ブロックの直前の行は改行で終わる（"abc\n<blockquote>"等と同じ）
+  //   という既存の規則に合わせ、この行に文字を入力したときdomToMarkdownが後続のリストと
+  //   正しく行を区切れるようにするため。生の"\n"でも同じ高さの空行になるが、Chromeは
+  //   ブロックに挟まれた"\n"だけの行を↑↓キーで素通りしてしまい、二度とカーソルを置けなく
+  //   なる（<br>なら置ける。文字を入力しても<br>はそのまま残ることも確認済み）。
+  // - CARET_MARKERは、この行の先頭と直前の項目の末尾が数値オフセット上同じ位置になる
+  //   （handleEnterInListItemのコメント参照）ため、カーソルを確実にこの行へ置くための目印。
+  // 空のまま送信した場合の空行は、domToMarkdown側で補う（同関数のコメント参照）。この空行での
+  // Backspace/Deleteは removeBlankLineBetweenLists が2つのリストを結合し直す。
+  if (nextItem) {
+    const parent = listEl.parentNode as Node
+    const line = document.createTextNode(CARET_MARKER)
+    const br = document.createElement('br')
+    if (!prevItem) {
+      parent.insertBefore(line, listEl)
+      parent.insertBefore(br, listEl)
+    } else {
+      const tailList = listEl.cloneNode(false) as HTMLElement
+      let item: Element | null = nextItem
+      while (item) {
+        const following: Element | null = item.nextElementSibling
+        tailList.appendChild(item)
+        item = following
+      }
+      parent.insertBefore(line, listEl.nextSibling)
+      parent.insertBefore(br, line.nextSibling)
+      parent.insertBefore(tailList, br.nextSibling)
+    }
+    const range = document.createRange()
+    range.setStart(line, CARET_MARKER.length)
+    range.collapse(true)
+    const sel = window.getSelection()
+    if (sel) {
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+    return
+  }
   if (listEl.children.length === 0) {
     // バグ修正（ユーザーからの報告「箇条書きの黒点を表示している行で何も入力せずEnterで
     // 改行すると、なぜか一行分のスペースが開いて次の行に行く」）: この分岐（唯一の項目を
@@ -1772,6 +1852,126 @@ export function handleDeleteInEmptyListItem(itemEl: HTMLElement): void {
   // handleEnterInListItemのコメント参照）ため、CARET_MARKERを実在させてその直後へ置く。
   const marker = document.createTextNode(CARET_MARKER)
   nextItem.insertBefore(marker, nextItem.firstChild)
+  const range = document.createRange()
+  range.setStart(marker, marker.length)
+  range.collapse(true)
+  const sel = window.getSelection()
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+}
+
+/** 中身が空かCARET_MARKERだけのテキストノードか（空行の目印として読み飛ばしてよいもの）。 */
+function isMarkerOnlyText(n: Node | null): boolean {
+  return !!n && n.nodeType === Node.TEXT_NODE && stripCaretMarker((n as Text).data) === ''
+}
+
+export function isListBlockNode(n: Node | null): n is HTMLElement {
+  return !!n && n.nodeType === Node.ELEMENT_NODE && (n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list'
+}
+
+/** カーソル（折りたたまれた選択範囲）が、投稿欄直下の<br>だけの空行（exitEmptyListItemが項目の
+ * 途中の黒点を消したときに作る「CARET_MARKER＋<br>」、目印が片付いた後の<br>単独も含む）に
+ * あれば、その<br>と前後の兄弟ノード（CARET_MARKERだけのテキストは読み飛ばす）を返す。 */
+export function getBlankBrLineAtSelection(
+  root: HTMLElement,
+): { br: HTMLElement; prev: Node | null; next: Node | null } | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null
+  const range = sel.getRangeAt(0)
+  const c = range.startContainer
+  let br: Node | null = null
+  if (c === root) {
+    br = root.childNodes[range.startOffset] ?? null
+    while (isMarkerOnlyText(br)) br = br!.nextSibling
+  } else if (c.parentNode === root && isMarkerOnlyText(c)) {
+    br = c.nextSibling
+  }
+  if (!br || br.nodeName !== 'BR') return null
+  let prev = br.previousSibling
+  while (isMarkerOnlyText(prev)) prev = prev!.previousSibling
+  return { br: br as HTMLElement, prev, next: br.nextSibling }
+}
+
+/** リストの直後の空行（getBlankBrLineAtSelectionで取得）でBackspace、またはリストの直前の空行で
+ * Deleteを押した結果を処理する。空行を取り除き、前後がどちらもリストなら1つのリストへ結合し直す
+ * （exitEmptyListItemで分割したものを元に戻す操作。ネイティブ処理に任せると、Backspaceでは
+ * 空行が消えずに上の項目の最後の1文字が消え、Deleteでは空行だけ消えて2つのリストが隣接した
+ * まま残る——実機Playwrightで確認）。カーソルはBackspaceなら上の項目の末尾、Deleteなら
+ * 下の項目の先頭へ置く（通常の空行でのBackspace/Deleteと同じ見た目）。 */
+export function removeBlankLineBetweenLists(
+  line: { br: HTMLElement; prev: Node | null; next: Node | null },
+  key: 'Backspace' | 'Delete',
+): void {
+  const { br, prev, next } = line
+  const parent = br.parentNode as Node
+  // 空行を構成する目印だけのテキストノードも一緒に取り除く
+  let n = br.previousSibling
+  while (isMarkerOnlyText(n)) {
+    const p = n!.previousSibling
+    parent.removeChild(n!)
+    n = p
+  }
+  br.remove()
+
+  const sel = window.getSelection()
+  const range = document.createRange()
+  if (key === 'Backspace' && prev?.nodeName === 'BR') {
+    // 上の行も空行（insertBlankLineAfterBrLineで増やした行）なら、この行だけ消して上の空行へ
+    // 移る。上の空行の先頭も直前の項目の末尾と数値オフセット上同じ位置になるため、CARET_MARKERを
+    // 置いてカーソルを確実にそこへ留める。
+    const marker = document.createTextNode(CARET_MARKER)
+    parent.insertBefore(marker, prev)
+    range.setStart(marker, marker.length)
+    range.collapse(true)
+  } else if (key === 'Backspace' && isListBlockNode(prev)) {
+    const lastItem = prev.lastElementChild as HTMLElement
+    if (isListBlockNode(next)) {
+      while (next.firstChild) prev.appendChild(next.firstChild)
+      next.remove()
+    }
+    range.selectNodeContents(lastItem)
+    range.collapse(false)
+  } else if (isListBlockNode(next)) {
+    const firstItem = next.firstElementChild as HTMLElement
+    if (isListBlockNode(prev)) {
+      while (next.firstChild) prev.appendChild(next.firstChild)
+      next.remove()
+    }
+    // 下の項目の先頭は直前の内容の末尾と数値オフセット上同じ位置になるため、CARET_MARKERを置く
+    // （handleEnterInListItemのコメント参照）
+    const marker = document.createTextNode(CARET_MARKER)
+    firstItem.insertBefore(marker, firstItem.firstChild)
+    range.setStart(marker, marker.length)
+    range.collapse(true)
+  } else {
+    return
+  }
+  if (sel) {
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+}
+
+/** リストに隣接する<br>だけの空行（getBlankBrLineAtSelectionで取得）でEnterを押した結果を処理する。
+ * 汎用のEnter処理（数値オフセットの位置へ"\n"を挿入）に任せると、空行の先頭が直前の項目の末尾と
+ * 数値オフセット上同じ位置になるため改行が意図しない位置に入り、続けて入力した文字が下のリストの
+ * 項目の先頭へ入ってしまう（実機Playwrightで確認）。同じ形の空行（CARET_MARKER＋<br>、
+ * exitEmptyListItem参照）を直後にもう1つ作り、そこへカーソルを置く。 */
+export function insertBlankLineAfterBrLine(line: { br: HTMLElement }): void {
+  const { br } = line
+  const parent = br.parentNode as Node
+  let n = br.previousSibling
+  while (isMarkerOnlyText(n)) {
+    const p = n!.previousSibling
+    parent.removeChild(n!)
+    n = p
+  }
+  const marker = document.createTextNode(CARET_MARKER)
+  const newBr = document.createElement('br')
+  parent.insertBefore(marker, br.nextSibling)
+  parent.insertBefore(newBr, marker.nextSibling)
   const range = document.createRange()
   range.setStart(marker, marker.length)
   range.collapse(true)
