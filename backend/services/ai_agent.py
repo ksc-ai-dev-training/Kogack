@@ -64,7 +64,8 @@
 # 起動する（8.1節・8.7節、REQ-N-05。A-11/A-14自体は応答を待たずに投稿完了を返す）。
 # reaction_mode='mention_only'（既定）では人間の発言本文に「@{persona_name}」の文字列一致が
 # 含まれるときのみ、'proactive'（F-15）では人間の発言であれば常に起動する（ただしチャンネル本体の
-# 投稿に限る。スレッド返信は下記のとおりreaction_modeに関わらず常にメンション必須）。AIへの
+# 投稿に限る。スレッド返信は下記のとおりreaction_modeに関わらず常にメンション必須。ただし元発言がAIの発言の
+# スレッドはメンション無しでも応答する、maybe_trigger参照）。AIへの
 # メンションはID参照化の対象外（基本設計書5.22節「設計判断」。チャンネルAIは1チャンネルにつき
 # 1つしかなく、同姓同名のような曖昧さが生じない）。
 #
@@ -609,7 +610,10 @@ def _build_doc_scope_section(out_of_scope_policy: str) -> str:
 # 文体の指定が無く、1つの返信の中でです・ます調と、だ・である調（「〜まとめる。」「〜できる。」等）が
 # 混ざっていた（ユーザーからの報告「AIの応答の口調が不安定。一回の返答の中で、敬語を使う部分と、
 # だ・である調になる部分がある」、2026-09-28）。既定を明示的なです・ます調にする
-DEFAULT_PERSONA_TONE = "です・ます調の丁寧語（文末は常に「です」「ます」で統一する）"
+# （当初は「文末は常に『です』『ます』で統一する」と書いていたが、モデルがこれを字面どおりに
+# 受け取り「〜使ってくださいです。」のように丁寧な文末へさらに「です」を付け足す誤りを実機で
+# 確認したため、「だ・である調を混ぜない」という表現に改めた）
+DEFAULT_PERSONA_TONE = "です・ます調の丁寧語（だ・である調を混ぜない）"
 
 
 def _style_rules(persona_tone: str) -> str:
@@ -623,6 +627,8 @@ def _style_rules(persona_tone: str) -> str:
         f'書くこと。です・ます調で書く場合は、箇条書きの項目・補足・注意書き・参考情報・締めの一文も'
         f'含めてすべてです・ます調にし、「〜する。」「〜だ。」「〜である。」「〜できる。」「〜まとめる。」'
         f'のようなだ・である調の文末を1文も混ぜないこと（箇条書きの項目を名詞で終える体言止めは可）。'
+        f'「〜ください。」「〜でしょうか。」「〜ません。」なども丁寧語なのでそのまま使い、'
+        f'「くださいです」「ましたです」のように丁寧な文末へさらに「です」を付け足さないこと。'
         f'口調設定がだ・である調やキャラクタの話し方を指定している場合は、逆にそちらで統一すること。\n'
         f'敬称: 利用者・参加者など人の名前を書くとき（呼びかけ・言及のどちらでも）の敬称は、'
         f'口調設定「{persona_tone}」または振る舞い定義に呼び方の指定（「くん」付け・「様」付け・'
@@ -1071,6 +1077,7 @@ def _attach_manual_link(text: str, manual_hits: list[str]) -> str:
 
 async def maybe_trigger(
     channel_id: int, body: str, requested_by: int, thread_id: int | None = None, force_mention: bool = False,
+    mentions_others: bool = False,
 ) -> None:
     """A-11・A-14（thread_id指定時）・services/scheduled_dispatcher.py（定期投稿、force_mention=True）
     から呼ばれる。条件を満たせば非同期タスクとしてAI応答生成を起動する（fire-and-forget、
@@ -1099,14 +1106,27 @@ async def maybe_trigger(
     繰り返し発生するリスクを避けるため、連鎖起動防止の原則をそちらでは維持する）。reaction_mode
     に関わらずforce_mention=Trueで常にメンション必須にしているのも、proactive設定のチャンネルで
     定期投稿のたびに（本来意図していない）AI応答が毎回付いてしまう驚きを避けるため（スレッド返信の
-    設計判断と同じ考え方）。"""
+    設計判断と同じ考え方）。
+    **AIの発言へのスレッド返信（2026-09-28）**: スレッドの元発言がAI自身の発言（sender_type='ai'）の
+    場合に限り、メンションが無くても応答する（ユーザーからの明示的な要望「AIの発言に対して返信ボタンで
+    スレッド内で何かしらを書き込んだときに、@でAIをメンションしてなくてもAIが反応するようにして
+    ほしい」）。AIの回答へ返信するのはAIとのやり取りの続きであり、上記の「人間同士のスレッドにAIが
+    割り込む」懸念が当てはまらないため。ただしその返信で他の人をメンションしている場合
+    （mentions_others、呼び出し元のA-14が保存したメンションの有無）は、その人宛ての発言とみなして
+    従来どおりAIへのメンションを要求する（AIが割り込まない）。"""
     if not ai_client.is_configured():
         return
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         return
     persona_name = settings["persona_name"] or "Kogack AI"
-    requires_mention = thread_id is not None or force_mention or settings["reaction_mode"] != "proactive"
+    if thread_id is not None:
+        root_is_ai = await get_pool().fetchval(
+            "SELECT sender_type = 'ai' FROM messages WHERE id = $1", thread_id
+        )
+        requires_mention = not root_is_ai or mentions_others
+    else:
+        requires_mention = force_mention or settings["reaction_mode"] != "proactive"
     if requires_mention and not detect_mention(body, persona_name):
         return
     if _looks_like_summarize_request(body, persona_name):

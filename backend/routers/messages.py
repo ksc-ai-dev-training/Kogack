@@ -312,7 +312,9 @@ async def post_reply(
         # トランザクションで元発言のupdated_atも更新することで解消する
         await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", message_id)
     if parent["channel_id"] is not None:
-        await ai_agent.maybe_trigger(parent["channel_id"], body.body, user.id, thread_id=message_id)
+        await ai_agent.maybe_trigger(
+            parent["channel_id"], body.body, user.id, thread_id=message_id, mentions_others=bool(blocks),
+        )
     # デスクトップ通知②（ユーザーからの明示的な要望「自分の発言に対してスレッドで返信が来た時と、
     # スレッド内でメンションされたときにも通知が来てほしい」、2026-09-14）。通常のスレッド返信は
     # 全参加者への配信対象外のままだが、この2種類に限りnotify_thread_replyが対象者だけへ送る
