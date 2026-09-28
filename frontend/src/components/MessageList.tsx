@@ -17,6 +17,7 @@ import ProfileCard from './ProfileCard'
 import { GuardedLink } from './GuardedLink'
 import { EMOJI_LIST } from './Composer'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
+import { CustomEmojiTile } from './CustomEmojiTile'
 import type {
   AiRequestOut, AttachmentPayload, CitationPayload, CustomEmoji, MentionSourceMember, Message, MessageAttachment,
   MessageReaction, Poll,
@@ -1314,15 +1315,7 @@ export function EmojiGridPopover({
           カスタム絵文字
         </div>
         {customEmoji.map((e) => (
-          <button
-            key={e.id}
-            type="button"
-            onClick={() => onSelect(`:${e.name}:`)}
-            title={`:${e.name}:`}
-            className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-surface-muted"
-          >
-            <img src={e.image_url} alt={e.name} className="h-7 w-7 object-contain" />
-          </button>
+          <CustomEmojiTile key={e.id} emoji={e} onSelect={onSelect} />
         ))}
         <button
           type="button"

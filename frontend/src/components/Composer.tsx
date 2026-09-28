@@ -4,6 +4,7 @@ import { apiFetch, uploadAttachment } from '../lib/api'
 import { getDraft, setDraft } from '../lib/drafts'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
+import { CustomEmojiTile } from './CustomEmojiTile'
 import { CreatePollModal } from './CreatePollModal'
 import { useToast } from './Toast'
 import {
@@ -1554,18 +1555,7 @@ export default function Composer({
             カスタム絵文字
           </div>
           {customEmoji.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              title={`:${e.name}:`}
-              onMouseDown={(ev) => {
-                ev.preventDefault()
-                insertEmoji(`:${e.name}:`)
-              }}
-              className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-surface-muted"
-            >
-              <img src={e.image_url} alt={e.name} className="h-7 w-7 object-contain" />
-            </button>
+            <CustomEmojiTile key={e.id} emoji={e} onSelect={insertEmoji} />
           ))}
           <button
             type="button"

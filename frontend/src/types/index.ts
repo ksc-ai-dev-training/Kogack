@@ -523,6 +523,8 @@ export interface CustomEmoji {
   id: string
   name: string
   image_url: string
+  /** 作成者のuser id（絵文字ピッカーで削除ボタンを作成者本人・システム管理者にだけ出すため） */
+  created_by: string
   created_by_name: string
   created_at: string
 }

@@ -28,6 +28,8 @@ def _out(row) -> dict:
         "id": str(row["id"]),
         "name": row["name"],
         "image_url": row["image_url"],
+        # 絵文字ピッカーで削除ボタン（作成者本人・システム管理者のみ）を出し分けるために返す
+        "created_by": str(row["created_by"]),
         "created_by_name": row["created_by_name"],
         "created_at": row["created_at"].isoformat(),
     }
@@ -39,7 +41,7 @@ async def list_custom_emoji(user: CurrentUser = Depends(require_auth)):
     全チャンネル・全DMのリアクション・メッセージ本文で使える。認証済みであれば誰でも取得できる
     （画像自体もアイコンと同じくPublicバケットで、一覧を返すこと自体に機密性は無い）。"""
     rows = await get_pool().fetch(
-        """SELECT e.id, e.name, e.image_url, e.created_at, u.name AS created_by_name
+        """SELECT e.id, e.name, e.image_url, e.created_by, e.created_at, u.name AS created_by_name
            FROM custom_emoji e JOIN users u ON u.id = e.created_by
            ORDER BY e.name"""
     )
@@ -74,7 +76,7 @@ async def create_custom_emoji(body: CreateCustomEmojiRequest, user: CurrentUser 
         name, body.image_url, user.id,
     )
     row = await pool.fetchrow(
-        """SELECT e.id, e.name, e.image_url, e.created_at, u.name AS created_by_name
+        """SELECT e.id, e.name, e.image_url, e.created_by, e.created_at, u.name AS created_by_name
            FROM custom_emoji e JOIN users u ON u.id = e.created_by WHERE e.id = $1""",
         new_id,
     )
