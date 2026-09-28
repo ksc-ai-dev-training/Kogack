@@ -11,6 +11,7 @@ import DmView from './pages/DmView'
 import SearchView from './pages/SearchView'
 import AdminConsole from './pages/AdminConsole'
 import HelpView from './pages/HelpView'
+import { readLastChannelId } from './lib/lastChannel'
 
 // ルーティング・認証ガード（詳細設計書 総論5.1節・5.9節、画面設計11.3節）。
 // このスライスはS-01ログイン＋S-02サイドバー＋S-03チャンネル会話＋DM＋S-04スレッド表示＋S-05横断検索＋S-06チャンネル設定＋S-08管理コンソール。
@@ -92,16 +93,19 @@ export default function App() {
   )
 }
 
-// ログイン直後の初期表示。最後に開いていたチャンネル（次スライスでlocalStorage対応）が
-// 無い間は、参加中の最初のチャンネルへ誘導する（基本設計書3.1節「最後に開いていたチャンネルを表示」の
-// 簡易版。画面設計11.5節「設計判断」で確定する最終仕様は次スライスで実装する）。
+// ワークスペース（/）の初期表示。最後に開いていたチャンネル（lib/lastChannel.ts）が今も参加中の
+// チャンネル一覧（A-05）にあればそこへ、無ければ（退出済み・未保存等）参加中の最初のチャンネルへ
+// 誘導する（基本設計書3.1節「最後に開いていたチャンネルを表示」、画面設計のlocalStorageキー表）。
+// ログイン直後に加え、管理コンソール等の「← ワークスペースに戻る」もここを通る。
 function Home() {
   const { joined, isLoading } = useChannels()
   if (isLoading) {
     return <div className="p-8 text-center text-sm text-ink-subtle">読み込み中...</div>
   }
   if (joined.length > 0) {
-    return <Navigate to={`/channels/${joined[0].id}`} replace />
+    const lastId = readLastChannelId()
+    const target = joined.find((c) => c.id === lastId) ?? joined[0]
+    return <Navigate to={`/channels/${target.id}`} replace />
   }
   return (
     <div className="flex h-full items-center justify-center">

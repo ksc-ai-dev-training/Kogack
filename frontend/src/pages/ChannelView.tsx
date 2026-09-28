@@ -4,6 +4,7 @@ import { useChannel, useChannels } from '../hooks/useChannels'
 import { useChannelMembers } from '../hooks/useChannelMembers'
 import { useMessages } from '../hooks/useMessages'
 import { useStickToBottom } from '../hooks/useStickToBottom'
+import { saveLastChannelId } from '../lib/lastChannel'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError, createPoll } from '../lib/api'
@@ -28,6 +29,10 @@ export default function ChannelView() {
   const highlightId = searchParams.get('highlight')
   const { me } = useMe()
   const { channel, error: channelError, mutate: mutateChannel } = useChannel(channelId)
+  // 参加中と確認できたチャンネルだけを「最後に開いていたチャンネル」として覚える（lib/lastChannel.ts）
+  useEffect(() => {
+    if (channelId && channel?.is_member) saveLastChannelId(channelId)
+  }, [channelId, channel?.is_member])
   const { joined, mutate: mutateChannelsList } = useChannels()
   const { members } = useChannelMembers(channelId)
   // F-41 メンション候補。先頭は @channel（チャンネル全員への通知）、次にチャンネルAI（有効な
