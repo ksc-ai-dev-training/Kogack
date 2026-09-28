@@ -1,4 +1,5 @@
-import { useLocation } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
+import { helpReturnPath } from '../lib/helpReturnPath'
 
 // 操作マニュアルのアプリ内表示（ユーザーからの明示的な要望「アプリ上で操作マニュアルを確認できる
 // ようにしてほしい」、2026-09-28）。マニュアル本体はバックエンドが /manual/ で配信する
@@ -8,10 +9,20 @@ import { useLocation } from 'react-router'
 // 付くリンクがこの形。services/ai_agent.pyの_attach_manual_link参照）。
 export default function HelpView() {
   const { hash } = useLocation()
+  const navigate = useNavigate()
   const src = `/manual/${hash}`
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-5">
+        {/* マニュアルを開く直前にいた画面へ戻る（lib/helpReturnPath.ts。iframe内の移動が
+            ブラウザの履歴に積まれるため、履歴を1つ戻る方式にはしていない） */}
+        <button
+          type="button"
+          onClick={() => navigate(helpReturnPath())}
+          className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+        >
+          ← 戻る
+        </button>
         <span className="text-[15px] font-bold text-ink">📖 操作マニュアル</span>
         <a
           href={src}

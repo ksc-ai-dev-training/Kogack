@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { useMatch, useNavigate, useSearchParams } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router'
 import { apiFetch } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
@@ -20,6 +20,7 @@ import DmPickerModal from './DmPickerModal'
 import ProfileEditModal from './ProfileEditModal'
 import ScheduledMessagesModal from './ScheduledMessagesModal'
 import { readSidebarCollapsed, saveSidebarCollapsed, type SidebarCollapsed } from '../lib/sidebarSections'
+import { rememberNonHelpPath } from '../lib/helpReturnPath'
 import type { Me } from '../types'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -115,6 +116,12 @@ export default function Layout({ me, children }: { me: Me; children: React.React
       return next
     })
   }
+  // 操作マニュアル（/help）の「← 戻る」の戻り先として、/help以外の画面へ移るたびに場所を覚える
+  // （lib/helpReturnPath.ts）
+  const location = useLocation()
+  useEffect(() => {
+    if (location.pathname !== '/help') rememberNonHelpPath(`${location.pathname}${location.search}${location.hash}`)
+  }, [location.pathname, location.search, location.hash])
   const currentChannelId = useMatch('/channels/:channelId')?.params.channelId
   const currentDmId = useMatch('/dms/:dmId')?.params.dmId
   const visibleChannels = collapsed.channels
