@@ -15,6 +15,7 @@ import {
   setSelectionOffsets,
   replaceRangeWithText,
   replaceRangeWithMentionSpan,
+  highlightMentionsInRange,
   insertTextAfterNode,
   insertAtomicEmojiAtCursor,
   tryConvertJustCompletedShortcode,
@@ -855,17 +856,37 @@ export default function Composer({
     const end = offs?.end ?? start
     const pasted = e.clipboardData.getData('text/plain')
     const trimmed = pasted.trim()
+    let pasteEnd = -1
     if (start !== end && LINK_PASTE_URL_RE.test(trimmed)) {
       const selectedText = domToPlainText(root).slice(start, end)
       replaceRangeWithText(root, start, end, `[${selectedText}](${trimmed})`)
     } else {
-      replaceRangeWithText(root, start, end, pasted)
+      pasteEnd = replaceRangeWithText(root, start, end, pasted)
     }
     // 旧実装（textarea）はブラウザ既定の貼り付けが自動的にmaxLength属性で切り詰めてくれていたが、
     // 貼り付けを全面的に自前化した（全ての貼り付けをpreventDefaultしプレーンテキストのみ手動挿入
     // する設計、上のコメント参照）ことでこの自動切り詰めが失われた。paste特有の欠落のため、ここで
     // 明示的に補う（書式ボタン等での数文字程度の超過は旧実装でも元々防げていなかったため対象外）。
     enforceMaxLength(root, MAX_BODY_LENGTH)
+    // バグ修正（ユーザーからの報告「メンションを含む文章をコピー＆ペーストすると名前の青い背景色が
+    // なくなる」）: 貼り付けはプレーンテキストのみ挿入するため、メンションのハイライト（候補選択時に
+    // だけ付与される）が失われ、mentions配列にも登録されず通知も飛ばなかった。貼り付けた範囲に
+    // 含まれる既知の候補の「@表示名」をハイライトし直し、候補選択と同じく通知対象へ登録する。
+    if (pasteEnd !== -1 && mentionCandidates && pasted.includes('@')) {
+      const total = domToPlainText(root).length
+      const rangeEnd = Math.min(pasteEnd, total)
+      const byDisplay = new Map(mentionCandidates.map((c) => [`@${c.name}`, c]))
+      const highlighted = highlightMentionsInRange(root, start, rangeEnd, Array.from(byDisplay.keys()))
+      for (const h of highlighted) registerMention(byDisplay.get(h.displayText)!)
+      const last = highlighted[highlighted.length - 1]
+      if (last && rangeEnd === total && domToPlainText(root).endsWith(last.displayText)) {
+        // 本文の末尾がメンションで終わる場合、候補選択時（selectCandidate）と同じくspanの外側へ
+        // 空白を置き、続けて入力した文字がspanへ吸い込まれて青く表示されるのを防ぐ
+        insertTextAfterNode(last.span, ' ')
+      } else if (highlighted.length > 0) {
+        setSelectionOffsets(root, rangeEnd)
+      }
+    }
     materializePendingFormats(root)
     afterMutate()
   }
@@ -977,6 +998,14 @@ export default function Composer({
     // （オフセットベースの挿入だとspanの中に吸い込まれてしまう、詳細はcomposerEditing.tsの
     // insertTextAfterNodeのコメント参照）。カーソル位置もこの関数が直接設定する。
     insertTextAfterNode(span, ' ')
+    registerMention(candidate)
+    setPickerQuery(null)
+    afterMutate()
+  }
+
+  // メンション候補をmentions配列（送信時にA-11等へ渡す通知対象）へ登録する。候補の選択と、
+  // メンションを含む文章の貼り付け（handlePaste）の両方から使う。
+  const registerMention = (candidate: MentionCandidate) => {
     if (candidate.isChannel) {
       // @channel はkind='channel'として送る（target_user_idは使わない）。重複選択しても1件だけ持つ
       setMentions((prev) =>
@@ -992,10 +1021,12 @@ export default function Composer({
           : [...prev, { target_user_id: 'here', display_name_snapshot: candidate.name, kind: 'here' }],
       )
     } else if (!candidate.isAi) {
-      setMentions((prev) => [...prev, { target_user_id: candidate.id, display_name_snapshot: candidate.name }])
+      setMentions((prev) =>
+        prev.some((m) => !m.kind && m.target_user_id === candidate.id)
+          ? prev
+          : [...prev, { target_user_id: candidate.id, display_name_snapshot: candidate.name }],
+      )
     }
-    setPickerQuery(null)
-    afterMutate()
   }
 
   // 入力欄下のメンションボタン（画面モックアップS-03のmention-btn）。カーソル位置に「@」を挿入し

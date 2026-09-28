@@ -693,6 +693,45 @@ export function replaceRangeWithMentionSpan(
   return { offset: result, span }
 }
 
+/** [start,end)に含まれる「@表示名」（displayTextsのいずれか、先頭の@を含む）をメンションハイライト用
+ * spanで囲む。貼り付けは常にプレーンテキストとして挿入する設計のため、メンションを含む文章を
+ * コピー＆ペーストするとハイライトが失われていた（ユーザーからの報告）ことへの対処で、貼り付けた
+ * 範囲だけを対象に一度だけ走査する（継続的な全文再スキャンはしない冒頭の設計判断は維持）。
+ * 同じ位置で複数の表示名が一致する場合は長い方を優先する（「@田中」と「@田中 太郎」等）。
+ * メールアドレス（例: foo@here.com）を誤ってハイライトしないよう、@の直前が英数字・記号類の
+ * 場合は対象外にする。後ろの位置から順に置き換えることで、手前の一致のオフセットがずれないようにする。
+ * 作成したspanと一致した表示名を文書順で返す（選択範囲の復元は呼び出し元が行う）。 */
+export function highlightMentionsInRange(
+  root: HTMLElement,
+  start: number,
+  end: number,
+  displayTexts: string[],
+): { span: HTMLSpanElement; displayText: string }[] {
+  const sorted = Array.from(new Set(displayTexts.filter((d) => d.length > 1))).sort((a, b) => b.length - a.length)
+  if (sorted.length === 0) return []
+  const text = domToPlainText(root)
+  const found: { index: number; displayText: string }[] = []
+  let i = Math.max(0, start)
+  while (i < Math.min(end, text.length)) {
+    const hit =
+      text[i] === '@' && !(i > 0 && /[A-Za-z0-9._%+-]/.test(text[i - 1]))
+        ? sorted.find((d) => i + d.length <= end && text.startsWith(d, i))
+        : undefined
+    if (hit) {
+      found.push({ index: i, displayText: hit })
+      i += hit.length
+    } else {
+      i++
+    }
+  }
+  const results: { span: HTMLSpanElement; displayText: string }[] = []
+  for (const f of found.reverse()) {
+    const { span } = replaceRangeWithMentionSpan(root, f.index, f.index + f.displayText.length, f.displayText)
+    results.unshift({ span, displayText: f.displayText })
+  }
+  return results
+}
+
 /** ノードの直後（＝その要素の外側）へプレーンテキストを挿入し、その直後へカーソルを置く。
  * バグ修正（実機Playwright検証で発見）: replaceRangeWithMentionSpanが返すoffset（＝span末尾の
  * 位置）に対してreplaceRangeWithTextで単純に後続テキストを挿入しようとすると、resolveOffsetが
