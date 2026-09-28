@@ -19,6 +19,7 @@ import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
 import ProfileEditModal from './ProfileEditModal'
 import ScheduledMessagesModal from './ScheduledMessagesModal'
+import { readSidebarCollapsed, saveSidebarCollapsed, type SidebarCollapsed } from '../lib/sidebarSections'
 import type { Me } from '../types'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -36,6 +37,22 @@ const navItemClass = (isActive: boolean) =>
       ? 'bg-accent-50 font-bold text-accent-700 shadow-[inset_3px_0_0_var(--color-accent-600)]'
       : 'text-ink hover:bg-surface-muted'
   }`
+
+// サイドバーの「チャンネル」「ダイレクトメッセージ」見出し。押すと一覧を開閉する（lib/sidebarSections.ts）
+function SectionToggle({ label, collapsed, onToggle }: { label: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      title={collapsed ? `${label}の一覧を開く` : `${label}の一覧を閉じる（未読のあるものは表示されたままになります）`}
+      className="flex items-center gap-1 rounded-[5px] pr-1 text-[11px] font-bold tracking-wide text-ink-subtle hover:text-ink"
+    >
+      <span className={`inline-block w-2.5 text-[9px] transition-transform ${collapsed ? '-rotate-90' : ''}`}>▼</span>
+      {label}
+    </button>
+  )
+}
 
 // S-02 共通ヘッダー＋サイドバー（詳細設計書 画面設計11.3節 Layout、画面モックアップS-03等の.sidebar）。
 export default function Layout({ me, children }: { me: Me; children: React.ReactNode }) {
@@ -86,6 +103,30 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const [searchParams] = useSearchParams()
   const settingsTab = searchParams.get('tab') ?? 'admin'
   const adminTab = searchParams.get('tab') ?? 'users'
+
+  // 「チャンネル」「ダイレクトメッセージ」見出しの開閉（lib/sidebarSections.ts）。閉じている間も、
+  // 未読・メンションのあるもの（ミュート中は除く＝バッジを出さないものは出さない）と、今開いている
+  // ものだけは表示し続ける（閉じたせいで新着を見落とさない・今いる場所が分かるようにするため）
+  const [collapsed, setCollapsed] = useState<SidebarCollapsed>(readSidebarCollapsed)
+  const toggleSection = (key: keyof SidebarCollapsed) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] }
+      saveSidebarCollapsed(next)
+      return next
+    })
+  }
+  const currentChannelId = useMatch('/channels/:channelId')?.params.channelId
+  const currentDmId = useMatch('/dms/:dmId')?.params.dmId
+  const visibleChannels = collapsed.channels
+    ? joined.filter(
+        (c) =>
+          c.id === currentChannelId ||
+          (c.notif_mode !== 'off' && ((c.unread_count ?? 0) > 0 || (c.unread_mention_count ?? 0) > 0)),
+      )
+    : joined
+  const visibleDms = collapsed.dms
+    ? dms.filter((d) => d.id === currentDmId || (d.notif_mode !== 'off' && d.unread_count > 0))
+    : dms
 
   const guardNavigation = useUnsavedChangesGuard()
 
@@ -262,7 +303,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
         ) : (
           <div className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3.5">
             <div className="flex items-center justify-between px-2 pb-1.5">
-              <span className="text-[11px] font-bold tracking-wide text-ink-subtle">チャンネル</span>
+              <SectionToggle label="チャンネル" collapsed={collapsed.channels} onToggle={() => toggleSection('channels')} />
               <button
                 type="button"
                 onClick={() => setModalOpen(true)}
@@ -273,7 +314,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               </button>
             </div>
             <ul>
-              {joined.map((c) => {
+              {visibleChannels.map((c) => {
                 // チャンネルごとの通知設定（2026-09-11）で「オフ（ミュート）」を選んだチャンネルは
                 // 未読バッジ・太字表示も抑える（全体設定のoffはバッジには影響しない既存仕様とは
                 // 意図的に区別。ユーザーが選んだ推奨案どおり。'default'/'all'/'mentions'は通知の
@@ -312,13 +353,13 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   </li>
                 )
               })}
-              {joined.length === 0 && (
+              {joined.length === 0 && !collapsed.channels && (
                 <li className="px-2 py-1.5 text-xs text-ink-subtle">参加中のチャンネルはありません</li>
               )}
             </ul>
 
             <div className="mt-4.5 flex items-center justify-between px-2 pb-1.5">
-              <span className="text-[11px] font-bold tracking-wide text-ink-subtle">ダイレクトメッセージ</span>
+              <SectionToggle label="ダイレクトメッセージ" collapsed={collapsed.dms} onToggle={() => toggleSection('dms')} />
               <button
                 type="button"
                 onClick={() => setDmModalOpen(true)}
@@ -329,7 +370,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               </button>
             </div>
             <ul>
-              {dms.map((d) => {
+              {visibleDms.map((d) => {
                 // 自分専用DM（F-05、is_self）はmembersに自分自身が入るため、そのまま氏名を出すと
                 // 紛らわしい（DmView.tsxのタイトル表記と揃える）
                 const label = d.is_self ? '自分（メモ）' : d.members.map((m) => m.name).join('、')
@@ -375,7 +416,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   </li>
                 )
               })}
-              {dms.length === 0 && <li className="px-2 py-1.5 text-xs text-ink-subtle">DMはまだありません</li>}
+              {dms.length === 0 && !collapsed.dms && <li className="px-2 py-1.5 text-xs text-ink-subtle">DMはまだありません</li>}
             </ul>
           </div>
         )}
