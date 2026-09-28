@@ -45,6 +45,22 @@ function isMarkerNode(node: Node): boolean {
   return node.nodeType === Node.ELEMENT_NODE && (node as Element).hasAttribute(LIVE_FORMAT_MARKER_ATTR)
 }
 
+/** 箇条書きの項目（data-block-format="list-item"）の中身が空のときに置かれるプレースホルダの<br>か
+ * （項目の唯一の実質的な子で、兄弟は空文字かCARET_MARKERだけのテキストノード）。空の項目が高さ0に
+ * 潰れず、resolveOffsetがその内側の位置を返せるようにするための要素で、文字としては数えない
+ * （domToPlainText・domToMarkdown・resolveOffset・domPositionToOffsetで共通、1文字の"\n"と
+ * 数えると送信Markdownの空項目の後ろに余計な改行が入っていた）。ブラウザもBackspace/Deleteで
+ * 中身を消し切った項目にこの<br>を自動で置く。 */
+function isListItemPlaceholderBr(node: Node): boolean {
+  if (node.nodeName !== 'BR') return false
+  const parent = node.parentNode
+  if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return false
+  if ((parent as Element).getAttribute(BLOCK_FORMAT_ATTR) !== 'list-item') return false
+  return Array.from(parent.childNodes).every(
+    (c) => c === node || (c.nodeType === Node.TEXT_NODE && stripCaretMarker((c as Text).data) === ''),
+  )
+}
+
 /** ノード配下のテキスト総文字数（原子絵文字・BR等の区別はせず、単純にテキストノードの
  * data.lengthを合算するだけの軽量版。隠しマーカーspanの中身は常に短い1〜数個のテキスト
  * ノードのみのため、これで十分）。 */
@@ -239,7 +255,7 @@ export function domToPlainText(root: Node): string {
       return
     }
     if ((node as Element).tagName === 'BR') {
-      text += '\n'
+      if (!isListItemPlaceholderBr(node)) text += '\n'
       return
     }
     // 箇条書き（data-block-format="list"）は1行=1つのdata-block-format="list-item"要素という
@@ -277,7 +293,7 @@ export function domToMarkdown(root: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return (node as Text).data
     if (node.nodeType !== Node.ELEMENT_NODE) return ''
     if (isEmojiNode(node)) return `:${node.getAttribute(EMOJI_ATTR)}:`
-    if ((node as Element).tagName === 'BR') return '\n'
+    if ((node as Element).tagName === 'BR') return isListItemPlaceholderBr(node) ? '' : '\n'
     // 箇条書き（data-block-format="list"）は各項目（data-block-format="list-item"）を
     // 個別に直列化し、"- "を付けて"\n"で連結する（domToPlainTextと同じ「項目の境界=仮想的な
     // 改行」モデル、本ファイル後方の箇条書きセクション参照）。項目自体の中身は太字等を含みうる
@@ -468,6 +484,8 @@ function resolveOffset(root: Node, targetOffset: number): DomPosition {
       const parent = node.parentNode as Node
       const idx = indexOfChild(node)
       if (remaining === 0) return { node: parent, offset: idx }
+      // 空の箇条書き項目のプレースホルダは幅0（isListItemPlaceholderBr参照）
+      if (isListItemPlaceholderBr(node)) return null
       remaining -= 1
       lastPosition = { node: parent, offset: idx + 1 }
       return null
@@ -513,7 +531,7 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
     if (n.nodeType === Node.TEXT_NODE) return (n as Text).data.length
     if (n.nodeType !== Node.ELEMENT_NODE) return 0
     if (isEmojiNode(n)) return (n.getAttribute(EMOJI_ATTR) as string).length + 2
-    if ((n as Element).tagName === 'BR') return 1
+    if ((n as Element).tagName === 'BR') return isListItemPlaceholderBr(n) ? 0 : 1
     // 箇条書き（resolveOffsetの同名コメント参照）: 項目間の仮想的な"\n"ぶんを加算する。
     if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
       const items = Array.from(n.childNodes)
@@ -558,7 +576,7 @@ function domPositionToOffset(root: HTMLElement, node: Node, nodeOffset: number):
       return false
     }
     if ((n as Element).tagName === 'BR') {
-      total += 1
+      if (!isListItemPlaceholderBr(n)) total += 1
       return false
     }
     if ((n as Element).getAttribute(BLOCK_FORMAT_ATTR) === 'list') {
@@ -1341,7 +1359,12 @@ function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
 // マーカーボックスがRange/Selection APIの挙動に干渉するリスクがあるため避けた。疑似要素は
 // DOM/Rangeツリーに一切含まれないため安全）。
 const LIST_CLASSNAME = 'my-1 space-y-0.5'
-const LIST_ITEM_CLASSNAME = "relative pl-5 before:absolute before:left-1.5 before:content-['•'] before:text-ink-subtle"
+// min-h-[1lh]: 中身が空の項目も1行ぶんの高さを保つ。項目の先頭でEnterを押すと、中身を
+// 次の項目へ切り出した元の項目が子を持たない空要素になり、黒点が絶対配置（before:absolute）の
+// ため高さ0に潰れて、空の項目が画面上に見えなくなっていた（ユーザーからの報告「●1行目/●|2行目で
+// Enterを押しても●1行目/●/●|2行目にならない」、実機Playwrightで高さ0を確認）。
+const LIST_ITEM_CLASSNAME =
+  "relative min-h-[1lh] pl-5 before:absolute before:left-1.5 before:content-['•'] before:text-ink-subtle"
 const BULLET_LINE_REGEX = /^- (.+)$/
 
 interface BulletRange {
@@ -1666,6 +1689,14 @@ export function handleEnterInListItem(root: HTMLElement, itemEl: HTMLElement, cu
   const tail = range.extractContents()
   const newItem = buildListItemElement(tail)
   listEl.insertBefore(newItem, itemEl.nextSibling)
+  // 項目の先頭でEnterを押した場合（ユーザーからの要望「●1行目/●|2行目でEnterを押したら
+  // ●1行目/●/●|2行目にしてほしい」）、中身を丸ごと切り出した元の項目は子を持たない空要素になる。
+  // ブラウザが空の項目に置くのと同じプレースホルダの<br>を入れ、resolveOffsetがこの項目の内側の
+  // 位置を返せるようにする（isListItemPlaceholderBr参照。子が無いと幅0の要素に入れず、この空項目での
+  // Backspace等の判定がずれていた）。
+  if (Array.from(itemEl.childNodes).every((c) => c.nodeType === Node.TEXT_NODE && (c as Text).data === '')) {
+    itemEl.replaceChildren(document.createElement('br'))
+  }
   // バグ修正（実機Playwright検証で発見）: cursor（分割前の絶対オフセット、＝新しい項目の
   // 先頭と数値上は同じ値）をそのままsetSelectionOffsetsへ渡すと、resolveOffsetが「その位置は
   // 直前の項目の末尾でも表現できる」という既知のバイアス（ties resolve to the end of the
