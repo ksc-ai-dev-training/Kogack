@@ -235,6 +235,10 @@ export interface Message {
 export interface MessagesResponse {
   items: Message[]
   has_more: boolean
+  /** since（差分ポーリング）指定時のみ: since以降に削除された発言のid（backend/message_diff.py） */
+  deleted_ids?: string[]
+  /** since指定時のみ: 削除分も含めた次のsinceカーソル（何も変化が無ければnull） */
+  next_since?: string | null
 }
 
 /** A-76「AIとのやりとりを見る」（ユーザーからの明示的な要望）。request_payloadは実際にOpenAI APIへ

@@ -98,8 +98,12 @@ async def delete_message(message_id: int, user: CurrentUser = Depends(require_au
         if row["sender_user_id"] != user.id:
             raise HTTPException(403, detail="権限がありません")
 
+    # updated_atも進める: 他の参加者の差分ポーリング（A-10/A-18のsince）がこの削除を検知し、
+    # deleted_idsとして受け取って画面から取り除けるようにする（従来は削除した本人の画面からしか
+    # 消えず、他の参加者の画面には再読み込みするまで残り続けていた。2026-09-28）
     await pool.execute(
-        "UPDATE messages SET deleted_at = now(), deleted_by = $2 WHERE id = $1", message_id, user.id
+        "UPDATE messages SET deleted_at = now(), deleted_by = $2, updated_at = now() WHERE id = $1",
+        message_id, user.id,
     )
     if row["thread_parent_id"] is not None:
         # 削除対象がスレッド返信の場合、元発言のthread_reply_countも減るため、post_replyと同じ理由で

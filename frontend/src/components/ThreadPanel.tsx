@@ -3,7 +3,7 @@ import { useThread } from '../hooks/useThread'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { useMe } from '../hooks/useMe'
-import { apiFetch, votePoll, closePoll } from '../lib/api'
+import { apiFetch, ApiError, votePoll, closePoll } from '../lib/api'
 import MessageList, {
   Avatar, EmojiGridPopover, PollCard, ReactionPills, ReactionQuickButtons, formatTime, isEmojiOnlyBody,
   renderMessageBody,
@@ -75,7 +75,9 @@ export default function ThreadPanel({
   onReplyPosted?: () => void
   onReplyDeleted?: () => void
 }) {
-  const { replies, mutate: mutateReplies, updateReplyReactions, updateReplyMessage, updateReplyPoll } = useThread(messageId)
+  const {
+    replies, error: threadError, mutate: mutateReplies, updateReplyReactions, updateReplyMessage, updateReplyPoll,
+  } = useThread(messageId)
   const { customEmoji } = useCustomEmoji()
   const { me } = useMe()
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -138,6 +140,19 @@ export default function ThreadPanel({
   const [parentProfileOpen, setParentProfileOpen] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
   const toast = useToast()
+
+  // スレッドを開いている間に元発言が削除されたら、スレッド画面を自動で閉じる（ユーザーからの
+  // 明示的な要望、2026-09-28）。A-13は削除済みの元発言に対して404を返す（require_thread_access）
+  // ため、3秒ごとのポーリングでそれを検知する。自分で元発言を削除した場合は、呼び出し元
+  // （ChannelView/DmViewのonDeleted）がポーリングを待たずに閉じる
+  useEffect(() => {
+    if (threadError instanceof ApiError && threadError.status === 404) {
+      toast('元の発言が削除されたため、スレッドを閉じました', 'info')
+      onClose()
+    }
+    // onCloseは親の再描画のたびに作り直されるため依存に含めない（404を検知したときだけ動けばよい）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadError])
 
   // 元発言への絵文字リアクション（MessageListを経由せずここで個別に描画しているため、
   // 返信一覧とは別に扱う）。返信側と異なりChannelView/DmView側のmessages一覧を直接

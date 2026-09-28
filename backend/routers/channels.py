@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
+import message_diff
 from auth_helpers import (
     CurrentUser, require_auth, require_channel_admin, require_channel_member, require_channel_member_or_admin,
 )
@@ -658,6 +659,7 @@ async def list_messages(
                ORDER BY m.updated_at ASC""",
             channel_id, since_dt,
         )
+        deleted_rows = await message_diff.deleted_since(pool, "channel_id", channel_id, since_dt)
     elif around:
         rows = await _around_rows(pool, _MESSAGES_SELECT, "channel_id", channel_id, around)
         if rows is None:
@@ -689,7 +691,9 @@ async def list_messages(
         )
         for r in rows
     ]
-    if since or around:
+    if since:
+        return {"items": items, "has_more": False, **message_diff.since_extras(rows, deleted_rows)}
+    if around:
         return {"items": items, "has_more": False}
     return {"items": items, "has_more": len(rows) == limit}
 

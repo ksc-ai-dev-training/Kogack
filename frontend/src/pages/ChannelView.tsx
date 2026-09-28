@@ -339,7 +339,11 @@ export default function ChannelView() {
             emptyMessage="まだ発言がありません。最初のメッセージを送ってみましょう。"
             onOpenThread={openThread}
             openThreadId={threadId}
-            onDeleted={removeMessage}
+            onDeleted={(id) => {
+              removeMessage(id)
+              // 開いているスレッドの元発言を自分で削除したら、そのスレッド画面も閉じる
+              if (id === threadId) closeThread()
+            }}
             onReactionToggled={updateMessageReactions}
             onEdited={updateMessage}
             onPollUpdated={updateMessagePoll}

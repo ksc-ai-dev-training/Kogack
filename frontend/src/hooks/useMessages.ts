@@ -96,6 +96,15 @@ export function useMessages(basePath: string | undefined, anchorMessageId?: stri
       s.messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       s.since = res.items[res.items.length - 1].updated_at
     }
+    // 他の参加者が削除した発言を一覧から取り除く（差分ポーリングのdeleted_ids、backend/message_diff.py）。
+    // 従来は削除した本人の画面（removeMessage）からしか消えず、他の参加者の画面には再読み込み
+    // するまで残り続けていた。next_sinceは削除分も含めたカーソルで、削除だけが起きたポーリング
+    // （itemsが空）でもカーソルを進め、同じ削除を毎回受け取り直さないようにする
+    if (res.deleted_ids && res.deleted_ids.length > 0) {
+      const gone = new Set(res.deleted_ids)
+      s.messages = s.messages.filter((m) => !gone.has(m.id))
+    }
+    if (res.next_since) s.since = res.next_since
     return s.messages
   }
 

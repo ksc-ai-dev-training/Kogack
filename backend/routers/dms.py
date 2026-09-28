@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
+import message_diff
 from auth_helpers import CurrentUser, require_auth, require_dm_member
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
@@ -279,6 +280,7 @@ async def list_messages(
                ORDER BY m.updated_at ASC""",
             dm_id, since_dt,
         )
+        deleted_rows = await message_diff.deleted_since(pool, "dm_id", dm_id, since_dt)
         blocks_by_message = await fetch_blocks_grouped(pool, [r["id"] for r in rows])
         attachments_by_message = await fetch_attachments_grouped(pool, [r["id"] for r in rows])
         reactions_by_message = await fetch_reactions_grouped(pool, [r["id"] for r in rows], user.id)
@@ -292,6 +294,7 @@ async def list_messages(
                 for r in rows
             ],
             "has_more": False,
+            **message_diff.since_extras(rows, deleted_rows),
         }
     if around:
         rows = await _around_rows(pool, dm_id, around)
