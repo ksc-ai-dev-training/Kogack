@@ -1137,11 +1137,16 @@ const RAW_STRIKE_REGEX = /~~([\s\S]+?)~~/g
 // 前後に別の「*」が隣接する「*」は対象外にする。「* 」のように直後が空白、閉じ側の直前が空白の
 // 場合も対象外（「2 * 3 * 4」のような計算式を太字にしないため。Slackと同じ規則）。
 const RAW_SINGLE_STAR_BOLD_REGEX = /(?<!\*)\*(?![*\s])([^*\n]+?)(?<![*\s])\*(?!\*)/g
+// 「~取り消し線~」（チルダ1個ずつ）も取り消し線として受け付ける（ユーザーからの要望、「*太字*」と
+// 同じ扱い。送信する本文は従来どおり「~~取り消し線~~」）。規則も「*太字*」と同じだが、加えて開き側の
+// 直前・閉じ側の直後が半角英数字の「~」は対象外にする——「10~12時と14~16時」のように範囲を表す
+// 「~」が日本語の文章では頻繁に使われ、それを取り消し線にしないため。
+const RAW_SINGLE_TILDE_STRIKE_REGEX = /(?<![~0-9A-Za-z])~(?![~\s])([^~\n]+?)(?<![~\s])~(?![~0-9A-Za-z])/g
 
 interface LiveMatch {
   start: number
   end: number
-  /** 開き・閉じ記号の文字数。省略時はTOGGLE_FORMAT_MARKERS[kind]の長さ（「*太字*」だけ1）。 */
+  /** 開き・閉じ記号の文字数。省略時はTOGGLE_FORMAT_MARKERS[kind]の長さ（「*太字*」「~取り消し線~」だけ1）。 */
   markerLength?: number
   priority: number
   // 'codeblock'（```` ``` ````、複数行）はToggleFormatKindに含めない別カテゴリ（本ファイル前方の
@@ -1221,6 +1226,10 @@ function collectRawMarkdownMatches(text: string): LiveMatch[] {
   for (const m of text.matchAll(RAW_STRIKE_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'strike' })
+  }
+  for (const m of text.matchAll(RAW_SINGLE_TILDE_STRIKE_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, markerLength: 1, priority: 1, kind: 'strike' })
   }
   candidates.sort((a, b) => a.priority - b.priority || a.start - b.start)
   const accepted: LiveMatch[] = []
@@ -2677,7 +2686,7 @@ function enterJustClosedFormat(): ToggleFormatKind[] {
   const before = prev.previousSibling
   if (
     before?.nodeType === Node.TEXT_NODE &&
-    [...Object.values(TOGGLE_FORMAT_MARKERS).map(({ prefix }) => prefix), '*'].some((prefix) => (before as Text).data.endsWith(prefix))
+    [...Object.values(TOGGLE_FORMAT_MARKERS).map(({ prefix }) => prefix), '*', '~'].some((prefix) => (before as Text).data.endsWith(prefix))
   ) {
     return []
   }
