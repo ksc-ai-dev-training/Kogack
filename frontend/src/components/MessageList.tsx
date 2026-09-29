@@ -4,18 +4,14 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { useDraftKeys } from '../hooks/useDraftKeys'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
-import { apiFetch, ApiError, uploadAttachment } from '../lib/api'
-import {
-  continueBulletOnEnter, continueQuoteOnEnter, insertBulletListText, insertQuoteText, wrapInlineCodeText, wrapCodeBlockText, wrapSelectionText,
-  trimMessageBody,
-} from '../lib/textFormatting'
+import { apiFetch, ApiError } from '../lib/api'
 import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import ProfileCard from './ProfileCard'
 import { GuardedLink } from './GuardedLink'
-import { EMOJI_LIST } from './Composer'
+import Composer, { EMOJI_LIST } from './Composer'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import { CustomEmojiTile } from './CustomEmojiTile'
 import type {
@@ -32,11 +28,6 @@ function findCustomEmojiUrl(shortcodeWithColons: string, customEmoji: CustomEmoj
   const name = shortcodeWithColons.slice(1, -1).toLowerCase()
   return customEmoji.find((e) => e.name.toLowerCase() === name)?.image_url ?? null
 }
-
-// Composer.tsxのMAX_ATTACHMENT_BYTESと同じ上限（F-07、05-1_詳細設計書_DB設計.html 3.6節）。
-// 発言の編集でファイルを追加する際もこの上限を適用する（ユーザーからの要望「編集の時にも
-// ファイルのボタンを付けてほしい」に伴う添付ファイル編集対応、2026-09-11）
-const MAX_EDIT_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 export function formatTime(iso: string) {
   const d = new Date(iso)
@@ -1749,163 +1740,38 @@ export default function MessageList({
   // 送った後でも編集できる機能が欲しい」）。同時に編集できるのは1件のみ（メッセージid単位でstate
   // を持つ、絵文字ピッカーのemojiPickerForと同じ考え方）。@メンションは編集画面自体に候補ピッカーを
   // 置かない方針（ユーザーとの合意どおり、「編集の時にはメンションボタン自体をなくしてよい」）。
-  // 添付ファイルは追加・削除の両方に対応する（ユーザーからの明示的な要望）。書式ボタン・絵文字挿入は
-  // Composer.tsxと同じ挙動を共有モジュール（lib/textFormatting.ts）経由で再現する
+  // 添付ファイルは追加・削除の両方に対応する（ユーザーからの明示的な要望）。入力欄は通常の投稿欄
+  // （Composer.tsx）をそのまま使う（ユーザーからの要望「発言編集欄・定期投稿・自動応答トリガーの
+  // 本文欄を通常の投稿欄と同じにしてほしい」。以前は記号を直接挿入する素のtextareaだった）
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editBody, setEditBody] = useState('')
-  const [savingEdit, setSavingEdit] = useState(false)
-  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
   // 既存の添付ファイルのうち「削除」を押してまだ外れていないものだけを保持する（起点はstartEditで
-  // m.attachmentsをそのままコピー）。新規に追加したファイルは別配列（editNewAttachments）で持ち、
-  // 保存時にこの2つから「もう表示されていない既存添付のid（=削除対象）」と「新規添付」を組み立てる
+  // m.attachmentsをそのままコピー）。新規に追加したファイルは投稿欄（Composer）側が保持し、保存時に
+  // この配列から「もう表示されていない既存添付のid（=削除対象）」を組み立てる
   const [editKeptAttachments, setEditKeptAttachments] = useState<MessageAttachment[]>([])
-  const [editNewAttachments, setEditNewAttachments] = useState<AttachmentPayload[]>([])
-  const [editUploading, setEditUploading] = useState(false)
-  const [editEmojiAnchor, setEditEmojiAnchor] = useState<DOMRect | null>(null)
-  const editFileInputRef = useRef<HTMLInputElement>(null)
 
   const startEdit = (m: Message) => {
     setEditingId(m.id)
-    setEditBody(m.body)
     setEditKeptAttachments(m.attachments ?? [])
-    setEditNewAttachments([])
-    setEditEmojiAnchor(null)
   }
   const cancelEdit = () => {
     setEditingId(null)
-    setEditEmojiAnchor(null)
   }
-  // バグ修正（ユーザーからの報告「たまにAIが二回応答するときがある」の調査で発見。Composer.tsxの
-  // send()と全く同じ原因・同じ対処。詳細はComposer.tsxのsendingRef直前のコメント参照）: Ctrl+Enter
-  // での保存を押しっぱなしにする（OSのキーリピート）と、この関数が短時間に連続で呼ばれ同じ編集内容が
-  // 重複送信されうる。savingEdit（state）だけでは同一tick内の連続呼び出しを防げないためrefで同期的に
-  // 再入を防ぐ
-  const savingEditRef = useRef(false)
-  const saveEdit = async (m: Message) => {
-    if (savingEditRef.current) return
-    const trimmed = trimMessageBody(editBody)
-    if (!trimmed) {
-      toast('本文を入力してください', 'error')
-      return
-    }
-    savingEditRef.current = true
-    setSavingEdit(true)
-    try {
-      const keptIds = new Set(editKeptAttachments.map((a) => a.id))
-      const removeAttachmentIds = (m.attachments ?? []).filter((a) => !keptIds.has(a.id)).map((a) => a.id)
-      const updated = await apiFetch<Message>(`/api/messages/${m.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          body: trimmed,
-          remove_attachment_ids: removeAttachmentIds,
-          new_attachments: editNewAttachments,
-        }),
-      })
-      onEdited?.(updated)
-      setEditingId(null)
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '編集に失敗しました', 'error')
-    } finally {
-      savingEditRef.current = false
-      setSavingEdit(false)
-    }
-  }
-
-  // 編集中の書式ボタン（太字・斜体・下線・取り消し線・コード・箇条書き）。Composer.tsxの
-  // wrapSelection/wrapCode/insertBulletListと同じアルゴリズム（lib/textFormatting.ts、共有）
-  const applyEditWrap = (prefix: string, suffix: string) => {
-    const el = editTextareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? editBody.length
-    const end = el.selectionEnd ?? editBody.length
-    const r = wrapSelectionText(editBody, start, end, prefix, suffix)
-    setEditBody(r.body)
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(r.selStart, r.selEnd)
+  // 保存はComposerのonSendとして呼ばれる（Ctrl+Enterの連打・キーリピートによる重複送信の防止、
+  // 失敗時のトースト表示はComposer側のsend()が担う。ユーザーからの報告「たまにAIが二回応答する
+  // ときがある」の調査で入れた対処と同じもの）。失敗時は例外をそのまま投げてComposerに表示させる
+  const saveEdit = async (m: Message, body: string, newAttachments: AttachmentPayload[]) => {
+    const keptIds = new Set(editKeptAttachments.map((a) => a.id))
+    const removeAttachmentIds = (m.attachments ?? []).filter((a) => !keptIds.has(a.id)).map((a) => a.id)
+    const updated = await apiFetch<Message>(`/api/messages/${m.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        body,
+        remove_attachment_ids: removeAttachmentIds,
+        new_attachments: newAttachments,
+      }),
     })
-  }
-  // ユーザーからの明示的な要望「コード（一行）とコードブロックのボタンを分けてください」により
-  // 旧applyEditCode（改行の有無で自動的にインライン/ブロックを切り替えていた）を分割した
-  const applyEditInlineCode = () => {
-    const el = editTextareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? editBody.length
-    const end = el.selectionEnd ?? editBody.length
-    const r = wrapInlineCodeText(editBody, start, end)
-    if (!r) {
-      toast('複数行を選択している場合はコードブロックのボタンを使ってください', 'error')
-      return
-    }
-    setEditBody(r.body)
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(r.selStart, r.selEnd)
-    })
-  }
-  const applyEditCodeBlock = () => {
-    const el = editTextareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? editBody.length
-    const end = el.selectionEnd ?? editBody.length
-    const r = wrapCodeBlockText(editBody, start, end)
-    setEditBody(r.body)
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(r.selStart, r.selEnd)
-    })
-  }
-  const applyEditBulletList = () => {
-    const el = editTextareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? editBody.length
-    const end = el.selectionEnd ?? editBody.length
-    const r = insertBulletListText(editBody, start, end)
-    setEditBody(r.body)
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(r.selStart, r.selEnd)
-    })
-  }
-  const applyEditQuote = () => {
-    const el = editTextareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? editBody.length
-    const end = el.selectionEnd ?? editBody.length
-    const r = insertQuoteText(editBody, start, end)
-    setEditBody(r.body)
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(r.selStart, r.selEnd)
-    })
-  }
-  const insertEditEmoji = (emoji: string) => {
-    const el = editTextareaRef.current
-    const cursor = el?.selectionStart ?? editBody.length
-    setEditBody(editBody.slice(0, cursor) + emoji + editBody.slice(cursor))
-    setEditEmojiAnchor(null)
-    requestAnimationFrame(() => {
-      const pos = cursor + emoji.length
-      el?.focus()
-      el?.setSelectionRange(pos, pos)
-    })
-  }
-  const pickEditFile = async (file: File | null) => {
-    if (!file) return
-    if (file.size > MAX_EDIT_ATTACHMENT_BYTES) {
-      toast('ファイルサイズは20MBまでです', 'error')
-      return
-    }
-    setEditUploading(true)
-    try {
-      const uploaded = await uploadAttachment(file)
-      setEditNewAttachments((prev) => [...prev, uploaded])
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'アップロードに失敗しました', 'error')
-    } finally {
-      setEditUploading(false)
-      if (editFileInputRef.current) editFileInputRef.current.value = ''
-    }
+    onEdited?.(updated)
+    setEditingId(null)
   }
 
   // 絵文字リアクション（A-75、ユーザーからの明示的な要望）。絵文字ピッカーはメッセージid単位で
@@ -2064,221 +1930,39 @@ export default function MessageList({
                   )}
                 </div>
                 {isEditing ? (
-                  <div className="mt-1 rounded-lg border border-accent-600 p-2">
-                    {/* 書式ボタン（Composer.tsxと同じ、通常投稿と揃える。ユーザーからの明示的な
-                        要望「編集の時にも通常のメッセージと同じように書式のボタンを付けてほしい」）。
-                        @メンションボタンは編集画面には置かない方針（ユーザーとの合意どおり） */}
-                    <div className="mb-1.5 flex items-center gap-0.5">
-                      <button
-                        type="button"
-                        title="太字（**で囲みます）"
-                        onClick={() => applyEditWrap('**', '**')}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black text-ink-subtle hover:bg-surface-muted"
-                      >
-                        B
-                      </button>
-                      <button
-                        type="button"
-                        title="斜体（_で囲みます）"
-                        onClick={() => applyEditWrap('_', '_')}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic text-ink-subtle hover:bg-surface-muted"
-                      >
-                        I
-                      </button>
-                      <button
-                        type="button"
-                        title="下線（++で囲みます）"
-                        onClick={() => applyEditWrap('++', '++')}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle underline hover:bg-surface-muted"
-                      >
-                        U
-                      </button>
-                      <button
-                        type="button"
-                        title="取り消し線（~~で囲みます）"
-                        onClick={() => applyEditWrap('~~', '~~')}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-ink-subtle line-through hover:bg-surface-muted"
-                      >
-                        S
-                      </button>
-                      <button
-                        type="button"
-                        title="コード（1行。複数行はコードブロックのボタンを使ってください）"
-                        onClick={applyEditInlineCode}
-                        className="flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold text-ink-subtle hover:bg-surface-muted"
-                      >
-                        {'</>'}
-                      </button>
-                      <button
-                        type="button"
-                        title="コードブロック（複数行のコードを枠で囲みます。選択範囲が無ければ現在の行が対象になります）"
-                        onClick={applyEditCodeBlock}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                          <rect x="2.5" y="3.5" width="15" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.4" />
-                          <path d="M8 8l-2 2 2 2M12 8l2 2-2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        title="箇条書き（行頭に「- 」を付けます）"
-                        onClick={applyEditBulletList}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                          <circle cx="4" cy="6" r="1.3" fill="currentColor" />
-                          <circle cx="4" cy="10" r="1.3" fill="currentColor" />
-                          <circle cx="4" cy="14" r="1.3" fill="currentColor" />
-                          <path d="M8 6h8M8 10h8M8 14h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        title="引用（行頭に「> 」を付けます）"
-                        onClick={applyEditQuote}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                          <rect x="3" y="4" width="2" height="12" rx="1" fill="currentColor" />
-                          <path d="M8 6h9M8 10h9M8 14h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                        </svg>
-                      </button>
-                    </div>
-                    <textarea
-                      ref={editTextareaRef}
-                      autoFocus
-                      value={editBody}
-                      onChange={(e) => setEditBody(e.target.value)}
-                      onKeyDown={(e) => {
-                        // Composer.tsxと同じ規約: Enter=改行、Ctrl+Enter（Macは⌘+Enter）=保存、Escape=取消。
-                        // e.repeatでのキーリピード対策もComposer.tsxと同じ（ユーザーからの報告
-                        // 「たまにAIが二回応答する」の調査で発見した不具合への対処、詳細はsaveEdit直前のコメント参照）
-                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                          e.preventDefault()
-                          if (e.repeat) return
-                          saveEdit(m)
-                          return
-                        }
-                        if (e.key === 'Escape') {
-                          e.preventDefault()
-                          cancelEdit()
-                          return
-                        }
-                        // 箇条書き・引用の行でEnterを押すと次の行にも自動で「- 」/「> 」を続ける
-                        // （Composer.tsxと同じ）
-                        if (e.key === 'Enter' && !e.shiftKey && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
-                          const r = continueBulletOnEnter(editBody, e.currentTarget.selectionStart) ?? continueQuoteOnEnter(editBody, e.currentTarget.selectionStart)
-                          if (r) {
-                            e.preventDefault()
-                            const el = e.currentTarget
-                            setEditBody(r.body)
-                            requestAnimationFrame(() => {
-                              el.focus()
-                              el.setSelectionRange(r.selStart, r.selEnd)
-                            })
-                          }
-                        }
-                      }}
-                      rows={Math.min(10, Math.max(2, editBody.split('\n').length))}
-                      maxLength={4000}
-                      className="w-full resize-none break-words border-none bg-transparent text-[13.5px] leading-[1.75] text-ink outline-none"
+                  <div className="mt-1">
+                    {/* @メンションの候補は編集画面には出さない方針（ユーザーとの合意どおり、
+                        mentionCandidatesを渡さない＝メンションボタンも出ない） */}
+                    <Composer
+                      placeholder="メッセージを編集"
+                      initialBody={m.body}
+                      onSend={(body, _mentions, newAttachments) => saveEdit(m, body, newAttachments)}
+                      submitLabel="保存"
+                      onCancel={cancelEdit}
+                      footerHint="Ctrl+Enterで保存・Escapeで取消"
+                      popoverPlacement="below"
+                      leadingAttachments={
+                        editKeptAttachments.length > 0
+                          ? editKeptAttachments.map((a) => (
+                              <span
+                                key={a.id}
+                                className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-subtle px-2 py-1 text-[11.5px] text-ink-muted"
+                              >
+                                📎 {a.file_name}
+                                <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditKeptAttachments((prev) => prev.filter((x) => x.id !== a.id))}
+                                  title="添付を外す"
+                                  className="text-ink-subtle hover:text-danger-text"
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            ))
+                          : null
+                      }
                     />
-                    {(editKeptAttachments.length > 0 || editNewAttachments.length > 0 || editUploading) && (
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
-                        {editKeptAttachments.map((a) => (
-                          <span
-                            key={a.id}
-                            className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-subtle px-2 py-1 text-[11.5px] text-ink-muted"
-                          >
-                            📎 {a.file_name}
-                            <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
-                            <button
-                              type="button"
-                              onClick={() => setEditKeptAttachments((prev) => prev.filter((x) => x.id !== a.id))}
-                              title="添付を外す"
-                              className="text-ink-subtle hover:text-danger-text"
-                            >
-                              ✕
-                            </button>
-                          </span>
-                        ))}
-                        {editNewAttachments.map((a, i) => (
-                          <span
-                            key={`${a.storage_path}-${i}`}
-                            className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-subtle px-2 py-1 text-[11.5px] text-ink-muted"
-                          >
-                            📎 {a.file_name}
-                            <span className="text-ink-subtle">({formatBytes(a.byte_size)})</span>
-                            <button
-                              type="button"
-                              onClick={() => setEditNewAttachments((prev) => prev.filter((_, idx) => idx !== i))}
-                              title="添付を外す"
-                              className="text-ink-subtle hover:text-danger-text"
-                            >
-                              ✕
-                            </button>
-                          </span>
-                        ))}
-                        {editUploading && <span className="px-1 py-1 text-[11.5px] text-ink-subtle">アップロード中…</span>}
-                      </div>
-                    )}
-                    <div className="mt-1.5 flex items-center gap-2 text-[11.5px]">
-                      <input
-                        ref={editFileInputRef}
-                        type="file"
-                        className="hidden"
-                        onChange={(e) => pickEditFile(e.target.files?.[0] ?? null)}
-                      />
-                      <button
-                        type="button"
-                        title="ファイルを添付"
-                        onClick={() => editFileInputRef.current?.click()}
-                        className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-                      >
-                        📎
-                      </button>
-                      <button
-                        type="button"
-                        title="絵文字を挿入"
-                        onClick={(e) => {
-                          // バグ修正（実機検証で発見）: getBoundingClientRect()をsetState updater内で
-                          // e.currentTargetから呼ぶと、DOM仕様上イベント終了後にcurrentTargetがnullへ
-                          // 戻ることがあり（Reactが更新を同期実行しない場合）、nullに対する呼び出しで
-                          // 例外が発生しReactツリー全体がクラッシュしていた。呼び出し側（同期的な
-                          // イベントハンドラ本体）でrectを先に確定させ、updaterには確定済みの値だけを渡す
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setEditEmojiAnchor((v) => (v ? null : rect))
-                        }}
-                        className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
-                      >
-                        😀
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingEdit}
-                        onClick={() => saveEdit(m)}
-                        className="rounded-md bg-accent-600 px-2.5 py-1 font-semibold text-white disabled:opacity-40"
-                      >
-                        {savingEdit ? '保存中…' : '保存'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingEdit}
-                        onClick={cancelEdit}
-                        className="rounded-md px-2.5 py-1 text-ink-muted hover:bg-surface-muted"
-                      >
-                        キャンセル
-                      </button>
-                      <span className="text-ink-subtle">Ctrl+Enterで保存・Escapeで取消</span>
-                    </div>
-                    {editEmojiAnchor && (
-                      <EmojiGridPopover
-                        anchor={editEmojiAnchor}
-                        onSelect={insertEditEmoji}
-                        onClose={() => setEditEmojiAnchor(null)}
-                      />
-                    )}
                   </div>
                 ) : m.generation_status === 'generating' ? (
                   <div className="mt-0.5 flex items-center gap-2 text-[12.5px] text-ink-subtle">

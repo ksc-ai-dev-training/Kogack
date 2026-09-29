@@ -1046,6 +1046,32 @@ export function getCodeBlockElementAtSelection(root: HTMLElement): HTMLElement |
   return null
 }
 
+/** ブラウザの実際のSelection（カーソル位置）を包むブロック書式の種類を返す（'codeblock'/
+ * 'list'/'quote'、箇条書きの'list-item'は'list'にまとめる）。Composer.tsxの書式ツールバーで、
+ * コードブロック・箇条書き・引用ボタンの押下状態を表示するために使う（ユーザーからの要望
+ * 「その書き方になっている状態のときには、そのボタンが押されていることを見た目でわかりやすく
+ * してほしい」）。getCodeBlockElementAtSelectionと同じ理由で、整数オフセットではなく実際の
+ * Selectionを直接読む（中身が空のブロックの内側にカーソルがある場合も判定できるようにするため）。 */
+export function getBlockFormatKindAtSelection(root: HTMLElement): 'codeblock' | 'list' | 'quote' | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return null
+  const range = sel.getRangeAt(0)
+  if (!root.contains(range.startContainer)) return null
+  let target: Node = range.startContainer
+  if (target.nodeType === Node.ELEMENT_NODE) {
+    const children = (target as Element).childNodes
+    target = children[range.startOffset] ?? target
+  }
+  let node: HTMLElement | null = target.nodeType === Node.TEXT_NODE ? (target as Text).parentElement : (target as HTMLElement)
+  while (node && node !== root) {
+    const kind = node.getAttribute(BLOCK_FORMAT_ATTR)
+    if (kind === 'codeblock' || kind === 'quote') return kind
+    if (kind === 'list' || kind === 'list-item') return 'list'
+    node = node.parentElement
+  }
+  return null
+}
+
 /** rootの中から中身が空の<pre data-block-format="codeblock">を探し、見つかればその内部
  * （offset 0）へブラウザの実際のSelectionを直接置く。ユーザーからの報告「コードブロック
  * ボタンを押すと、コードブロック内ではなく下の普通の所にカーソルが合ってしまう」への対処。

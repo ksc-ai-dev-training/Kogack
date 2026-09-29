@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { avatarColorFor } from '../lib/avatarColor'
 import { apiFetch, uploadAttachment } from '../lib/api'
 import { getDraft, setDraft } from '../lib/drafts'
@@ -35,6 +35,7 @@ import {
   isCursorInsideActiveFormats,
   getBlockFormatAt,
   getCodeBlockElementAtSelection,
+  getBlockFormatKindAtSelection,
   getInlineCodeElementAt,
   convertLinesToListItems,
   convertLinesToQuote,
@@ -196,9 +197,21 @@ export default function Composer({
   scheduleTarget,
   draftKey,
   onCreatePoll,
+  initialBody,
+  initialMentions,
+  onChange,
+  submitLabel = '送信',
+  onCancel,
+  footerHint,
+  allowAttachments = true,
+  leadingAttachments,
+  autoFocus = true,
+  popoverPlacement = 'above',
 }: {
   placeholder: string
-  onSend: (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => Promise<void>
+  /** 未指定時は送信ボタン自体を出さない（定期投稿・自動応答トリガーの本文欄のように、フォーム側の
+   * 保存ボタンで確定する使い方。onChangeで本文を受け取る）。 */
+  onSend?: (body: string, mentions: MentionPayload[], attachments: AttachmentPayload[]) => Promise<void>
   mentionCandidates?: MentionCandidate[]
   /** 入力中のAIメンションのハイライト用（チャンネルAIのpersona_name）。以前はfindMentionHighlights
    * による全文再スキャンでこの値を使ってハイライトしていたが、2026-09-18のcontentEditable化で
@@ -216,10 +229,36 @@ export default function Composer({
    * 指定された場合のみ投稿欄に📊ボタンを表示する。V1スコープはチャンネル・DM本体の投稿のみ
    * （ThreadPanel.tsxはこのpropを渡さず、スレッド返信からの作成は対象外のまま）。 */
   onCreatePoll?: (question: string, options: string[]) => Promise<void>
+  // 以下は通常の投稿欄以外（発言の編集・定期投稿/自動応答トリガーの本文欄）でこの投稿欄を
+  // そのまま使うためのprops（ユーザーからの要望「定期投稿・自動応答トリガーの本文欄を、通常の
+  // 投稿欄と同じにしてほしい」。以前はそれぞれが記号を直接挿入する素のtextareaだった）。
+  /** マウント時に読み込む本文（Markdown）。下書き（draftKey）とは併用しない想定。 */
+  initialBody?: string
+  /** initialBodyに含まれるメンション。マウント時に本文中の該当箇所をハイライトし、通知対象として引き継ぐ。 */
+  initialMentions?: MentionPayload[]
+  /** 本文・メンションが変わるたびに呼ばれる（本文は送信時と同じMarkdown、閉じ忘れの```は補って渡す）。 */
+  onChange?: (body: string, mentions: MentionPayload[]) => void
+  /** 送信ボタンの文言（発言の編集では「保存」）。 */
+  submitLabel?: string
+  /** 指定時はキャンセルボタンを出し、Escapeキーでも呼ぶ（発言の編集）。 */
+  onCancel?: () => void
+  /** 送信ボタンの横に出す操作説明（例: 「Ctrl+Enterで保存・Escapeで取消」）。 */
+  footerHint?: string
+  /** falseでファイル添付ボタンを出さない（定期投稿・自動応答トリガーはファイル添付に非対応）。 */
+  allowAttachments?: boolean
+  /** 添付ファイル欄の先頭に並べる要素（発言の編集で、既に添付済みのファイルを表示・削除するため）。 */
+  leadingAttachments?: ReactNode
+  /** falseでマウント時に入力欄へフォーカスしない（設定画面のフォーム内で使う場合）。 */
+  autoFocus?: boolean
+  /** メンション候補・絵文字・リンク・送信予約のポップアップを入力欄の上下どちらに出すか。
+   * スクロール領域の上端付近で使う場合（発言の編集・設定画面）は上に出すと見切れるため'below'にする。 */
+  popoverPlacement?: 'above' | 'below'
 }) {
   const [sending, setSending] = useState(false)
   const [hasContent, setHasContent] = useState(false)
-  const [mentions, setMentions] = useState<MentionPayload[]>(() => (draftKey ? getDraft(draftKey).mentions : []))
+  const [mentions, setMentions] = useState<MentionPayload[]>(() =>
+    draftKey ? getDraft(draftKey).mentions : (initialMentions ?? []),
+  )
   const [attachments, setAttachments] = useState<AttachmentPayload[]>([])
   const [uploading, setUploading] = useState(false)
   const [pickerQuery, setPickerQuery] = useState<string | null>(null)
@@ -272,6 +311,10 @@ export default function Composer({
   // 存在していた）。次にmaterializePendingFormats（下記）が実際に入力された文字を検知した時点で
   // 初めてマーカーを挿入するよう変更し、それまでは本文・DOMに一切触れない。
   const [pendingFormats, setPendingFormats] = useState<ToggleFormatKind[]>([])
+  // カーソルがいるブロック書式（コードブロック・箇条書き・引用）。書式ツールバーの押下状態の
+  // 表示専用（ユーザーからの要望「その書き方になっている状態のときには、そのボタンが押されている
+  // ことを見た目でわかりやすくしてほしい」）。selectionchangeとDOM変更のたびに実DOMから求め直す。
+  const [activeBlock, setActiveBlock] = useState<'codeblock' | 'list' | 'quote' | null>(null)
   // materializePendingFormatsが「今回の入力で何文字増えたか」を判定するための、直前の
   // 書式同期後（refreshEditorHousekeeping末尾）の本文文字数。IME合成中（skipLiveFormatSync）は
   // 更新しない——合成の途中経過ごとに更新すると、合成が確定した時点で「合成開始前からの
@@ -335,12 +378,24 @@ export default function Composer({
     if (draftKey) {
       const draft = getDraft(draftKey)
       if (draft.body) root.replaceChildren(deserializeFromText(draft.body, customEmoji))
+    } else if (initialBody) {
+      root.replaceChildren(deserializeFromText(initialBody, customEmoji))
+      // initialBodyに含まれる確定済みメンション（と@チャンネルAI名）は、候補から選んだときと同じ
+      // ハイライトを付け直す。貼り付け時（handlePaste）と同じく、書式のライブプレビュー同期
+      // （下のrefreshEditorHousekeeping）より前に行う——同期後は書式要素の境界に置かれる不可視の
+      // 目印文字の分だけ位置がずれ、ハイライトが1文字手前から始まってしまった（実機Playwrightで確認）。
+      const needles = [
+        ...(initialMentions ?? []).map((m) => `@${m.display_name_snapshot}`),
+        ...(mentionCandidates ?? []).filter((c) => c.isAi).map((c) => `@${c.name}`),
+      ]
+      if (needles.length > 0) highlightMentionsInRange(root, 0, domToPlainText(root).length, needles)
     }
     // setHasContent+resizeEditorを直接呼ぶのではなくrefreshEditorHousekeeping経由にする
     // （バグ修正: 直接呼んでいた当時はここが書式のライブプレビュー同期を経由せず、復元直後の
     // 下書きに「**太字**」等が含まれていてもリロード直後は装飾なしのプレーンテキストのまま
     // 表示され、次の1文字入力まで反映されない不具合があった。実機Playwrightで発見・修正）
     refreshEditorHousekeeping()
+    if (!autoFocus) return
     // ユーザーからの明示的な要望「チャンネルやDMを開いた時点で、メッセージ入力欄にカーソルが
     // 当たっている状態にしてほしい（画面を開いてすぐにキーボードを打ち込んでも入力されるように）」
     // により、マウント時に投稿欄へフォーカスする。Composerはチャンネル/DM切り替えのたびkey propで
@@ -367,7 +422,7 @@ export default function Composer({
     emojiCatchUpAppliedRef.current = true
     if (hasUserEditedRef.current) return
     const root = editorRef.current
-    if (!root || !draftKey) return
+    if (!root || (!draftKey && !initialBody)) return
     // バグ修正（実機Playwright検証で発見）: ここは「現在のDOMをテキストとして読み直し、
     // 絵文字ショートコード解釈ありで再構築する」処理のため、domToPlainTextではなく
     // domToMarkdownを使う必要がある——domToPlainTextは太字・斜体・下線・取り消し線の
@@ -387,11 +442,19 @@ export default function Composer({
   // ため、古い値を参照してしまう心配が無い（送信・送信予約成功後はDOMがクリアされ本文が
   // 空になるため、この効果がそのまま下書きの削除も兼ねる。lib/drafts.tsのsetDraftは
   // 空文字を渡すとエントリ自体を消す）。
+  // onChange（フォームに埋め込んで使う場合の本文通知）も同じタイミングで呼ぶ。
   useEffect(() => {
-    if (!draftKey) return
     const root = editorRef.current
     if (!root) return
-    setDraft(draftKey, domToMarkdown(root), mentions)
+    const markdown = domToMarkdown(root)
+    if (draftKey) setDraft(draftKey, markdown, mentions)
+    if (onChange) {
+      const body = closeDanglingCodeFence(markdown)
+      onChange(body, activeMentionsIn(body))
+    }
+    // onChangeは呼び出し元で毎レンダー作り直される関数のため依存に含めない（本文・メンションの
+    // 変化だけを契機に呼ぶ）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey, mentions, contentVersion])
 
   // 純粋な「見た目・下書き反映の更新」だけを行う（hasUserEditedRefは変更しない）。マウント時の
@@ -417,6 +480,7 @@ export default function Composer({
       prevPlainTextLengthRef.current = domToPlainText(root).length
     }
     setHasContent(domToPlainText(root).trim().length > 0)
+    setActiveBlock(getBlockFormatKindAtSelection(root))
     setContentVersion((v) => v + 1)
     resizeEditor()
   }
@@ -458,8 +522,10 @@ export default function Composer({
       const sel = window.getSelection()
       if (!sel || sel.rangeCount === 0) return
       const range = sel.getRangeAt(0)
-      if (!range.collapsed) return
       if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return
+      // ブロック書式の押下表示は選択範囲があっても開始位置で判定する
+      setActiveBlock(getBlockFormatKindAtSelection(root))
+      if (!range.collapsed) return
       setActiveFormats((prev) => {
         if (prev.length === 0) return prev
         const cursor = getSelectionOffsets(root)?.start
@@ -1108,7 +1174,7 @@ export default function Composer({
   // 同期的な再入防止を行う（sending stateはReactのバッチ更新の都合上、同一tick内の連続呼び出しでは
   // 更新前の古い値を見てしまう可能性があるため、refで即座に一貫した値を参照できるようにする）
   const send = async () => {
-    if (sendingRef.current) return
+    if (sendingRef.current || !onSend) return
     const root = editorRef.current
     if (!root) return
     const text = trimMessageBody(closeDanglingCodeFence(domToMarkdown(root)))
@@ -1182,6 +1248,13 @@ export default function Composer({
         setPickerQuery(null)
         return
       }
+    }
+    // 発言の編集ではEscapeで編集を取り消す（従来の編集欄と同じ操作。ポップアップが開いている
+    // 間は上の分岐でそちらを閉じるのが優先）
+    if (onCancel && e.key === 'Escape' && !linkOpen) {
+      e.preventDefault()
+      onCancel()
+      return
     }
     // 箇条書きの項目先頭（絶対オフセットがちょうど項目の開始位置と一致する場合）でのBackspaceは
     // 自前で処理する。項目またぎのブロック要素の結合はブラウザ間の挙動が大きく異なるため
@@ -1491,11 +1564,19 @@ export default function Composer({
   // 片方がpending/active中はもう片方のボタンをUI上も押せなくする
   const codeFormatActive = activeFormats.includes('code') || pendingFormats.includes('code')
   const otherFormatActive = activeFormats.some((f) => f !== 'code') || pendingFormats.some((f) => f !== 'code')
+  // 書式ツールバーのボタンの押下状態の見た目。押されている間は淡い背景だけでは気づきにくいため、
+  // 背景色に加えて枠線（ring）を付けて「押し込まれている」ことをはっきり示す（ユーザーからの要望
+  // 「その書き方になっている状態のときには、そのボタンが押されていることを見た目でわかりやすく
+  // してほしい」）。
+  const toolbarButtonState = (on: boolean) =>
+    on ? 'bg-accent-100 text-accent-700 ring-1 ring-inset ring-accent-300' : 'text-ink-subtle hover:bg-surface-muted'
+
+  const popoverPos = popoverPlacement === 'below' ? 'top-full mt-2' : 'bottom-full mb-2'
 
   return (
     <div className="relative rounded-[10px] border border-line-strong px-3 py-2.5">
       {pickerOpen && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 max-h-[260px] w-[300px] overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+        <div className={`absolute left-0 z-40 ${popoverPos} max-h-[260px] w-[300px] overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]`}>
           {filteredCandidates.map((c, i) => (
             <button
               key={c.id}
@@ -1550,7 +1631,7 @@ export default function Composer({
       {emojiOpen && (
         <div
           ref={emojiPopoverRef}
-          className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[280px] w-[314px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+          className={`absolute left-0 z-40 ${popoverPos} grid max-h-[280px] w-[314px] grid-cols-8 gap-0.5 overflow-y-auto rounded-xl border border-line-strong bg-surface p-1.5 shadow-[0_12px_30px_rgba(16,24,40,0.18)]`}>
           {/* 既存（Unicode）の絵文字とカスタム絵文字を見出しで分けて表示する（ユーザーからの
               明示的な要望「既存の絵文字と、新しく作った絵文字を分けて表示させたい」）。col-span-8の
               見出し行を挟むと、8列グリッドの自動配置により後続タイルが自然に次の行から始まる */}
@@ -1605,7 +1686,7 @@ export default function Composer({
         />
       )}
       {scheduleOpen && (
-        <div className="absolute bottom-full right-0 z-40 mb-2 w-[260px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]">
+        <div className={`absolute right-0 z-40 ${popoverPos} w-[260px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]`}>
           <div className="mb-2 text-[12.5px] font-bold text-ink">送信日時を指定</div>
           <div className="flex gap-1.5">
             <input
@@ -1645,7 +1726,7 @@ export default function Composer({
       )}
       {linkOpen && (
         <div
-          className="absolute bottom-full left-0 z-40 mb-2 w-[280px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]"
+          className={`absolute left-0 z-40 ${popoverPos} w-[280px] rounded-xl border border-line-strong bg-surface p-3 shadow-[0_12px_30px_rgba(16,24,40,0.18)]`}
           onKeyDown={(e) => {
             // コンテナ全体で拾うことで、フォーカスがテキスト欄・URL欄・キャンセル/挿入ボタンの
             // いずれにあってもEscapeで閉じられるようにする（各inputだけにハンドラを付けると、
@@ -1708,9 +1789,9 @@ export default function Composer({
             e.preventDefault()
             toggleFormatButton('bold')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
-            activeFormats.includes('bold') || pendingFormats.includes('bold') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
-          }`}
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-black disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${toolbarButtonState(
+            activeFormats.includes('bold') || pendingFormats.includes('bold'),
+          )}`}
         >
           B
         </button>
@@ -1722,9 +1803,9 @@ export default function Composer({
             e.preventDefault()
             toggleFormatButton('italic')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
-            activeFormats.includes('italic') || pendingFormats.includes('italic') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
-          }`}
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold italic disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${toolbarButtonState(
+            activeFormats.includes('italic') || pendingFormats.includes('italic'),
+          )}`}
         >
           I
         </button>
@@ -1736,9 +1817,9 @@ export default function Composer({
             e.preventDefault()
             toggleFormatButton('underline')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold underline hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
-            activeFormats.includes('underline') || pendingFormats.includes('underline') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
-          }`}
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold underline disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${toolbarButtonState(
+            activeFormats.includes('underline') || pendingFormats.includes('underline'),
+          )}`}
         >
           U
         </button>
@@ -1750,9 +1831,9 @@ export default function Composer({
             e.preventDefault()
             toggleFormatButton('strike')
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold line-through hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
-            activeFormats.includes('strike') || pendingFormats.includes('strike') ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
-          }`}
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold line-through disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${toolbarButtonState(
+            activeFormats.includes('strike') || pendingFormats.includes('strike'),
+          )}`}
         >
           S
         </button>
@@ -1764,9 +1845,7 @@ export default function Composer({
             e.preventDefault()
             toggleInlineCode()
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
-            codeFormatActive ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
-          }`}
+          className={`flex h-7 w-7 items-center justify-center rounded-md font-mono text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${toolbarButtonState(codeFormatActive)}`}
         >
           {'</>'}
         </button>
@@ -1777,7 +1856,7 @@ export default function Composer({
             e.preventDefault()
             toggleCodeBlock()
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md ${toolbarButtonState(activeBlock === 'codeblock')}`}
         >
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <rect x="2.5" y="3.5" width="15" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.4" />
@@ -1791,9 +1870,7 @@ export default function Composer({
             e.preventDefault()
             toggleLinkPopover()
           }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] hover:bg-surface-muted ${
-            linkOpen ? 'bg-accent-50 text-accent-700' : 'text-ink-subtle'
-          }`}
+          className={`flex h-7 w-7 items-center justify-center rounded-md text-[13px] ${toolbarButtonState(linkOpen)}`}
         >
           🔗
         </button>
@@ -1804,7 +1881,7 @@ export default function Composer({
             e.preventDefault()
             insertBulletList()
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md ${toolbarButtonState(activeBlock === 'list')}`}
         >
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <circle cx="4" cy="6" r="1.3" fill="currentColor" />
@@ -1820,7 +1897,7 @@ export default function Composer({
             e.preventDefault()
             insertQuote()
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          className={`flex h-7 w-7 items-center justify-center rounded-md ${toolbarButtonState(activeBlock === 'quote')}`}
         >
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <rect x="3" y="4" width="2" height="12" rx="1" fill="currentColor" />
@@ -1843,8 +1920,9 @@ export default function Composer({
         onClick={handleEditorClick}
         className="composer-editable relative w-full whitespace-pre-wrap break-words text-[13px] text-ink outline-none [scrollbar-gutter:stable]"
       />
-      {(attachments.length > 0 || uploading) && (
+      {(attachments.length > 0 || uploading || leadingAttachments) && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {leadingAttachments}
           {attachments.map((a, i) => (
             <span
               key={`${a.storage_path}-${i}`}
@@ -1879,6 +1957,7 @@ export default function Composer({
             e.target.value = ''
           }}
         />
+        {allowAttachments && (
         <button
           type="button"
           title="ファイルを添付（20MBまで）"
@@ -1893,6 +1972,7 @@ export default function Composer({
             />
           </svg>
         </button>
+        )}
         <button
           type="button"
           title="絵文字を挿入"
@@ -1960,17 +2040,32 @@ export default function Composer({
             </svg>
           </button>
         )}
-        <button
-          type="button"
-          title="Ctrl+Enter（Macは⌘+Enter）でも送信できます"
-          disabled={sending || uploading || !hasContent}
-          onClick={send}
-          className={`rounded-[7px] bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40 ${
-            canSchedule ? '' : 'ml-auto'
-          }`}
-        >
-          送信
-        </button>
+        {footerHint && <span className="ml-auto pr-1.5 text-[11px] text-ink-subtle">{footerHint}</span>}
+        {onCancel && (
+          <button
+            type="button"
+            disabled={sending}
+            onClick={onCancel}
+            className={`rounded-[7px] px-3 py-1.5 text-[12.5px] text-ink-muted hover:bg-surface-muted disabled:opacity-40 ${
+              canSchedule || footerHint ? '' : 'ml-auto'
+            }`}
+          >
+            キャンセル
+          </button>
+        )}
+        {onSend && (
+          <button
+            type="button"
+            title={`Ctrl+Enter（Macは⌘+Enter）でも${submitLabel}できます`}
+            disabled={sending || uploading || !hasContent}
+            onClick={send}
+            className={`rounded-[7px] bg-accent-600 px-4 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40 ${
+              canSchedule || footerHint || onCancel ? '' : 'ml-auto'
+            }`}
+          >
+            {sending && submitLabel !== '送信' ? `${submitLabel}中…` : submitLabel}
+          </button>
+        )}
       </div>
     </div>
   )
