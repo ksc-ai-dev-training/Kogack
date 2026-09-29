@@ -651,7 +651,7 @@ async def list_messages(
     カーソルを追跡し、既存行はid一致で上書きするよう対応済み）。"""
     pool = get_pool()
     if since:
-        since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        since_dt = message_diff.parse_since(since)
         rows = await pool.fetch(
             f"""{_MESSAGES_SELECT}
                WHERE m.channel_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL

@@ -1317,6 +1317,15 @@ async def _insert_citation_blocks(pool, message_id: int, citations: list[dict]) 
         )
 
 
+async def _touch_thread_parent(pool, thread_id: int | None) -> None:
+    """スレッドへAI発言を投稿したとき、元発言のupdated_atも進める（2026-09-29バグ修正）。
+    thread_reply_countは都度計算で元発言の行自体は変わらないため、これが無いと本体タイムラインの
+    差分ポーリングが「N件の返信」の増分を拾えず、他の参加者の画面では件数が古いまま残っていた
+    （routers/messages.py post_reply・scheduled_dispatcher.pyの2026-09-14の修正と同じ理由）"""
+    if thread_id is not None:
+        await pool.execute("UPDATE messages SET updated_at = now() WHERE id = $1", thread_id)
+
+
 async def _generate_and_post(
     channel_id: int, settings: dict, requested_by: int, thread_id: int | None = None,
 ) -> None:
@@ -1336,6 +1345,7 @@ async def _generate_and_post(
         channel_id, thread_id, persona_name, persona_icon_url,
     )
     message_id = placeholder["id"]
+    await _touch_thread_parent(pool, thread_id)
     # A-74 生成の強制中断用に、この発言を今実行中のタスクとして登録する（ユーザーからの明示的な
     # 要望）。finallyで必ず取り除く（正常終了・エラー・中断のいずれの経路でも登録が残り続けない
     # ようにするため）。cancel_generationはこの対応表からタスクを見つけてasyncio.Task.cancel()する
@@ -1558,6 +1568,7 @@ async def _launch_summary(
         channel_id, thread_id, persona_name, persona_icon_url,
     )
     message_id = placeholder["id"]
+    await _touch_thread_parent(pool, thread_id)
     asyncio.create_task(
         _generate_summary_and_post(
             channel_id, thread_id, message_id, settings, requested_by, since_dt, until_dt, range_label,

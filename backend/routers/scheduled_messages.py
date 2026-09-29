@@ -5,7 +5,8 @@
 # 参加者であることの検証（insert_mention_blocks）は予約時点ではなく発言化のタイミング
 # （scheduled_dispatcher.py）で行う。予約から送信までの間に対象者がチャンネルを抜ける可能性が
 # あり、A-11/A-14が「投稿時点の参加者」を基準にするのと同じ考え方を送信時点に合わせるため。
-# 元発言がDMの場合はA-11/A-14と同じくメンション候補元（A-46）が無いため常に空として扱う。
+# DM宛ての予約もA-19と同じくDM参加者をメンション候補元として保持する（DMのメンションは
+# 2026-09-04から対応済みで、従来ここだけ常に空として捨てていた）。
 # ファイル添付との併用は引き続き対象外（要件定義書3.2節）。
 import json
 from datetime import datetime, timezone
@@ -57,9 +58,12 @@ async def create_scheduled_message(
         raise HTTPException(400, detail="未来の日時を指定してください")
 
     pool = get_pool()
-    channel_id = int(body.channel_id) if body.channel_id else None
-    dm_id = int(body.dm_id) if body.dm_id else None
-    thread_parent_id = int(body.thread_parent_id) if body.thread_parent_id else None
+    try:
+        channel_id = int(body.channel_id) if body.channel_id else None
+        dm_id = int(body.dm_id) if body.dm_id else None
+        thread_parent_id = int(body.thread_parent_id) if body.thread_parent_id else None
+    except ValueError:
+        raise HTTPException(422, detail="IDは数値で指定してください")
 
     # 投稿API（A-11/A-19）と同じ参加者チェック（総論5.1節・5.3節）。channel_id/dm_idはURLパスの
     # パラメータではなくボディの値のため、require_channel_member/require_dm_memberは使えず
@@ -84,14 +88,30 @@ async def create_scheduled_message(
         if not is_member:
             raise HTTPException(404, detail="見つかりません")
 
-    # DMはメンション候補元（A-46）が無いため、A-11/A-14と同じくmentionsを送っても無視する
-    mentions_to_store = body.mentions if channel_id is not None else []
+    if thread_parent_id is not None:
+        # バグ修正（2026-09-29）: 従来はthread_parent_idを一切検証しておらず、自分のチャンネルを
+        # 宛先にしたまま「参加していない非公開チャンネル・DMの発言」を返信先に指定できた。送信時に
+        # その他人のスレッドへ返信が入り込むうえ、@AI名を含めると他人のスレッドの会話がAIへ渡され、
+        # 自分のチャンネルのAI発言・A-76（送信内容の確認）経由で読み出せてしまっていた。
+        # A-14（require_thread_access＋元発言からchannel_id/dm_idを引き継ぐ）と同じく、返信先が
+        # 宛先と同じチャンネル/DMにある削除されていない本体の発言であることを要求する
+        # （上の参加者チェックを通過済みなので、ここで一致すれば返信先も閲覧可能と言える）
+        parent = await pool.fetchrow(
+            "SELECT channel_id, dm_id, thread_parent_id FROM messages WHERE id = $1 AND deleted_at IS NULL",
+            thread_parent_id,
+        )
+        if (
+            parent is None or parent["thread_parent_id"] is not None
+            or parent["channel_id"] != channel_id or parent["dm_id"] != dm_id
+        ):
+            raise HTTPException(404, detail="返信先の発言が見つかりません")
+
     row = await pool.fetchrow(
         """INSERT INTO scheduled_messages
                (channel_id, dm_id, thread_parent_id, sender_user_id, body, mentions, scheduled_at)
            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING *""",
         channel_id, dm_id, thread_parent_id, user.id, body.body,
-        json.dumps([m.model_dump() for m in mentions_to_store]), scheduled_at,
+        json.dumps([m.model_dump() for m in body.mentions]), scheduled_at,
     )
     return _out(row)
 

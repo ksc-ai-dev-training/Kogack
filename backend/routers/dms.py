@@ -272,7 +272,7 @@ async def list_messages(
     （ユーザーからの明示的な要望、2026-09-15）"""
     pool = get_pool()
     if since:
-        since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        since_dt = message_diff.parse_since(since)
         rows = await pool.fetch(
             f"""{_MESSAGES_SELECT}
                WHERE m.dm_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL
