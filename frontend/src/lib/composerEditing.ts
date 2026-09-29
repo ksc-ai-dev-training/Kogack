@@ -1270,7 +1270,11 @@ function extractHiddenMarker(fragment: DocumentFragment, count: number, fromEnd:
 // consumeRawMarkdownSyntaxがこの関数より先に文書全体へ対して実行済みのため、ここで
 // 改めて検出し直す必要はない（wrapQuoteRangeは「> 」を消して<blockquote>で包むだけで良い）。
 const QUOTE_BLOCKQUOTE_CLASSNAME = 'my-1 border-l-[3px] border-line-strong py-0.5 pl-2.5 text-ink-muted'
-const QUOTE_LINE_REGEX = /^> (.+)$/
+// 行頭の「>」だけ（または「> 」）の時点で引用にする（ユーザーからの要望「行の先頭に半角の>が
+// 入力された瞬間に>が消えて引用タグのマークが現れ、引用ボタンが選択されている状態になる」）。
+// 以前は「> 」の後に1文字以上が必要だった。「>abc」のように直後が空白でない行は対象外のまま
+// （「>_<」等の顔文字や、行頭に「>」を書きたいだけの文章を誤って引用にしないため）。
+const QUOTE_LINE_REGEX = /^>( |$)/
 
 interface QuoteRange {
   start: number
@@ -1503,18 +1507,26 @@ export function removeLineFromQuote(root: HTMLElement, blockEl: HTMLElement, lin
 /** 検出済みの引用範囲（collectQuoteRanges）の各行頭の「> 」マーカーを削除してから
  * convertLinesToQuoteで構築する（wrapBulletRangeの「- 」削除と全く同じロジック——降順で
  * 処理しないと、先に削除した行より後方のオフセットが崩れる）。 */
-function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): void {
+/** 行頭マーカーの削除記録（syncLiveFormattingがカーソル位置を補正するために使う）。offsetは削除前の位置。 */
+interface MarkerDeletion {
+  offset: number
+  length: number
+}
+
+function wrapQuoteRange(root: HTMLElement, quoteRange: QuoteRange): MarkerDeletion[] {
   const { start, end } = quoteRange
-  if (start >= end) return
+  if (start > end) return []
   const lineTexts = domToPlainText(root).slice(start, end).split('\n')
-  const markerOffsets: number[] = []
+  const deletions: MarkerDeletion[] = []
   let pos = start
   for (const line of lineTexts) {
-    markerOffsets.push(pos)
+    // 「>」だけの行はマーカーが1文字（QUOTE_LINE_REGEX参照）
+    deletions.push({ offset: pos, length: line.startsWith('> ') ? 2 : 1 })
     pos += line.length + 1
   }
-  for (const off of [...markerOffsets].reverse()) deleteRangeInContainer(root, off, off + 2)
-  convertLinesToQuote(root, start, end - markerOffsets.length * 2)
+  for (const d of [...deletions].reverse()) deleteRangeInContainer(root, d.offset, d.offset + d.length)
+  convertLinesToQuote(root, start, end - deletions.reduce((sum, d) => sum + d.length, 0))
+  return deletions
 }
 
 // 箇条書き（「- 」）のライブプレビュー（2026-09-25、「入力している時点で送信後の表示を反映させたい
@@ -1659,18 +1671,19 @@ export function convertLinesToListItems(root: HTMLElement, start: number, end: n
  * （wrapQuoteRangeの「> 」削除と全く同じロジック——降順で処理しないと、先に削除した行より
  * 後方のオフセットが崩れる）。convertLinesToListItems自体はボタン駆動（マーカー文字を
  * 経由しない）とこの手打ち検出の両方から共有されるため、マーカー削除はこの関数の責務にする。 */
-function wrapBulletRange(root: HTMLElement, bulletRange: BulletRange): void {
+function wrapBulletRange(root: HTMLElement, bulletRange: BulletRange): MarkerDeletion[] {
   const { start, end } = bulletRange
-  if (start >= end) return
+  if (start >= end) return []
   const lineTexts = domToPlainText(root).slice(start, end).split('\n')
-  const markerOffsets: number[] = []
+  const deletions: MarkerDeletion[] = []
   let pos = start
   for (const line of lineTexts) {
-    markerOffsets.push(pos)
+    deletions.push({ offset: pos, length: 2 })
     pos += line.length + 1
   }
-  for (const off of [...markerOffsets].reverse()) deleteRangeInContainer(root, off, off + 2)
-  convertLinesToListItems(root, start, end - markerOffsets.length * 2)
+  for (const d of [...deletions].reverse()) deleteRangeInContainer(root, d.offset, d.offset + d.length)
+  convertLinesToListItems(root, start, end - deletions.length * 2)
+  return deletions
 }
 
 /** data-block-format="list"要素を解除し、各項目の中身を実在の"\n"区切りの生テキストへ戻す
@@ -2391,8 +2404,15 @@ function removeEmptyCodeBlocks(root: HTMLElement): void {
  * 太字・斜体・下線・取り消し線・インラインコード（実DOM構造、TOGGLE_FORMAT_ELEMENT_ATTR）・
  * 引用・コードブロック（BLOCK_FORMAT_ATTR）は一切unwrapされず、consumeRawMarkdownSyntax・
  * consumeCodeBlockMatchesが手打ちの生Markdownだけを検出して実要素へ破壊的に変換する
- * （詳細は本ファイル前方の書式セクションの冒頭コメント参照）。 */
-export function syncLiveFormatting(root: HTMLElement): void {
+ * （詳細は本ファイル前方の書式セクションの冒頭コメント参照）。
+ *
+ * 戻り値: カーソルの直前で手打ちの太字等（`**文字**`等）がちょうど閉じられて変換された場合、
+ * カーソルをその要素の内側の末尾へ移し、その書式（外側→内側の順）を返す。呼び出し元
+ * （Composer.tsx）はこれをactiveFormatsにしてボタンを押された状態にする（ユーザーからの要望
+ * 「**の間に文字が入力されたら、その文字が太字になり自動的に太字ボタンが押された状態になる」）。
+ * 続けて入力した文字も同じ書式になり、ボタンをもう一度押すと解除される（ボタンで始めた場合と同じ）。
+ * それ以外は空配列。 */
+export function syncLiveFormatting(root: HTMLElement): ToggleFormatKind[] {
   root.normalize()
   removeEmptyToggleFormatWrappers(root)
   removeEmptyCodeBlocks(root)
@@ -2420,6 +2440,9 @@ export function syncLiveFormatting(root: HTMLElement): void {
   // consumeRawMarkdownSyntaxが変換したときだけ）。
   const rawMatches = collectRawMarkdownMatches(domToPlainText(root))
   const useMarkerBasedRestore = !!preserved && rawMatches.length > 0
+  // カーソル（選択なし）がちょうど閉じ記号の直後にある＝今まさに閉じ記号を打ち終えたマッチ
+  const closedAtCaret =
+    !!preserved && !hasRange && rawMatches.some((m) => m.kind !== 'codeblock' && m.end === preserved.start)
 
   if (useMarkerBasedRestore && preserved) {
     const snap = (x: number): number => {
@@ -2469,9 +2492,21 @@ export function syncLiveFormatting(root: HTMLElement): void {
     ...quoteRanges.map((r) => ({ ...r, kind: 'quote' as const })),
     ...bulletRanges.map((r) => ({ ...r, kind: 'list' as const })),
   ].sort((a, b) => b.start - a.start)
+  // 行頭マーカー（「> 」「- 」）の削除でカーソルより前の文字数が減った分を、下の数値オフセットでの
+  // 復元時に差し引く（以前は補正しておらず、途中の行で変換が起きるとカーソルが後ろへずれていた）。
+  const deletions: MarkerDeletion[] = []
+  // 中身が空の引用（「>」だけの行）を作った場合、convertLinesToQuoteが空のblockquoteの内側へ
+  // 直接カーソルを置く。幅0の要素の内側には数値オフセットでは入れない（getCodeBlockElementAtSelection
+  // のコメント参照）ため、カーソルがその行にあったなら下の数値オフセットでの復元をしない。
+  let caretPlacedInEmptyQuote = false
   for (const r of blockRanges) {
-    if (r.kind === 'quote') wrapQuoteRange(root, r)
-    else wrapBulletRange(root, r)
+    if (r.kind === 'quote') {
+      const lineOnlyMarkers = domToPlainText(root).slice(r.start, r.end).split('\n').every((l) => l === '>' || l === '> ')
+      deletions.push(...wrapQuoteRange(root, r))
+      if (lineOnlyMarkers && preserved && preserved.start >= r.start && preserved.start <= r.end) caretPlacedInEmptyQuote = true
+    } else {
+      deletions.push(...wrapBulletRange(root, r))
+    }
   }
 
   // コードブロックは最後に処理する（引用の検出がまだ生の```マーカーを必要とするため）。
@@ -2481,9 +2516,61 @@ export function syncLiveFormatting(root: HTMLElement): void {
   if (useMarkerBasedRestore) {
     const restored = restoreSelectionFromMarkers(root, hasRange)
     if (!restored) stripSelectionMarkersFromDom(root)
-  } else if (preserved) {
-    setSelectionOffsets(root, preserved.start, preserved.end)
+  } else if (preserved && !caretPlacedInEmptyQuote) {
+    const shift = (x: number) => {
+      let result = x
+      for (const d of deletions) {
+        if (d.offset >= x) continue
+        result -= Math.min(d.length, x - d.offset)
+      }
+      return result
+    }
+    setSelectionOffsets(root, shift(preserved.start), shift(preserved.end))
   }
+  return closedAtCaret ? enterJustClosedFormat() : []
+}
+
+/** restoreSelectionFromMarkersがカーソルを「閉じたばかりの実要素の直後（CARET_MARKERの直後）」に
+ * 置いた状態から、その要素（入れ子なら最も内側）の中の末尾へカーソルを移し、その書式を外側→内側の
+ * 順で返す。直前が書式の実要素でなければ何もせず空配列（syncLiveFormattingの戻り値のコメント参照）。 */
+function enterJustClosedFormat(): ToggleFormatKind[] {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return []
+  const range = sel.getRangeAt(0)
+  const node = range.startContainer
+  const offset = range.startOffset
+  if (node.nodeType !== Node.TEXT_NODE || offset !== 1) return []
+  const text = node as Text
+  if (text.data[0] !== CARET_MARKER) return []
+  const prev = text.previousSibling
+  if (prev?.nodeType !== Node.ELEMENT_NODE || !(prev as HTMLElement).hasAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)) return []
+  // 直前に開き記号（**等）が残っている＝`**_x_**`のように外側の書式を組み立てている途中。ここで
+  // 内側へ入ると、続けて打つ外側の閉じ記号まで内側の書式の中に入ってしまい外側が閉じられないため、
+  // 従来どおり要素の直後にカーソルを残す（外側を閉じた時点で改めて外側・内側の両方に入る）。
+  const before = prev.previousSibling
+  if (
+    before?.nodeType === Node.TEXT_NODE &&
+    Object.values(TOGGLE_FORMAT_MARKERS).some(({ prefix }) => (before as Text).data.endsWith(prefix))
+  ) {
+    return []
+  }
+  let el = prev as HTMLElement
+  const kinds: ToggleFormatKind[] = [el.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR) as ToggleFormatKind]
+  while (el.lastChild?.nodeType === Node.ELEMENT_NODE && (el.lastChild as HTMLElement).hasAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)) {
+    el = el.lastChild as HTMLElement
+    kinds.push(el.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR) as ToggleFormatKind)
+  }
+  // 退出点として置かれたCARET_MARKERは不要になるため取り除く
+  text.deleteData(0, 1)
+  if (text.data === '') text.remove()
+  const caret = document.createRange()
+  const last = el.lastChild
+  if (last?.nodeType === Node.TEXT_NODE) caret.setStart(last, (last as Text).length)
+  else caret.setStart(el, el.childNodes.length)
+  caret.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(caret)
+  return kinds
 }
 
 // 書式トグルボタン（太字・斜体・下線・取り消し線、ユーザーからの明示的な要望）。以下はDOM

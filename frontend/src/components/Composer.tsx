@@ -473,7 +473,14 @@ export default function Composer({
     const root = editorRef.current
     if (!root) return
     if (!options?.skipLiveFormatSync) {
-      syncLiveFormatting(root)
+      // 手打ちの`**文字**`等をちょうど閉じた直後は、カーソルがその書式の内側の末尾へ移るので、
+      // ボタンで始めたときと同じくその書式のボタンを押された状態にする（syncLiveFormattingの
+      // 戻り値のコメント参照）
+      const entered = syncLiveFormatting(root)
+      if (entered.length > 0) {
+        setActiveFormats(entered)
+        setPendingFormats([])
+      }
       // IME合成中は更新しない（上のコメント参照）。この関数の末尾で更新することで、
       // materializePendingFormatsが次の呼び出しで比較する基準値が常に「直前の同期後」の
       // 本文文字数になる。
