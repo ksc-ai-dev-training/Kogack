@@ -86,6 +86,13 @@ def _excerpt(body: str, terms: list[str], limit: int = 80) -> str:
     return prefix + text[start:end] + suffix
 
 
+def _escape_like(term: str) -> str:
+    """ILIKEのワイルドカード（%・_）と既定のエスケープ文字（バックスラッシュ）を文字どおりに扱う
+    （2026-09-29バグ修正）。従来は「100%」で検索すると「100」を含む発言が全件、「a_b」で「axb」等が
+    ヒットしていた"""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _build_conditions(
     user_id: int, term_column: str, terms: list[str], in_id, with_id, from_id,
     after_date, before_date, on_date, during_month,
@@ -96,7 +103,7 @@ def _build_conditions(
     conditions = ["m.deleted_at IS NULL", "(cm.user_id IS NOT NULL OR dmm.user_id IS NOT NULL)"]
 
     for term in terms:
-        params.append(term)
+        params.append(_escape_like(term))
         conditions.append(f"{term_column} ILIKE '%' || ${len(params)} || '%'")
     if in_id is not None:
         params.append(in_id)

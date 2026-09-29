@@ -6,12 +6,12 @@
 # S-06チャンネル設定は「チャンネル管理者」「基本設定」「キャラクタ」「振る舞い定義」「定期投稿」
 # 「自動応答トリガー」の6タブを実装し、「参照ドキュメント範囲」「スキル」「反応モード」「自動対応範囲」の
 # 4タブは対応する基盤（ドキュメント索引・自動対応分類）が未実装のため対象外（CLAUDE.md 実装状況節）。
-import asyncio
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+import background
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
 import message_diff
 from auth_helpers import (
@@ -626,7 +626,7 @@ async def _around_rows(pool, select: str, scope_column: str, scope_id: int, arou
 
 @router.get("/{channel_id}/messages")
 async def list_messages(
-    channel_id: int, since: str | None = None, limit: int = 50, around: int | None = None,
+    channel_id: int, since: str | None = None, limit: int = Query(50, ge=1, le=200), around: int | None = None,
     before: str | None = None, user: CurrentUser = Depends(require_channel_member),
 ):
     """A-10: 履歴取得。sinceは3秒間隔ポーリングの差分取得に使う（基本設計書9.1節）。
@@ -730,7 +730,7 @@ async def post_message(
     await ai_agent.maybe_trigger(channel_id, body.body, user.id)
     # デスクトップ通知②（Web Push、2026-09-11）。投稿完了を待たせないfire-and-forget起動
     # （AIメンション応答・自動応答トリガーと同じ非同期パターン）
-    asyncio.create_task(
+    background.spawn(
         push_sender.notify_channel_message(channel_id, user.id, user.name, body.body, blocks, f"/channels/{channel_id}")
     )
     return _message_out(
@@ -756,7 +756,7 @@ async def create_poll(
         message_row, poll_payload = await create_poll_message(
             conn, channel_id=channel_id, dm_id=None, sender_user_id=user.id, poll=body,
         )
-    asyncio.create_task(
+    background.spawn(
         push_sender.notify_channel_message(channel_id, user.id, user.name, body.question, [], f"/channels/{channel_id}")
     )
     return _message_out(

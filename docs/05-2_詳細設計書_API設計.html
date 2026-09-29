@@ -68,6 +68,7 @@
       <tr class="diff-new"><td>1.37</td><td>2026-09-17</td><td>新規API A-76（GET /api/messages/{id}/ai-request）を追加した。ユーザーからの明示的な要望「AIとのやりとり（システムがAPIに投げている内容）を画面上確認できるようにしてほしい」に対応するもので、AI発言ごとに実際にOpenAI APIへ送信したmessages配列（T-13.request_payload、05-1 DB設計v1.16）をそのまま返す。表示位置は各AI発言のホバー時アクションバー（ユーザーが「各AI発言にボタンを付ける（推奨）」を選択）、権限はそのチャンネルのchadminまたはシステムadmin（ユーザーが「チャンネル管理者（chadmin）も可」を選択、システムadmin限定へは絞らなかった）。基本設計書・要件定義書・画面モックアップは変更なし（既存のAI発言表示への機能追加のため）。</td></tr>
       <tr class="diff-new"><td>1.38</td><td>2026-09-28</td><td>A-10/A-18の差分ポーリング（since指定時）のレスポンスに<code>deleted_ids</code>・<code>next_since</code>を追加し、A-12削除時に<code>updated_at</code>も更新するようにした。他の参加者が削除した発言が、再読み込みするまで画面に残り続けていた不具合の修正（スレッドの元発言が削除されたらスレッド画面を閉じてほしいという要望への対応中に発覚）。</td></tr>
       <tr class="diff-new"><td>1.39</td><td>2026-09-29</td><td>A-50（送信予約）で<code>thread_parent_id</code>が宛先と同じチャンネル/DMの本体の発言であることを検証するようにした（従来は未検証で、参加していない非公開チャンネル・DMのスレッドへ返信を送り込め、AI応答経由でその内容を読み出せた）。DM宛ての予約でも<code>mentions</code>を保持するようにした。A-10/A-18の差分ポーリングは<code>since</code>を5秒巻き戻して取得するようにした（トランザクション開始時刻基準の<code>updated_at</code>による取りこぼしの修正）。</td></tr>
+      <tr class="diff-new"><td>1.40</td><td>2026-09-29</td><td>A-10/A-18の<code>limit</code>を1〜200に制限した（範囲外は422）。A-14は返信先がスレッドの返信の場合400を返すようにした（返信への返信は対象外）。A-20の語句条件で<code>%</code>・<code>_</code>を文字どおりに扱うようエスケープするようにした。削除済みの発言に紐づくアンケートへの投票・締め切りは404にした。</td></tr>
     </tbody>
   </table>
 
@@ -197,7 +198,7 @@ POST /api/channels/42/members
 { "items": [ { "id":"10301", "sender_type":"human", "sender_user_id":"7", "body":"...",
     "generation_status": null, "thread_reply_count": 2, "blocks": [], "created_at":"..." } ],
   "has_more": false }</code></pre>
-  <p class="muted"><code>since</code> 省略時は直近50件。ポーリング（3秒間隔）は直近ポーリング時刻を <code>since</code> として差分取得する（基本設計書9.1節）。<span class="diff-new">サーバーは<code>since</code>を5秒巻き戻した時刻以降の<code>updated_at</code>を持つ行を返す（<code>updated_at</code>の<code>now()</code>はコミット時刻ではなくトランザクション開始時刻のため、先に始まって後からコミットされた投稿を取りこぼさないようにする。巻き戻した分の重複はクライアントがid一致で上書きする。2026-09-29）。</span><code>generation_status</code> が <code>"generating"</code> の行はAI発言が生成中であることを示す（AIサポート10.3節）。<span class="diff-new"><code>around</code>（発言id、<code>since</code>と同時指定時は<code>since</code>を優先）を指定すると、直近N件ではなくその発言を中心に前後25件ずつを返す（S-05検索結果からのハイライトジャンプ用、ユーザーからの明示的な要望。基本設計書6.2節「設計判断」）。対象の発言が存在しない・スレッド返信・他チャンネルの発言の場合は404。A-18も同じ<code>around</code>パラメータに対応する。</span><span class="diff-new"><code>since</code>指定時（差分ポーリング）のみ、レスポンスに <code>"deleted_ids": ["10299"]</code>（since以降に削除された本体タイムラインの発言id）と <code>"next_since"</code>（削除分も含めた次のsinceカーソル。変化が無ければnull）を付ける。差分ポーリングは削除済みの行を<code>items</code>に含めないため、クライアントは<code>deleted_ids</code>の発言を一覧から取り除き、次回は<code>next_since</code>をsinceに使う（削除だけが起きたポーリングで同じ削除を繰り返し受け取らないため）。A-18も同じ。従来は削除した本人の画面からしか消えず、他の参加者の画面には再読み込みするまで残り続けていた（2026-09-28）。</span></p>
+  <p class="muted"><code>since</code> 省略時は直近50件<span class="diff-new">（<code>limit</code>で変更可、1〜200。範囲外は422）</span>。ポーリング（3秒間隔）は直近ポーリング時刻を <code>since</code> として差分取得する（基本設計書9.1節）。<span class="diff-new">サーバーは<code>since</code>を5秒巻き戻した時刻以降の<code>updated_at</code>を持つ行を返す（<code>updated_at</code>の<code>now()</code>はコミット時刻ではなくトランザクション開始時刻のため、先に始まって後からコミットされた投稿を取りこぼさないようにする。巻き戻した分の重複はクライアントがid一致で上書きする。2026-09-29）。</span><code>generation_status</code> が <code>"generating"</code> の行はAI発言が生成中であることを示す（AIサポート10.3節）。<span class="diff-new"><code>around</code>（発言id、<code>since</code>と同時指定時は<code>since</code>を優先）を指定すると、直近N件ではなくその発言を中心に前後25件ずつを返す（S-05検索結果からのハイライトジャンプ用、ユーザーからの明示的な要望。基本設計書6.2節「設計判断」）。対象の発言が存在しない・スレッド返信・他チャンネルの発言の場合は404。A-18も同じ<code>around</code>パラメータに対応する。</span><span class="diff-new"><code>since</code>指定時（差分ポーリング）のみ、レスポンスに <code>"deleted_ids": ["10299"]</code>（since以降に削除された本体タイムラインの発言id）と <code>"next_since"</code>（削除分も含めた次のsinceカーソル。変化が無ければnull）を付ける。差分ポーリングは削除済みの行を<code>items</code>に含めないため、クライアントは<code>deleted_ids</code>の発言を一覧から取り除き、次回は<code>next_since</code>をsinceに使う（削除だけが起きたポーリングで同じ削除を繰り返し受け取らないため）。A-18も同じ。従来は削除した本人の画面からしか消えず、他の参加者の画面には再読み込みするまで残り続けていた（2026-09-28）。</span></p>
 
   <p><strong>A-12 <span class="badge badge-delete">DELETE</span> /api/messages/{id}（メッセージ削除）</strong></p>
   <pre><code>DELETE /api/messages/10301
@@ -234,7 +235,7 @@ POST /api/channels/42/members
   <pre><code>{ "body": "@田中 智子 確認しました",
   "mentions": [ { "target_user_id": "7", "display_name_snapshot": "田中 智子" } ] }
 // response 201: A-11と同じ形（channel_id/dm_idは元発言から継承、blocksを含む）</code></pre>
-  <p class="muted"><code>mentions</code>は元発言がチャンネル・DMいずれの場合もT-07へ保存する（<span class="diff-new">v1.26でDMも対応。対象がそのDMの参加者であることを検証する点はA-19と同じ</span>）。元発言がF-43のシステム通知の場合は400（「システム通知には返信できません」）を返し、返信自体を作成しない（基本設計書6.2節「設計判断」）。</p>
+  <p class="muted"><span class="diff-new">返信先（<code>{id}</code>）がスレッドの返信の場合は400（返信への返信は対象外）。</span><code>mentions</code>は元発言がチャンネル・DMいずれの場合もT-07へ保存する（<span class="diff-new">v1.26でDMも対応。対象がそのDMの参加者であることを検証する点はA-19と同じ</span>）。元発言がF-43のシステム通知の場合は400（「システム通知には返信できません」）を返し、返信自体を作成しない（基本設計書6.2節「設計判断」）。</p>
 
   <p><strong>A-49 <span class="badge badge-put">PUT</span> /api/channels/{id}/visibility（公開/非公開切替）</strong></p>
   <pre><code>{ "is_public": false }
@@ -562,6 +563,7 @@ WHERE m.deleted_at IS NULL
                               AND m.created_at < (:during_month || '-01')::date + interval '1 month' AT TIME ZONE 'Asia/Tokyo')
 ORDER BY m.created_at DESC
 LIMIT 20 OFFSET :offset;</code></pre>
+  <p class="muted diff-new">語句（<code>:term1</code>等）は、<code>%</code>・<code>_</code>・<code>\</code>をバックスラッシュでエスケープしてから渡す（「100%」等の検索語がワイルドカードとして働き、無関係な発言までヒットするのを防ぐ）。</p>
   <p class="muted">ファイル検索（T-06）も同じ考え方で、<code>message_attachments</code>を<code>messages</code>に結合してchannel_id/dm_id/sender_user_id/created_atを継承し、同一のモディファイア条件を適用する（file_nameに対してILIKE、in/with/from/日付系はJOIN先messagesの列で判定）。</p>
 
   <h3>6.3 ドキュメント検索・索引の実装</h3>

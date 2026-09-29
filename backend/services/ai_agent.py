@@ -82,6 +82,7 @@ import traceback
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+import background
 import mentions
 import polls
 from database import get_pool
@@ -1136,7 +1137,7 @@ async def maybe_trigger(
         range_label = _format_range_label(*range_) if range_ else ""
         await _launch_summary(channel_id, thread_id, settings, requested_by, since_dt, until_dt, range_label)
         return
-    asyncio.create_task(_generate_and_post(channel_id, settings, requested_by, thread_id))
+    background.spawn(_generate_and_post(channel_id, settings, requested_by, thread_id))
 
 
 async def _fetch_history_rows(channel_id: int, thread_id: int | None):
@@ -1569,7 +1570,7 @@ async def _launch_summary(
     )
     message_id = placeholder["id"]
     await _touch_thread_parent(pool, thread_id)
-    asyncio.create_task(
+    background.spawn(
         _generate_summary_and_post(
             channel_id, thread_id, message_id, settings, requested_by, since_dt, until_dt, range_label,
         )

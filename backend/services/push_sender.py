@@ -4,7 +4,7 @@
 # プッシュ購読先へ、サーバー側からVAPID署名付きの暗号化プッシュを送る。
 #
 # routers/channels.py（A-11）・routers/dms.py（A-19）の投稿処理から、発言のINSERT・
-# insert_mention_blocks完了後にasyncio.create_task()でfire-and-forget起動する
+# insert_mention_blocks完了後にbackground.spawn()でfire-and-forget起動する
 # （AIメンション応答・自動応答トリガーと同じ非同期起動パターン。投稿API自体はプッシュ送信の
 # 完了を待たない）。スレッド返信（A-14）は全参加者への配信（notify_channel_message/
 # notify_dm_message）の対象外のまま——①がunread_count/unread_mention_countの増分

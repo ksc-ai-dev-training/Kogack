@@ -16,11 +16,13 @@ router = APIRouter(prefix="/api/polls", tags=["polls"])
 
 
 async def _fetch_poll_with_scope(pool, poll_id: int):
-    """アンケートの所属するchannel_id/dm_idもあわせて取得する（参加者チェック用）。"""
+    """アンケートの所属するchannel_id/dm_idもあわせて取得する（参加者チェック用）。元の発言が
+    削除済みのアンケートは見つからない扱いにする（2026-09-29バグ修正。従来は削除後も投票・
+    締め切りができ、画面に出ない発言のupdated_atだけが進んでいた）"""
     return await pool.fetchrow(
         """SELECT p.*, m.channel_id, m.dm_id FROM polls p
            JOIN messages m ON m.id = p.message_id
-           WHERE p.id = $1""",
+           WHERE p.id = $1 AND m.deleted_at IS NULL""",
         poll_id,
     )
 

@@ -1,12 +1,12 @@
 # A-16〜A-19（詳細設計書 API設計4.4節、総論5.1節）
 # グループDM対応。参加者は開始時に固定（開始後の追加・削除は対象外、05-1_詳細設計書_DB設計.html 3.17節）。
 # 自分専用DM（F-05、direct_message_membersが自分1行のみ）にも対応する
-import asyncio
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+import background
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
 import message_diff
 from auth_helpers import CurrentUser, require_auth, require_dm_member
@@ -261,7 +261,7 @@ async def _around_rows(pool, dm_id: int, around_message_id: int):
 
 @router.get("/{dm_id}/messages")
 async def list_messages(
-    dm_id: int, since: str | None = None, limit: int = 50, around: int | None = None,
+    dm_id: int, since: str | None = None, limit: int = Query(50, ge=1, le=200), around: int | None = None,
     before: str | None = None, user: CurrentUser = Depends(require_dm_member),
 ):
     """A-18: 履歴取得。channels.list_messagesと同じsince差分ポーリング方式（基本設計書9.1節）。
@@ -386,7 +386,7 @@ async def post_message(dm_id: int, body: PostMessageRequest, user: CurrentUser =
     # blocksは通知の絞り込みには使わない（DM本体は常に自分宛てのため'mentions'/'all'は同じ動作、
     # 2026-09-15）が、実際に@メンションされていればタイトルを「あなたへのメンション」に変える
     # （notify_channel_messageと同じ見せ方）ためpush_sender側で参照する
-    asyncio.create_task(
+    background.spawn(
         push_sender.notify_dm_message(dm_id, user.id, user.name, body.body, blocks, f"/dms/{dm_id}")
     )
     return _message_out(
@@ -405,7 +405,7 @@ async def create_poll(dm_id: int, body: PollInput, user: CurrentUser = Depends(r
         message_row, poll_payload = await create_poll_message(
             conn, channel_id=None, dm_id=dm_id, sender_user_id=user.id, poll=body,
         )
-    asyncio.create_task(
+    background.spawn(
         push_sender.notify_dm_message(dm_id, user.id, user.name, body.question, [], f"/dms/{dm_id}")
     )
     return _message_out(

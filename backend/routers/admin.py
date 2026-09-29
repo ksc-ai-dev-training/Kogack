@@ -1,7 +1,6 @@
 # A-36〜A-44（詳細設計書 API設計4.8節、基本設計書3.3節・S-08管理コンソール）。
 # 利用者管理（A-36/A-37）・ドキュメント参照範囲のフォルダ登録（A-38〜A-40、F-22）・
 # AI利用状況・コスト（A-42/A-43、F-29）・監査ログ（A-44、T-16）を実装。
-import asyncio
 import json
 import re
 from datetime import date, datetime, time
@@ -12,6 +11,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
+import background
 from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
 from services import ai_client, doc_indexer, doc_permissions, doc_storage
@@ -363,7 +363,7 @@ async def upload_doc_file(
     # 索引化（テキスト抽出・チャンク分割・埋め込み生成）はAI応答生成と同じfire-and-forget方式で
     # バックグラウンド実行し、アップロードのレスポンス自体は待たせない（Slice 3、2026-09-09）。
     if ai_client.is_configured():
-        asyncio.create_task(doc_indexer.index_folder(new_id))
+        background.spawn(doc_indexer.index_folder(new_id))
     else:
         await pool.execute(
             "UPDATE doc_folders SET index_status = 'failed', index_error = $2 WHERE id = $1",

@@ -2,7 +2,6 @@
 # スレッドはチャンネル・DMどちらの発言にもぶら下がれる（T-05.thread_parent_idは自己参照FKで
 # channel_id/dm_idを問わない）ため、権限判定は元発言のchannel_id/dm_idに応じて分岐する
 # （require_thread_access）。返信自体はネストしない（返信への返信は対象外）。
-import asyncio
 import json
 import re
 from urllib.parse import quote
@@ -10,6 +9,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
+import background
 from attachments import AttachmentInput, fetch_attachments_grouped, insert_attachments
 from auth_helpers import CurrentUser, require_auth, require_channel_admin, require_thread_access
 from database import get_pool
@@ -290,10 +290,15 @@ async def post_reply(
     引き続き対象外。応答は同じスレッドへの返信として投稿される）"""
     pool = get_pool()
     parent = await pool.fetchrow(
-        "SELECT channel_id, dm_id, sender_type, bot_display_name FROM messages WHERE id = $1", message_id
+        "SELECT channel_id, dm_id, thread_parent_id, sender_type, bot_display_name FROM messages WHERE id = $1",
+        message_id,
     )
     if parent is None:
         raise HTTPException(404, detail="見つかりません")
+    if parent["thread_parent_id"] is not None:
+        # 返信への返信（ネスト）は対象外（冒頭コメント）。画面からは発生しないが、API直接呼び出しで
+        # 作れてしまい、どの画面にも表示されない発言になっていた（2026-09-29バグ修正）
+        raise HTTPException(400, detail="スレッドの返信には返信できません")
     if parent["sender_type"] == "bot" and parent["bot_display_name"] == "システム通知":
         # F-43のシステム通知は返信対象外とする（基本設計書6.2節「設計判断」）
         raise HTTPException(400, detail="システム通知には返信できません")
@@ -327,7 +332,7 @@ async def post_reply(
         if parent["channel_id"] is not None
         else f"/dms/{parent['dm_id']}?thread={message_id}"
     )
-    asyncio.create_task(push_sender.notify_thread_reply(
+    background.spawn(push_sender.notify_thread_reply(
         channel_id=parent["channel_id"], dm_id=parent["dm_id"], thread_parent_id=message_id,
         sender_id=user.id, sender_name=user.name, body=body.body, blocks=blocks, url=url,
     ))
