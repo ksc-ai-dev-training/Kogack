@@ -48,6 +48,7 @@
       <tr class="diff-new"><td>1.17</td><td>2026-09-29</td><td>メンションの催促（ユーザーからの明示的な要望、要件定義書上のF-xxに対応付けられていない新規機能）に伴い、T-08 channel_ai_settingsへ<code>mention_reminder_enabled</code>・<code>mention_reminder_hours</code>・<code>mention_reminder_enabled_at</code>を追加し、新規T-30 mention_remindersを追加した（3.19節）。新規API A-77（API設計4.6節）。催促の発言を見分けるためT-05 messagesへ<code>is_reminder</code>列を追加した。あわせてT-08.ai_modelの既定値の記載を実装どおり'gpt-5-mini'に直した（起動のたびにgpt-4.1-nanoをgpt-5-miniへ書き換えていた移行処理も撤去した）。</td></tr>
       <tr class="diff-new"><td>1.18</td><td>2026-09-29</td><td>T-11 channel_skillsに<code>response_level</code>（auto/confirm）を追加し、T-12 channel_auto_response_rulesを「人に任せる依頼」（human）だけを持つテーブルにした（要件定義書v1.27 F-16、基本設計書v1.46）。既存行の移行方法を3.10節に追記した。</td></tr>
       <tr class="diff-new"><td>1.19</td><td>2026-09-29</td><td>参照範囲外の質問への対応（out_of_scope_policy、F-11）の既定を「厳格に制限」から「一般回答を許可」に変更し、既存チャンネルも一括で切り替えた（ユーザーからの要望）。T-08.out_of_scope_policyの既定値を更新し、一度きりのデータ移行の適用記録として新規T-31 app_migrationsを追加した（3.20節）。</td></tr>
+      <tr class="diff-new"><td>1.20</td><td>2026-09-29</td><td>メンションの催促で、スレッドを使わずチャンネル本体で返事をした場合も反応とみなせるよう、送り主への@付き発言のルールとAIによる返事判定を追加した（ユーザーとの合意）。T-30に<code>outcome</code>列を追加し、3.19節に判定の仕様と精度評価の結果を追記した。</td></tr>
     </tbody>
   </table>
 
@@ -405,10 +406,11 @@
       <tr><td>message_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→messages.id（ON DELETE CASCADE）。メンションを含む元の発言</td></tr>
       <tr><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id（ON DELETE CASCADE）。催促した相手（メンションされた人）</td></tr>
       <tr><td>reminder_message_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→messages.id（ON DELETE SET NULL）。AIが投稿した催促の発言</td></tr>
-      <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>催促した時刻</td></tr>
+      <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>催促した（または返事済みと判定した）時刻</td></tr>
+      <tr class="diff-new"><td>outcome</td><td>TEXT</td><td>NOT NULL</td><td>'reminded'</td><td>CHECK IN ('reminded','judged_responded')。2026-09-29追加。reminded=催促した、judged_responded=AI判定で返事済みとみなし催促しなかった（reminder_message_idはNULL）</td></tr>
     </tbody>
   </table>
-  <p class="muted diff-new">UNIQUE(message_id, user_id)。1件のメンションにつき催促は1回だけにするための重複防止を兼ねる。判定と投稿は<code>services/mention_reminder.py</code>が送信予約と同じ30秒間隔のループ（<code>services/scheduled_dispatcher.py</code>）で行う。対象は、チャンネル内の人間の発言に含まれる個人宛てメンション（T-07のpayloadに<code>target_user_id</code>を持つもの）のうち、T-08.mention_reminder_hours以上たっても対象者の反応が無いもの。反応とは、その発言への絵文字リアクション（T-26）、または同じスレッドへのメンションより後の返信を指す。@channel・@here・DM・BOT/AI発言のメンションは対象外。チャンネルAIが無効な場合、対象者がチャンネルを抜けた・無効化された場合、期限から7日を超えて過ぎた場合も催促しない。催促は元発言のスレッドへ、sender_type='ai'・チャンネルAIのキャラクタ名とアイコンの定型文として投稿し、対象者へのメンション（T-07）を付ける。LLMは呼ばない。</p>
+  <p class="muted diff-new">UNIQUE(message_id, user_id)。1件のメンションにつき催促は1回だけにするための重複防止を兼ねる。判定と投稿は<code>services/mention_reminder.py</code>が送信予約と同じ30秒間隔のループ（<code>services/scheduled_dispatcher.py</code>）で行う。対象は、チャンネル内の人間の発言に含まれる個人宛てメンション（T-07のpayloadに<code>target_user_id</code>を持つもの）のうち、T-08.mention_reminder_hours以上たっても対象者の反応が無いもの。反応とは、その発言への絵文字リアクション（T-26）、または同じスレッドへのメンションより後の返信を指す。<span class="diff-new">2026-09-29に、スレッドを使わずチャンネル本体で返事をした場合も反応とみなせるよう次の2段階を追加した: (a) メンション後に本人が送り主へ@を付けて発言していれば反応済み（ただしその@付き発言は、それより前にある同じ送り主からの一番新しいメンションへの返事とみなす）、(b) それでも決まらず、メンション後に本人がチャンネル本体で発言している場合に限り、元のメンション発言と本人のその後のチャンネル本体での発言（最大5件、別スレッドへの返信は含めない）をAIに渡して返事かどうかを判定させる。判定のモデルはチャンネルのAIモデル設定に関係なくgpt-5-miniに固定する（精度評価で、返事/別件が分かっている42例×3回の正解率がgpt-5-miniは99.2%、gpt-4.1-nano・gpt-5-nanoは約81%だったため）。返事と判定したものはoutcome='judged_responded'として記録し、再判定しない。AIが使えない・判定できない場合は催促する。判定のAI利用はT-13 ai_usage_logsに記録する（requested_by=メンションされた人、message_id=元のメンション発言）。</span>@channel・@here・DM・BOT/AI発言のメンションは対象外。チャンネルAIが無効な場合、対象者がチャンネルを抜けた・無効化された場合、期限から7日を超えて過ぎた場合も催促しない。催促は元発言のスレッドへ、sender_type='ai'・チャンネルAIのキャラクタ名とアイコンの定型文として投稿し、対象者へのメンション（T-07）を付ける。催促の文面を作るのにLLMは呼ばない（上記(b)の判定でのみ呼ぶ）。</p>
 
   <h3 class="diff-new">3.20 T-31 app_migrations（一度きりのデータ移行の適用記録）</h3>
   <table class="diff-new">

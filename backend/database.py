@@ -933,6 +933,10 @@ CREATE TABLE IF NOT EXISTS mention_reminders (
     UNIQUE (message_id, user_id)
 );
 ALTER TABLE mention_reminders ENABLE ROW LEVEL SECURITY;
+-- outcome（2026-09-29追加）: 'reminded'=催促した、'judged_responded'=メンション後の本人の発言を
+-- AIが返事と判定したため催促しなかった（services/mention_reminder.py。どちらの場合も1回きりで再判定しない）
+ALTER TABLE mention_reminders ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'reminded'
+    CHECK (outcome IN ('reminded', 'judged_responded'));
 """
 
 
