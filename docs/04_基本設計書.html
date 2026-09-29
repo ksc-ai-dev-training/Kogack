@@ -17,7 +17,7 @@
     <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
     <div class="meta">
       <span>作成日: 2026-08-19</span>
-      <span>版数: 1.47</span>
+      <span>版数: 1.48</span>
       <span>作成: コガソフトウェア株式会社</span>
     </div>
     <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
@@ -76,6 +76,7 @@
       <tr class="diff-new"><td>1.45</td><td>2026-09-29</td><td>S-06の「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（ユーザーからの要望。どちらも「この種類の依頼が来たらAIはどうするか」を決める設定で、引き継ぎ先も両方から使われるのに、2つのタブに分かれていて違いが分かりにくいという指摘）。DB（T-11/T-12）・API（A-28〜A-31・A-45）・機能（F-12・F-16・F-17）は別々のまま。あわせて、実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」を選択肢から外した。4.8節を改訂し、設計判断をcalloutに残した。画面モックアップS-06・詳細設計書画面設計・操作マニュアルを一貫して更新した。要件定義書は変更なし。</td></tr>
       <tr class="diff-new"><td>1.46</td><td>2026-09-29</td><td>スキル（F-12）と自動対応範囲（F-16）の関係を改めた（要件定義書v1.27、ユーザーとの合意）。スキルを「AIに任せる業務」と位置づけ、区分を「スキル（そのまま対応）／スキル（確認してから対応）／人に任せる依頼」の3つにした。T-11にresponse_level（auto/confirm）を追加し、T-12は「人に任せる依頼」（human）だけを持つようにした（既存の自動対応可・確認のうえ対応の行はスキルへ移行）。「確認してから対応」は、F-24・F-25ができるまでAIがチャット上で依頼者に確認し同意を得てから進める。4.8節・5章・6.2節・7章・8.1節・8.3節を改訂し、4.8節の設計判断を書き改めた。</td></tr>
       <tr class="diff-new"><td>1.47</td><td>2026-09-29</td><td>S-06のタブ名を「業務と対応範囲」から「スキルと対応範囲設定」に改めた（ユーザーからの要望）。4.8節を更新した。</td></tr>
+      <tr class="diff-new"><td>1.48</td><td>2026-09-29</td><td>参照範囲外の質問への対応（out_of_scope_policy、F-11）の既定を「厳格に制限」から「一般回答を許可」に変更し、既存チャンネルも一括で切り替えた（ユーザーからの要望）。8.2節・6.2節を更新した。</td></tr>
     </tbody>
   </table>
 
@@ -887,7 +888,7 @@
       <tr><td>T-05</td><td><code>messages</code></td><td>発言</td><td>チャンネル・DM・スレッド共通の発言。channel_id／dm_id（いずれか一方。CHECK制約）、thread_parent_id（自己参照FK、スレッドの元発言）、sender_type（'human'/'ai'<span class="diff-new">/'bot'</span>）、sender_user_id（AI・BOT発言時はNULL）、body、deleted_at・deleted_by（論理削除）<span class="diff-new">、bot_display_name・bot_icon<span class="diff-new">・bot_icon_url</span>（sender_type='bot'のときのみ使用。送信時点のT-19の値をスナップショットするため非正規化。ルール変更・削除後も過去の投稿の見た目を保つ）、recurring_post_id（FK→T-19、sender_type='bot'のときのみ、どのルールから生成されたかの参照。F-36）</span><span class="diff-new">、trigger_rule_id（FK→T-21、sender_type='bot'かつトリガー応答のときのみ、どのルールから生成されたかの参照。recurring_post_idと同時にはNOT NULLにならない。F-38）</span></td></tr>
       <tr><td>T-06</td><td><code>message_attachments</code></td><td>添付ファイル</td><td>発言に紐づく添付ファイル。message_id、file_name、byte_size（20MB上限はAPI側で検証）、storage_path（Supabase Storage）、uploaded_by</td></tr>
       <tr><td>T-07</td><td><code>message_blocks</code></td><td>発言内の構造化ブロック</td><td>AI発言に付随する根拠カード等<span class="diff-new">、および人間の発言の@メンション参照（F-41）</span>。message_id、block_type（'citation'/'external_system'/'quote_reference'/'pending_action'<span class="diff-new">/'mention'</span>）、payload（JSONB。種類ごとに異なる構造<span class="diff-new">。'mention'はtarget_user_id・表示名スナップショットを持つ</span>）、sort_order。設計判断は6.3節<span class="diff-new">・5.22節</span>参照</td></tr>
-      <tr><td>T-08</td><td><code>channel_ai_settings</code></td><td>チャンネルAI設定</td><td>チャンネルごとのAI設定。channel_id（FK、UNIQUE）、is_ai_enabled、persona_name／persona_icon_url<span class="diff-new">（A-61で画像をアップロードし、返却されたURLをA-25で保存する。未設定時は「AI」の2文字アバターで代替）</span>／persona_tone、behavior_prompt、reaction_mode（'mention_only'/'proactive'）、<span class="diff-new">out_of_scope_policy（'strict'/'general'。指定範囲外の質問への対応方針。F-11）、fallback_handoff_user_id（スキルにない業務依頼の引き継ぎ先。NULL時はT-03の当該チャンネルchadminへ引き継ぐ。F-17）、</span>updated_by・updated_at（監査ログの参照元）</td></tr>
+      <tr><td>T-08</td><td><code>channel_ai_settings</code></td><td>チャンネルAI設定</td><td>チャンネルごとのAI設定。channel_id（FK、UNIQUE）、is_ai_enabled、persona_name／persona_icon_url<span class="diff-new">（A-61で画像をアップロードし、返却されたURLをA-25で保存する。未設定時は「AI」の2文字アバターで代替）</span>／persona_tone、behavior_prompt、reaction_mode（'mention_only'/'proactive'）、<span class="diff-new">out_of_scope_policy（'strict'/'general'<span class="diff-new">、既定は'general'</span>。指定範囲外の質問への対応方針。F-11）、fallback_handoff_user_id（スキルにない業務依頼の引き継ぎ先。NULL時はT-03の当該チャンネルchadminへ引き継ぐ。F-17）、</span>updated_by・updated_at（監査ログの参照元）</td></tr>
       <tr><td>T-09</td><td><code>doc_folders</code></td><td>参照ドキュメントフォルダ（全体候補）</td><td>S-08で管理者が登録するGoogle Driveフォルダの全体候補。drive_folder_id（UNIQUE）、drive_folder_name、added_by</td></tr>
       <tr><td>T-10</td><td><code>channel_doc_folders</code></td><td>チャンネル別 参照ドキュメント範囲</td><td>T-09の候補のうち、各チャンネルが参照範囲として選択したもの。(channel_id, folder_id) 主キー</td></tr>
       <tr><td>T-11</td><td><code>channel_skills</code></td><td>スキル</td><td>チャンネルAIに割り当てる「依頼を受けたらこう進める」手順（AIに任せる業務）。channel_id、title、instructions<span class="diff-new">、response_level（'auto'=そのまま対応/'confirm'=確認してから対応。F-16）</span></td></tr>
@@ -1140,7 +1141,7 @@
     <li><strong>権限フィルタリング（質問のたび）:</strong> AIが<code>search_documents</code>ツールを呼び出すと、索引から候補文書を取得したうえで、<strong>質問者本人のGoogleアカウントに対しGoogle Drive APIで当該文書の閲覧権限を都度確認</strong>し、権限のない文書は候補から除外してから回答生成に渡す。権限確認結果は短時間（数分程度）キャッシュしてよいが、キャッシュ中の権限変更が反映されるまでの遅延は許容範囲とする（要件定義書5.1節）。</li>
   </ol>
   <p>「S-08で管理者が登録した範囲（T-09/T-10）」と「質問者本人の閲覧権限」は独立した制約であり、両方を満たす文書のみを回答の根拠にできる。回答には根拠文書名・該当箇所へのリンクを T-07 message_blocks（block_type='citation'）として付与する（F-20）。</p>
-  <p class="diff-new"><strong>指定範囲外の質問への対応（out_of_scope_policy、F-11）:</strong> 権限フィルタリング後、参照範囲内に根拠となる文書が1件も見つからなかった場合の挙動をチャンネルごとに分岐する。channel_ai_settings.out_of_scope_policy が<code>'strict'</code>（既定）のときは、AIは一般知識を使わず「担当外のためお答えできません」の旨を回答し、<code>'general'</code>のときはAIの一般的な知識で回答してよいが、その場合も文書根拠が無い旨とF-30の注意喚起を必ず付記するようプロンプトで指示する。</p>
+  <p class="diff-new"><strong>指定範囲外の質問への対応（out_of_scope_policy、F-11）:</strong> 権限フィルタリング後、参照範囲内に根拠となる文書が1件も見つからなかった場合の挙動をチャンネルごとに分岐する。channel_ai_settings.out_of_scope_policy が<code>'strict'</code>のときは、AIは一般知識を使わず「担当外のためお答えできません」の旨を回答し、<code>'general'</code><span class="diff-new">（既定。2026-09-29に'strict'から変更）</span>のときはAIの一般的な知識で回答してよいが、その場合も文書根拠が無い旨とF-30の注意喚起を必ず付記するようプロンプトで指示する。</p>
 
   <h3>8.3 チャンネル振る舞い定義とプロンプト構成（F-09, F-10, F-12）</h3>
   <p>AI呼び出し時のシステムプロンプトは、次の要素を結合して構成する。</p>

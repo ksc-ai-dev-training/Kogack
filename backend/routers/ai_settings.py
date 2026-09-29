@@ -186,7 +186,7 @@ async def update_prompt(
 
 class UpdateDocScopeRequest(BaseModel):
     folder_ids: list[str] = Field(default_factory=list)
-    out_of_scope_policy: str = "strict"
+    out_of_scope_policy: str = "general"  # 2026-09-29に既定を「一般回答を許可」へ変更（database.py参照）
     # falseのまま409（要確認）を受け取った後、確認ダイアログで「はい」を押した場合のみtrueにして
     # 再送信する（閲覧権限モデルSlice 2b、(5)）。この場合のみ権限を失う参加者を強制退出させる。
     force: bool = False

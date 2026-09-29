@@ -71,6 +71,7 @@
       <tr class="diff-new"><td>1.40</td><td>2026-09-29</td><td>A-10/A-18の<code>limit</code>を1〜200に制限した（範囲外は422）。A-14は返信先がスレッドの返信の場合400を返すようにした（返信への返信は対象外）。A-20の語句条件で<code>%</code>・<code>_</code>を文字どおりに扱うようエスケープするようにした。削除済みの発言に紐づくアンケートへの投票・締め切りは404にした。</td></tr>
       <tr class="diff-new"><td>1.41</td><td>2026-09-29</td><td>メンションの催促（ユーザーからの明示的な要望）のため、新規API A-77（催促の有効/無効・待ち時間の更新）を追加し、A-23のレスポンスに<code>mention_reminder_enabled</code>・<code>mention_reminder_hours</code>を追加した（DB設計v1.17 T-08・T-30）。要件定義書上のF-xxに対応付けられた変更ではないため、要件定義書・基本設計書の改訂は無い。</td></tr>
       <tr class="diff-new"><td>1.42</td><td>2026-09-29</td><td>A-28/A-29にスキルの対応区分<code>response_level</code>（auto=そのまま対応/confirm=確認してから対応）を追加し、A-31を「人に任せる依頼」（response_level='human'のみ）を扱うAPIにした（要件定義書v1.27 F-16、DB設計v1.18）。</td></tr>
+      <tr class="diff-new"><td>1.43</td><td>2026-09-29</td><td>参照範囲外の質問への対応（out_of_scope_policy、F-11）の既定を「厳格に制限」から「一般回答を許可」に変更し、既存チャンネルも一括で切り替えた（ユーザーからの要望）。A-23のレスポンス例とA-27の省略時の値を更新した。</td></tr>
     </tbody>
   </table>
 
@@ -329,7 +330,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <pre><code>// response 200
 { "channel_id": "42", "is_ai_enabled": true, "persona_name": "Kogack AI", "persona_icon_url": null,
   "persona_tone": null, "behavior_prompt": "", "reaction_mode": "mention_only",
-  "out_of_scope_policy": "strict", <span class="diff-new">"ai_model": "gpt-4.1-nano",
+  "out_of_scope_policy": "general", <span class="diff-new">"ai_model": "gpt-4.1-nano",
   "available_models": [
     { "value": "gpt-5-nano", "label": "gpt-5-nano（推論系。複雑な多段階の論理・計算問題には強いが、応答はやや遅い）" },
     { "value": "gpt-4.1-nano", "label": "gpt-4.1-nano（現在の既定。速度・コストのバランスが良く、アプリの用途に最も相性が良い）" },
@@ -358,7 +359,7 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p><strong>A-27 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/doc-scope</strong></p>
   <pre><code>{ "folder_ids": ["3", "5"], "out_of_scope_policy": "strict" }
 // response 200: A-23と同じ形で、更新後のfolder_ids・out_of_scope_policyを返す</code></pre>
-  <p class="muted"><span class="diff-new"><code>folder_ids</code> は送信された集合でT-10を洗い替える（DELETE→INSERTのトランザクション。差分計算はしない）。存在しないfolder_id（S-08で削除済み等）は黙って無視し、設定保存自体は失敗させない（F-41のメンション対象外指定と同じ考え方）。folder_idsが空配列の場合は「参照ドキュメント無し」として全件削除する。out_of_scope_policyはstrict/generalのいずれか以外は422。実際のDrive同期・索引・AI検索（search_documentsツール、総論8.2節）は次のスライスで実装するため、この設定は現時点ではAI応答に反映されない。</span></p>
+  <p class="muted"><span class="diff-new"><code>folder_ids</code> は送信された集合でT-10を洗い替える（DELETE→INSERTのトランザクション。差分計算はしない）。存在しないfolder_id（S-08で削除済み等）は黙って無視し、設定保存自体は失敗させない（F-41のメンション対象外指定と同じ考え方）。folder_idsが空配列の場合は「参照ドキュメント無し」として全件削除する。out_of_scope_policyはstrict/generalのいずれか以外は422<span class="diff-new">（省略時は'general'。2026-09-29に既定を変更）</span>。実際のDrive同期・索引・AI検索（search_documentsツール、総論8.2節）は次のスライスで実装するため、この設定は現時点ではAI応答に反映されない。</span></p>
 
   <p class="diff-new"><strong>A-28 <span class="badge badge-post">POST</span> /api/channels/{id}/skills</strong></p>
   <pre class="diff-new"><code>{ "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる",

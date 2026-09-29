@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS channel_ai_settings (
     persona_tone              TEXT,
     behavior_prompt           TEXT DEFAULT '',
     reaction_mode             TEXT NOT NULL DEFAULT 'mention_only' CHECK (reaction_mode IN ('mention_only', 'proactive')),
-    out_of_scope_policy       TEXT NOT NULL DEFAULT 'strict' CHECK (out_of_scope_policy IN ('strict', 'general')),
+    out_of_scope_policy       TEXT NOT NULL DEFAULT 'general' CHECK (out_of_scope_policy IN ('strict', 'general')),
     fallback_handoff_user_id  BIGINT REFERENCES users(id),
     ai_model                  TEXT NOT NULL DEFAULT 'gpt-5-mini',
     updated_by                BIGINT REFERENCES users(id),
@@ -277,6 +277,28 @@ UPDATE channel_ai_settings SET ai_model = 'gpt-5-mini' WHERE ai_model IS NULL;
 -- この列を持たない古いDBから起動した場合の結果は従来と変わらない。
 ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET DEFAULT 'gpt-5-mini';
 ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET NOT NULL;
+
+-- T-31 app_migrations: 一度だけ実行したいデータ移行の適用記録（2026-09-29追加）。SCHEMAは起動のたびに
+-- 丸ごと適用される（AUTO_MIGRATE）ため、「既存の値を一括で書き換える」UPDATEをそのまま書くと、
+-- その後に利用者が画面で選び直した値まで起動のたびに書き戻してしまう（ai_modelで実際に起きた不具合）。
+-- 一度きりの移行は、このテーブルへのINSERTが成功した起動（＝初回）だけ本体のUPDATEが働く形で書く
+CREATE TABLE IF NOT EXISTS app_migrations (
+    name        TEXT PRIMARY KEY,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE app_migrations ENABLE ROW LEVEL SECURITY;
+
+-- 参照範囲外の質問への対応（out_of_scope_policy、F-11）の既定を「厳格に制限」から「一般回答を許可」へ
+-- 変更した（2026-09-29、ユーザーからの明示的な要望）。既存チャンネルも一括で切り替える（ユーザーに確認
+-- 済み。意図して「厳格に制限」を選んでいたチャンネルと既定のままのチャンネルはDB上で区別できないため、
+-- 両者を区別せず切り替える）。切り替えは初回の起動で1回だけ行い、以後に画面で選び直した値は戻さない
+ALTER TABLE channel_ai_settings ALTER COLUMN out_of_scope_policy SET DEFAULT 'general';
+WITH first_run AS (
+    INSERT INTO app_migrations (name) VALUES ('2026-09-29_out_of_scope_policy_default_general')
+    ON CONFLICT (name) DO NOTHING RETURNING name
+)
+UPDATE channel_ai_settings SET out_of_scope_policy = 'general', updated_at = now()
+    WHERE out_of_scope_policy = 'strict' AND EXISTS (SELECT 1 FROM first_run);
 -- persona_nameの既定値を「AI」から「Kogack AI」へ変更した際のbackfill（CREATE TABLE IF NOT EXISTSは
 -- 既存DBのテーブルには効かないため、既存DBの以後のINSERT分にも新しい既定値を反映させる。
 -- 既にAI発言済みの行のpersona_name自体の書き換えは対象外＝一度きりの手動UPDATEで対応する）

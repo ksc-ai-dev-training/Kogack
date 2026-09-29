@@ -576,17 +576,17 @@
 
         <div class="field-group" style="margin-top:24px;">
           <label class="field-label">指定範囲外の質問が来た場合の対応方針</label>
-          <div class="radio-card selected">
+          <div class="radio-card">
             <div class="radio-dot"></div>
             <div>
               <div class="r-title">厳格に制限</div>
               <div class="r-sub">登録されたドキュメントや振る舞い定義・スキルの範囲外の質問には対応せず、「担当外のためお答えできません」のようにお断りする。</div>
             </div>
           </div>
-          <div class="radio-card">
+          <div class="radio-card selected">
             <div class="radio-dot"></div>
             <div>
-              <div class="r-title">一般回答を許可</div>
+              <div class="r-title">一般回答を許可（既定）</div>
               <div class="r-sub">登録ドキュメントに根拠がない質問でも、AIの一般的な知識を使って回答する。社内ドキュメントを根拠にできる質問については、そちらを優先する。</div>
             </div>
           </div>
@@ -698,7 +698,8 @@
     <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル管理者」タブにチャンネル名・説明文の編集欄と、チャンネルを完全に削除する操作（危険な操作。削除対象のチャンネル名を再入力して初めて「削除する」ボタンが有効になる）を追加した。要件定義書F-02・権限マトリクスに反映済み（チャンネル名・説明文の編集は今回新規、削除自体は基本設計書に以前から記載されていたが未実装だった）。<br>
     <span style="color:#fbbf24;" class="diff-new">1.20版で統合:</span> <span class="diff-new">「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（2026-09-29、ユーザーからの要望）。上から「① AIが対応する業務の手順」（旧・スキル、F-12）・「② 人に回す依頼」（旧・自動対応範囲、F-16）・「③ 引き継ぎ先」（F-17）の順に並べる（AIが何をするかを先に見せるため手順を先頭にした）。DB・API・機能は別々のまま。実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」は選択肢から外し、「自動対応可」は「AIが対応」に言い換えた。基本設計書4.8節に反映済み。</span><br>
     <span style="color:#fbbf24;" class="diff-new">1.21版で再設計:</span> <span class="diff-new">要求仕様書REQ-F-11・REQ-F-15を踏まえ、スキルを「AIに任せる業務」と位置づけ直した（2026-09-29、要件定義書F-16改訂）。①「AIに任せる業務（スキル）」はスキルごとに「そのまま対応／確認してから対応」を選び、②「人に任せる依頼」は区分の選択が無い一覧にした。旧・自動対応範囲の「自動対応可」「確認のうえ対応」の行はスキルへ移行する。基本設計書4.8節に反映済み。</span><br>
-    <span style="color:#fbbf24;" class="diff-new">1.22版で改称:</span> <span class="diff-new">タブ名を「業務と対応範囲」から「スキルと対応範囲設定」に改めた（2026-09-29、ユーザーからの要望）。</span>
+    <span style="color:#fbbf24;" class="diff-new">1.22版で改称:</span> <span class="diff-new">タブ名を「業務と対応範囲」から「スキルと対応範囲設定」に改めた（2026-09-29、ユーザーからの要望）。</span><br>
+    <span style="color:#fbbf24;" class="diff-new">1.23版で変更:</span> <span class="diff-new">「参照ドキュメント範囲」タブの「指定範囲外の質問が来た場合の対応方針」の既定を「厳格に制限」から「一般回答を許可」に変更した（2026-09-29、ユーザーからの要望）。</span>
   </div>
 
 <script>
