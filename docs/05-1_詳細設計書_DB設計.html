@@ -45,6 +45,7 @@
       <tr class="diff-new"><td>1.14</td><td>2026-09-07</td><td>新規T-23 google_drive_tokensを追加した。層2ドキュメントQ&A（F-19〜F-22）に向けたGoogle Drive連携の最初のスライスとして、GCP側のDrive API有効化・OAuthスコープの全社展開について千田氏の許可を得て着手した。利用者ごとのGoogle Driveアクセストークン（access_token・refresh_token・有効期限）を保存し、期限切れ時はrefresh_tokenで自動更新する（services/google_drive.py）。索引作成・埋め込みベクトル化・検索本体は次のスライス。</td></tr>
       <tr class="diff-new"><td>1.15</td><td>2026-09-17</td><td>T-08 channel_ai_settingsへ<code>ai_model</code>列を追加した。チャンネルごとのAIモデル選択機能（基本設計書v1.43、ユーザーからの明示的な要望）に伴う変更。選択肢はDBのCHECK制約では縛らず、API層（services/ai_client.MODEL_COSTSのキー集合）で検証する設計とした（新しいモデルの単価行を追加するだけでDBスキーマ変更無しに選択肢が増えるようにするため）。**当初はTEXT・NULL可（NULL＝AI_MODEL環境変数の既定値に追従する間接参照）で実装したが、同日中にユーザーから「『既定（...）を使う』という選択肢自体をなくし、どのチャンネルも常にgpt-4.1-nanoが具体的に選択されている状態にしたい」との要望を受け、NOT NULL DEFAULT 'gpt-4.1-nano'へ変更した**（既存のNULL行はbackfillしてからNOT NULLを付与する冪等な移行、database.py参照）。本節のみで完結する変更のため、この局所的な更新（T-25〜T-27等、他の実装済みテーブルの網羅的なbackfillは含まない）に留める。</td></tr>
       <tr class="diff-new"><td>1.16</td><td>2026-09-17</td><td>T-13 ai_usage_logsへ<code>message_id</code>（FK→messages.id、ON DELETE SET NULL）・<code>request_payload</code>（JSONB）を追加した。ユーザーからの明示的な要望「AIとのやりとり（システムがAPIに投げている内容）を画面上確認できるようにしてほしい」に対応するもので、AI発言ごとに実際にOpenAI APIへ送信したmessages配列（システムプロンプト・会話履歴・ツール呼び出しの往復を含む）を記録する。既存の「質問文・回答文は保持しない」方針（T-13の従来からの設計判断）とは対象が異なり、回答本文の重複保存ではなくリクエスト内容そのものの記録である旨を明記した。新規API（A-76、API設計4.3節）・S-03/S-04のAI発言に閲覧ボタンを追加した（詳細設計書API設計、v1.37）。要件定義書上のF-xxに対応付けられた変更ではないため要件定義書・基本設計書の改訂は無い。</td></tr>
+      <tr class="diff-new"><td>1.17</td><td>2026-09-29</td><td>メンションの催促（ユーザーからの明示的な要望、要件定義書上のF-xxに対応付けられていない新規機能）に伴い、T-08 channel_ai_settingsへ<code>mention_reminder_enabled</code>・<code>mention_reminder_hours</code>・<code>mention_reminder_enabled_at</code>を追加し、新規T-30 mention_remindersを追加した（3.19節）。新規API A-77（API設計4.6節）。</td></tr>
     </tbody>
   </table>
 
@@ -209,6 +210,9 @@
       <tr><td>out_of_scope_policy</td><td>TEXT</td><td>NOT NULL</td><td>'strict'</td><td>CHECK IN ('strict','general')（F-11）</td></tr>
       <tr><td>fallback_handoff_user_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。NULL時は当該チャンネルchadminへ引き継ぐ（F-17）</td></tr>
       <tr class="diff-new"><td>ai_model</td><td>TEXT</td><td>NOT NULL</td><td>'gpt-4.1-nano'</td><td>2026-09-17追加。当初はNULL可（NULL＝AI_MODEL環境変数の既定値を使う間接参照）だったが、同日中にユーザーの要望で「既定を使う」という抽象的な選択肢自体を撤去し、常に具体的なモデル名を持つNOT NULL DEFAULT 'gpt-4.1-nano'へ変更した。選択肢はDBのCHECK制約では縛らずAPI層（services/ai_client.MODEL_COSTSのキー集合）で検証する</td></tr>
+      <tr class="diff-new"><td>mention_reminder_enabled</td><td>BOOLEAN</td><td>NOT NULL</td><td>false</td><td>2026-09-29追加。メンションの催促の有効/無効（A-77、3.19節）</td></tr>
+      <tr class="diff-new"><td>mention_reminder_hours</td><td>INT</td><td>NOT NULL</td><td>24</td><td>2026-09-29追加。催促までの待ち時間（時間）。CHECK 1〜168</td></tr>
+      <tr class="diff-new"><td>mention_reminder_enabled_at</td><td>TIMESTAMPTZ</td><td>NULL可</td><td>-</td><td>2026-09-29追加。最後にオフ→オンへ切り替えた時刻。これより前のメンションは催促しない</td></tr>
       <tr><td>updated_by</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。監査ログの参照元</td></tr>
       <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
@@ -386,6 +390,19 @@
     </tbody>
   </table>
   <p class="muted diff-new">1利用者につき最新の1組のみ保持する（履歴は持たない）。取得・更新は<code>services/google_drive.py</code>の<code>get_valid_access_token</code>に集約し、呼び出し時点で期限切れ間近（5分以内）であればrefresh_tokenを使って自動更新してから返す。保存自体はA-02（ログインコールバック）で、Google側から実際に返ってきたトークンをそのままUPSERTする（<code>routers/auth.py</code>）。索引作成・埋め込みベクトル化・検索本体（<code>search_documents</code>ツール）は次のスライスで、このトークンを使ってDrive APIを呼び出す形になる。</p>
+
+  <h3 class="diff-new">3.19 T-30 mention_reminders（メンションの催促の記録）</h3>
+  <table class="diff-new">
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>id</td><td>BIGINT</td><td>NOT NULL</td><td>IDENTITY</td><td>PRIMARY KEY</td></tr>
+      <tr><td>message_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→messages.id（ON DELETE CASCADE）。メンションを含む元の発言</td></tr>
+      <tr><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id（ON DELETE CASCADE）。催促した相手（メンションされた人）</td></tr>
+      <tr><td>reminder_message_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→messages.id（ON DELETE SET NULL）。AIが投稿した催促の発言</td></tr>
+      <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>催促した時刻</td></tr>
+    </tbody>
+  </table>
+  <p class="muted diff-new">UNIQUE(message_id, user_id)。1件のメンションにつき催促は1回だけにするための重複防止を兼ねる。判定と投稿は<code>services/mention_reminder.py</code>が送信予約と同じ30秒間隔のループ（<code>services/scheduled_dispatcher.py</code>）で行う。対象は、チャンネル内の人間の発言に含まれる個人宛てメンション（T-07のpayloadに<code>target_user_id</code>を持つもの）のうち、T-08.mention_reminder_hours以上たっても対象者の反応が無いもの。反応とは、その発言への絵文字リアクション（T-26）、または同じスレッドへのメンションより後の返信を指す。@channel・@here・DM・BOT/AI発言のメンションは対象外。チャンネルAIが無効な場合、対象者がチャンネルを抜けた・無効化された場合、期限から7日を超えて過ぎた場合も催促しない。催促は元発言のスレッドへ、sender_type='ai'・チャンネルAIのキャラクタ名とアイコンの定型文として投稿し、対象者へのメンション（T-07）を付ける。LLMは呼ばない。</p>
 
   <footer class="doc-footer">
     <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 DB設計</span>

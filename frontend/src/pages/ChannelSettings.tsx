@@ -1098,6 +1098,109 @@ function ReactionTab({
           />
         ))}
       </div>
+      <MentionReminderSection channelId={channelId} settings={settings} mutate={mutate} />
+    </div>
+  )
+}
+
+const MENTION_REMINDER_HOURS = [1, 3, 6, 12, 24, 48, 72, 168]
+
+const reminderHoursLabel = (h: number) => (h % 24 === 0 ? `${h / 24}日` : `${h}時間`)
+
+// メンションの催促（A-77、2026-09-29。ユーザーからの明示的な要望「メンションを受けたのに一定時間
+// たっても返信もリアクションもしていないユーザーに、AIが自動的に催促する機能」）。判定・投稿は
+// backend/services/mention_reminder.py。反応モードと同じ「AIがいつ発言するか」の設定なのでこのタブに
+// 同居させる。オン/オフ・待ち時間ともGeneralTabと同じく操作した瞬間に保存する
+function MentionReminderSection({
+  channelId,
+  settings,
+  mutate,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+}) {
+  const toast = useToast()
+  const [saving, setSaving] = useState(false)
+
+  const save = async (enabled: boolean, hours: number, message: string) => {
+    if (saving) return
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/mention-reminder`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled, hours }),
+      })
+      await mutate()
+      toast(message)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '変更に失敗しました', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const enabled = settings.mention_reminder_enabled
+  const hours = settings.mention_reminder_hours
+  // 選択肢に無い値（APIを直接呼んで設定した場合）もそのまま表示できるよう補う
+  const hourOptions = MENTION_REMINDER_HOURS.includes(hours)
+    ? MENTION_REMINDER_HOURS
+    : [...MENTION_REMINDER_HOURS, hours].sort((a, b) => a - b)
+
+  return (
+    <div className="mt-8">
+      <div className="mb-1.5 text-[13px] font-bold text-ink">メンションの催促</div>
+      <p className="mb-3 text-[12.5px] leading-relaxed text-ink-muted">
+        メンションされた人が一定時間たっても返信も絵文字リアクションもしていない場合に、AIが元の発言のスレッドで本人に催促します。催促は1件のメンションにつき1回だけです。
+      </p>
+      <label className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-line bg-surface-subtle px-3.5 py-3">
+        <span
+          className={`relative h-[22px] w-[38px] flex-none rounded-full transition-colors ${
+            enabled ? 'bg-accent-600' : 'bg-line-strong'
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={() =>
+              save(!enabled, hours, enabled ? 'メンションの催促を無効にしました' : 'メンションの催促を有効にしました')
+            }
+            disabled={saving}
+            className="sr-only"
+          />
+          <span
+            className={`absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow transition-all ${
+              enabled ? 'left-[18px]' : 'left-0.5'
+            }`}
+          />
+        </span>
+        <span>
+          <div className="text-[13px] font-bold text-ink">反応の無いメンションをAIが催促する</div>
+          <div className="mt-0.5 text-[11.5px] text-ink-subtle">
+            有効にした時点より後のメンションが対象です。@channel・@hereは対象外です。
+          </div>
+        </span>
+      </label>
+      <div className="mt-3 rounded-[10px] border border-line bg-surface-subtle px-3.5 py-3">
+        <label className="field-label mb-1.5 block text-[13px] font-bold text-ink">催促するまでの時間</label>
+        <select
+          value={hours}
+          onChange={(e) => save(enabled, Number(e.target.value), '催促するまでの時間を更新しました')}
+          disabled={saving}
+          className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-ink"
+        >
+          {hourOptions.map((h) => (
+            <option key={h} value={h}>
+              メンションから{reminderHoursLabel(h)}後
+            </option>
+          ))}
+        </select>
+      </div>
+      {enabled && !settings.is_ai_enabled && (
+        <div className="mt-2 text-[11.5px] text-danger-text">
+          このチャンネルではAIが無効のため、催促は行われません（基本設定タブでAIを有効にしてください）。
+        </div>
+      )}
     </div>
   )
 }

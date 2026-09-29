@@ -82,6 +82,11 @@ export interface AiSettings {
   skills: Skill[]
   auto_response_rules: AutoResponseRule[]
   fallback_handoff_user_id: string | null
+  /** メンションの催促（A-77、2026-09-29）。一定時間たっても返信・リアクションの無い個人宛て
+   * メンションに、AIが元発言のスレッドで催促する */
+  mention_reminder_enabled: boolean
+  /** 催促までの待ち時間（1〜168時間） */
+  mention_reminder_hours: number
 }
 
 /** T-12 channel_auto_response_rules（A-31, F-16）。request_categoryはチャンネル管理者が

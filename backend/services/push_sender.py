@@ -225,3 +225,33 @@ async def notify_thread_reply(
             "tag": f"kogack-t-{thread_parent_id}",
         }
         await _send_to_subscription(r, payload)
+
+
+async def notify_mention_reminder(
+    *, channel_id: int, user_id: int, thread_parent_id: int, sender_name: str, body: str, url: str,
+) -> None:
+    """メンションの催促（services/mention_reminder.py、2026-09-29）を対象者本人にだけ送る。
+    notify_thread_replyを使うとスレッドの元発言者・過去の返信者にも届いてしまうため、別に用意した。
+    催促は「あなた宛てのメンション」そのものなので、通知設定が'mentions'でも送り、'off'
+    （全体設定、またはこのチャンネル限定の上書き）のときだけ送らない"""
+    if not is_configured():
+        return
+    rows = await get_pool().fetch(
+        """SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, u.notif_mode, cm.notif_mode AS channel_notif_mode
+           FROM channel_members cm
+           JOIN users u ON u.id = cm.user_id
+           JOIN push_subscriptions ps ON ps.user_id = u.id
+           WHERE cm.channel_id = $1 AND u.id = $2""",
+        channel_id, user_id,
+    )
+    for r in rows:
+        effective_mode = (
+            r["channel_notif_mode"] if r["channel_notif_mode"] not in (None, "default") else r["notif_mode"]
+        )
+        if effective_mode == "off":
+            continue
+        payload = {
+            "title": "メンションへの反応の催促", "body": f"{sender_name}: {_excerpt(body)}", "url": url,
+            "tag": f"kogack-t-{thread_parent_id}",
+        }
+        await _send_to_subscription(r, payload)

@@ -857,6 +857,31 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 );
 CREATE INDEX IF NOT EXISTS idx_poll_votes_option_id ON poll_votes (option_id);
 ALTER TABLE poll_votes ENABLE ROW LEVEL SECURITY;
+
+-- メンションの催促（ユーザーからの明示的な要望「メンションを受けたのに一定時間たっても返信も
+-- リアクションもしていないユーザーに、AIが自動的に催促・リマインドする機能」、2026-09-29。
+-- 要件定義書上のF-xxに対応付けられていない新規機能）。チャンネルごとの設定はT-08へ列を足す
+-- （S-06「反応モード」タブ、A-77）。既定はオフ。mention_reminder_enabled_atはオンにした時刻で、
+-- これより前のメンションは催促しない（オンにした直後に過去の未反応メンションがまとめて催促される
+-- のを防ぐ）。ADD COLUMN IF NOT EXISTSは列が既にあれば丸ごとスキップされるため、インラインの
+-- CHECK制約も含めて毎起動実行しても冪等
+ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS mention_reminder_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS mention_reminder_hours INT NOT NULL DEFAULT 24
+    CHECK (mention_reminder_hours BETWEEN 1 AND 168);
+ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS mention_reminder_enabled_at TIMESTAMPTZ;
+
+-- T-30 mention_reminders: 催促済みの（発言, 対象者）の記録。1件のメンションにつき催促は1回だけに
+-- するための重複防止（UNIQUE）を兼ねる。催促の発言自体はT-05にsender_type='ai'で投稿し、その
+-- idをreminder_message_idに持つ（services/mention_reminder.py）
+CREATE TABLE IF NOT EXISTS mention_reminders (
+    id                   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    message_id           BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id              BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reminder_message_id  BIGINT REFERENCES messages(id) ON DELETE SET NULL,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (message_id, user_id)
+);
+ALTER TABLE mention_reminders ENABLE ROW LEVEL SECURITY;
 """
 
 

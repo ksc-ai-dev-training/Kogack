@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 
 from database import get_pool
 from mentions import MentionInput, insert_mention_blocks
-from services import ai_agent, trigger_matcher
+from services import ai_agent, mention_reminder, trigger_matcher
 
 POLL_INTERVAL_SECONDS = 30
 
@@ -251,6 +251,8 @@ async def _run_loop() -> None:
         try:
             await _dispatch_due_messages()
             await _dispatch_recurring_posts()
+            # メンションの催促（2026-09-29、services/mention_reminder.py）も同じ30秒ループに相乗りする
+            await mention_reminder.dispatch_due_reminders()
         except Exception:
             # 1回の失敗でループ自体を止めない（次の30秒後に再試行される）
             traceback.print_exc()

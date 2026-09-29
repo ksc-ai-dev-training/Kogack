@@ -36,6 +36,9 @@ def _out(row, folder_ids: list[str], skills: list[dict], auto_response_rules: li
         "fallback_handoff_user_id": (
             str(row["fallback_handoff_user_id"]) if row["fallback_handoff_user_id"] is not None else None
         ),
+        # メンションの催促（2026-09-29、A-77・services/mention_reminder.py）
+        "mention_reminder_enabled": row["mention_reminder_enabled"],
+        "mention_reminder_hours": row["mention_reminder_hours"],
     }
 
 
@@ -373,6 +376,40 @@ async def update_handoff(
     await audit_log.record(
         pool, "channel_ai_setting_change", user.id, "スキルの引き継ぎ先を更新しました",
         target_channel_id=channel_id, target_field="fallback_handoff_user_id",
+    )
+    return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
+
+
+class UpdateMentionReminderRequest(BaseModel):
+    enabled: bool
+    hours: int = Field(ge=1, le=168)
+
+
+@router.put("/{channel_id}/ai-settings/mention-reminder")
+async def update_mention_reminder(
+    channel_id: int, body: UpdateMentionReminderRequest, user: CurrentUser = Depends(require_channel_admin),
+):
+    """A-77: メンションの催促の有効/無効と待ち時間（ユーザーからの明示的な要望、2026-09-29。
+    services/mention_reminder.pyのモジュールコメント参照）。オフ→オンに切り替えたときだけ
+    mention_reminder_enabled_atを現在時刻にする（これより前のメンションは催促しない。オンのまま
+    待ち時間だけ変えた場合は起点を動かさない）"""
+    await _get_or_create(channel_id)
+    pool = get_pool()
+    row = await pool.fetchrow(
+        """UPDATE channel_ai_settings
+           SET mention_reminder_enabled = $2, mention_reminder_hours = $3,
+               mention_reminder_enabled_at = CASE
+                   WHEN $2 AND NOT mention_reminder_enabled THEN now()
+                   ELSE mention_reminder_enabled_at
+               END,
+               updated_by = $4, updated_at = now()
+           WHERE channel_id = $1 RETURNING *""",
+        channel_id, body.enabled, body.hours, user.id,
+    )
+    await audit_log.record(
+        pool, "channel_ai_setting_change", user.id,
+        f"メンションの催促を{'有効（' + str(body.hours) + '時間後）' if body.enabled else '無効'}にしました",
+        target_channel_id=channel_id, target_field="mention_reminder",
     )
     return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
 
