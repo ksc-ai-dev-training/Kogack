@@ -1218,7 +1218,8 @@ const visibleLevels = (current: AutoResponseRule['response_level']) =>
 // 「業務と対応範囲」タブ（2026-09-29、ユーザーからの要望で旧「スキル」タブと旧「自動対応範囲」タブを
 // 画面上だけ1つにまとめた。DB（T-11/T-12）・API（A-28〜A-31・A-45）は別々のまま）。どちらも
 // 「この種類の依頼が来たらAIはどうするか」を決める設定で、引き継ぎ先も両方から使われるため、
-// ①人に回す依頼 ②AIが対応する業務の手順 ③引き継ぎ先 の順に1画面で見渡せるようにする。
+// ①AIが対応する業務の手順 ②人に回す依頼 ③引き継ぎ先 の順に1画面で見渡せるようにする（当初は
+// ①②が逆だったが、AIが何をするかを先に見せたいというユーザーの要望で同日入れ替えた）。
 // 旧URL（?tab=skills・?tab=auto）はどちらもこのタブを開く
 function TasksTab({
   channelId,
@@ -1232,13 +1233,13 @@ function TasksTab({
   return (
     <div className="max-w-[700px]">
       <p className="mb-6 text-[12.5px] leading-relaxed text-ink-muted">
-        依頼の種類ごとにAIが対応するか人に回すかを決め（①）、AIが対応する業務の進め方を登録します（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。
+        AIが対応する業務の進め方を登録し（①）、依頼の種類ごとにAIが対応するか人に回すかを決めます（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。
       </p>
-      <SectionHeading no="①" title="人に回す依頼" />
-      <AutoResponseSection channelId={channelId} settings={settings} mutate={mutate} />
-      <div className="mt-10" />
-      <SectionHeading no="②" title="AIが対応する業務の手順（スキル）" />
+      <SectionHeading no="①" title="AIが対応する業務の手順（スキル）" />
       <SkillsSection channelId={channelId} settings={settings} mutate={mutate} />
+      <div className="mt-10" />
+      <SectionHeading no="②" title="人に回す依頼" />
+      <AutoResponseSection channelId={channelId} settings={settings} mutate={mutate} />
       <div className="mt-10" />
       <SectionHeading no="③" title="引き継ぎ先" />
       <HandoffSection channelId={channelId} settings={settings} mutate={mutate} />
@@ -1254,7 +1255,7 @@ function SectionHeading({ no, title }: { no: string; title: string }) {
   )
 }
 
-// ①人に回す依頼＝旧「自動対応範囲」タブ（A-31、F-16。TasksTabの一部）。
+// ②人に回す依頼＝旧「自動対応範囲」タブ（A-31、F-16。TasksTabの一部）。
 // 「人が対応」区分の判定方法は設計書が規定していない（グレー）ため、
 // ユーザーに確認のうえ、区分一覧をシステムプロンプトに含めてAI自身に判断・引き継ぎさせる方式を
 // 採用した（追加の分類LLM呼び出しはしない。services/ai_agent.py _build_auto_response_sectionを参照）。
@@ -1350,7 +1351,7 @@ function AutoResponseSection({
   return (
     <div>
       <p className="mb-4 text-[12.5px] leading-relaxed text-ink-muted">
-        依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。②に手順を登録した業務でも、ここで「人が対応」にすると人に回します。
+        依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。①に手順を登録した業務でも、ここで「人が対応」にすると人に回します。
       </p>
 
       {rules.length === 0 ? (
@@ -1524,7 +1525,7 @@ function SkillFormFields({
   )
 }
 
-// ②AIが対応する業務の手順＝旧「スキル」タブ（A-28〜A-30、F-12。TasksTabの一部）。定期投稿・
+// ①AIが対応する業務の手順＝旧「スキル」タブ（A-28〜A-30、F-12。TasksTabの一部）。定期投稿・
 // トリガーと同じ「新規作成パネル＋編集モーダル」の構成。引き継ぎ先は①②の両方から使われるため
 // HandoffSection（③）へ分けた
 function SkillsSection({
@@ -1646,7 +1647,7 @@ function SkillsSection({
   )
 }
 
-// ③引き継ぎ先（A-45、F-17。TasksTabの一部）。①で「人が対応」にした依頼と、②のどのスキルにも
+// ③引き継ぎ先（A-45、F-17。TasksTabの一部）。②で「人が対応」にした依頼と、①のどのスキルにも
 // 当てはまらない業務依頼の両方で、AIが案内する相談先。参加者から選ぶセレクトのみのため、
 // GeneralTabのトグルと同じく選択時に即保存する
 function HandoffSection({
@@ -1681,7 +1682,7 @@ function HandoffSection({
   return (
     <div>
       <p className="mb-2.5 text-[12.5px] leading-relaxed text-ink-muted">
-        ①で「人が対応」にした依頼と、②のどのスキルにも当てはまらない業務依頼を受けたときに、AIが案内する相談先です（F-17）。未指定の場合はこのチャンネルの管理者を案内します。指定した参加者が退出・無効化された場合は自動的に未指定へ戻ります。
+        ②で「人が対応」にした依頼と、①のどのスキルにも当てはまらない業務依頼を受けたときに、AIが案内する相談先です（F-17）。未指定の場合はこのチャンネルの管理者を案内します。指定した参加者が退出・無効化された場合は自動的に未指定へ戻ります。
       </p>
       <select
         value={settings.fallback_handoff_user_id ?? ''}

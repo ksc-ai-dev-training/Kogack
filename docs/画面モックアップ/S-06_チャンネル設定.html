@@ -596,11 +596,26 @@
 
       <!-- 業務と対応範囲（旧「スキル」「自動対応範囲」を画面上だけ統合、2026-09-29） -->
       <div class="tab-panel" id="panel-skills">
-        <p class="panel-lede">依頼の種類ごとにAIが対応するか人に回すかを決め（①）、AIが対応する業務の進め方を登録します（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。</p>
+        <p class="panel-lede">AIが対応する業務の進め方を登録し（①）、依頼の種類ごとにAIが対応するか人に回すかを決めます（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。</p>
 
         <div class="field-group">
-          <label class="field-label">① 人に回す依頼</label>
-          <div class="field-hint" style="margin:0 0 10px;">依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。②に手順を登録した業務でも、ここで「人が対応」にすると人に回します。</div>
+          <label class="field-label">① AIが対応する業務の手順（スキル）</label>
+          <div class="field-hint" style="margin:0 0 10px;">「依頼を受けたらこう進める」手順を登録します（F-12）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。</div>
+        <div class="skill-card">
+          <div class="skill-head"><span class="skill-title">デプロイ手順の案内</span><button class="skill-del" type="button">削除</button></div>
+          <textarea rows="3">デプロイ方法に関する質問を受けたら、まずデプロイ手順書.mdを参照し、ステージング検証→バックアップ→本番反映の順で案内する。手順書に無い内容は「担当者に確認してください」と回答する。</textarea>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span class="skill-title">座席予約状況の確認</span><button class="skill-del" type="button">削除</button></div>
+          <textarea rows="3">会議室・座席の空き状況を聞かれたら、座席予約システムを参照し、日時・エリアを確認したうえで空き状況を表形式で回答する。</textarea>
+        </div>
+        <button class="add-skill-btn" type="button">＋ スキルを追加</button>
+
+        </div>
+
+        <div class="field-group" style="margin-top:26px;">
+          <label class="field-label">② 人に回す依頼</label>
+          <div class="field-hint" style="margin:0 0 10px;">依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。①に手順を登録した業務でも、ここで「人が対応」にすると人に回します。</div>
         <table class="auto-table">
           <thead><tr><th>依頼の種類</th><th>対応区分</th></tr></thead>
           <tbody>
@@ -633,23 +648,8 @@
         </div>
 
         <div class="field-group" style="margin-top:26px;">
-          <label class="field-label">② AIが対応する業務の手順（スキル）</label>
-          <div class="field-hint" style="margin:0 0 10px;">「依頼を受けたらこう進める」手順を登録します（F-12）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。</div>
-        <div class="skill-card">
-          <div class="skill-head"><span class="skill-title">デプロイ手順の案内</span><button class="skill-del" type="button">削除</button></div>
-          <textarea rows="3">デプロイ方法に関する質問を受けたら、まずデプロイ手順書.mdを参照し、ステージング検証→バックアップ→本番反映の順で案内する。手順書に無い内容は「担当者に確認してください」と回答する。</textarea>
-        </div>
-        <div class="skill-card">
-          <div class="skill-head"><span class="skill-title">座席予約状況の確認</span><button class="skill-del" type="button">削除</button></div>
-          <textarea rows="3">会議室・座席の空き状況を聞かれたら、座席予約システムを参照し、日時・エリアを確認したうえで空き状況を表形式で回答する。</textarea>
-        </div>
-        <button class="add-skill-btn" type="button">＋ スキルを追加</button>
-
-        </div>
-
-        <div class="field-group" style="margin-top:26px;">
           <label class="field-label">③ 引き継ぎ先</label>
-          <div class="field-hint" style="margin:0 0 10px;">①で「人が対応」にした依頼と、②のどのスキルにも当てはまらない業務依頼が来たとき、誰に引き継ぐかを設定します（F-17）。</div>
+          <div class="field-hint" style="margin:0 0 10px;">②で「人が対応」にした依頼と、①のどのスキルにも当てはまらない業務依頼が来たとき、誰に引き継ぐかを設定します（F-17）。</div>
 
           <div class="radio-card selected">
             <div class="radio-dot"></div>
@@ -712,7 +712,7 @@
     <span style="color:#fbbf24;">1.15版で改称:</span> 画面名を「チャンネルAI設定」から「チャンネル設定」に変更した。チャンネル管理者・定期投稿・自動応答トリガーとAI設定以外の項目が増え、旧名称が実態と合わなくなったため。画面ID・ファイル名は変更していない。要件定義書・基本設計書にも反映済み。<br>
     <span style="color:#fbbf24;">1.16版で改名:</span> モックアップのファイル名も<code>S-06_チャンネルAI設定.html</code>から<code>S-06_チャンネル設定.html</code>に変更した。参照している全ファイル（一覧・S-03・補足03・補足06）のリンクを更新済み。<br>
     <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル管理者」タブにチャンネル名・説明文の編集欄と、チャンネルを完全に削除する操作（危険な操作。削除対象のチャンネル名を再入力して初めて「削除する」ボタンが有効になる）を追加した。要件定義書F-02・権限マトリクスに反映済み（チャンネル名・説明文の編集は今回新規、削除自体は基本設計書に以前から記載されていたが未実装だった）。<br>
-    <span style="color:#fbbf24;" class="diff-new">1.20版で統合:</span> <span class="diff-new">「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（2026-09-29、ユーザーからの要望）。上から「① 人に回す依頼」（旧・自動対応範囲、F-16）・「② AIが対応する業務の手順」（旧・スキル、F-12）・「③ 引き継ぎ先」（F-17）の順に並べる。DB・API・機能は別々のまま。実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」は選択肢から外し、「自動対応可」は「AIが対応」に言い換えた。基本設計書4.8節に反映済み。</span>
+    <span style="color:#fbbf24;" class="diff-new">1.20版で統合:</span> <span class="diff-new">「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（2026-09-29、ユーザーからの要望）。上から「① AIが対応する業務の手順」（旧・スキル、F-12）・「② 人に回す依頼」（旧・自動対応範囲、F-16）・「③ 引き継ぎ先」（F-17）の順に並べる（AIが何をするかを先に見せるため手順を先頭にした）。DB・API・機能は別々のまま。実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」は選択肢から外し、「自動対応可」は「AIが対応」に言い換えた。基本設計書4.8節に反映済み。</span>
   </div>
 
 <script>
