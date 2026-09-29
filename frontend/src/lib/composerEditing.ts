@@ -1130,10 +1130,19 @@ const RAW_BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g
 const RAW_ITALIC_REGEX = /_([\s\S]+?)_/g
 const RAW_UNDERLINE_REGEX = /\+\+([\s\S]+?)\+\+/g
 const RAW_STRIKE_REGEX = /~~([\s\S]+?)~~/g
+// 「*太字*」（アスタリスク1個ずつ、Slackと同じ）も太字として受け付ける（ユーザーからの要望
+// 「*が一個ずつで太字になるようにしてほしい」）。入力欄の中で太字の実要素に変換するだけで、送信する
+// 本文は太字要素からdomToMarkdownが作るため従来どおり「**太字**」になる（受信側の表示は変更不要）。
+// 「**太字**」を1文字ずつ打っている途中（「**太字*」の時点）で内側の「*太字*」を誤って拾わないよう、
+// 前後に別の「*」が隣接する「*」は対象外にする。「* 」のように直後が空白、閉じ側の直前が空白の
+// 場合も対象外（「2 * 3 * 4」のような計算式を太字にしないため。Slackと同じ規則）。
+const RAW_SINGLE_STAR_BOLD_REGEX = /(?<!\*)\*(?![*\s])([^*\n]+?)(?<![*\s])\*(?!\*)/g
 
 interface LiveMatch {
   start: number
   end: number
+  /** 開き・閉じ記号の文字数。省略時はTOGGLE_FORMAT_MARKERS[kind]の長さ（「*太字*」だけ1）。 */
+  markerLength?: number
   priority: number
   // 'codeblock'（```` ``` ````、複数行）はToggleFormatKindに含めない別カテゴリ（本ファイル前方の
   // ToggleFormatKindコメント参照）。collectRawMarkdownMatchesの重なり判定にのみ使い、返り値からは
@@ -1196,6 +1205,10 @@ function collectRawMarkdownMatches(text: string): LiveMatch[] {
   for (const m of text.matchAll(RAW_BOLD_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'bold' })
+  }
+  for (const m of text.matchAll(RAW_SINGLE_STAR_BOLD_REGEX)) {
+    const start = m.index ?? 0
+    candidates.push({ start, end: start + m[0].length, markerLength: 1, priority: 1, kind: 'bold' })
   }
   for (const m of text.matchAll(RAW_ITALIC_REGEX)) {
     const start = m.index ?? 0
@@ -2443,11 +2456,16 @@ export function syncLiveFormatting(root: HTMLElement): ToggleFormatKind[] {
   // カーソル（選択なし）がちょうど閉じ記号の直後にある＝今まさに閉じ記号を打ち終えたマッチ
   const closedAtCaret =
     !!preserved && !hasRange && rawMatches.some((m) => m.kind !== 'codeblock' && m.end === preserved.start)
+  // カーソルがマッチの内側にある＝先に打った「****」の間へ文字を入れた場合（ユーザーからの報告
+  // 「**の間に文字を入れても太字にならない」）。変換後のカーソルは書式の内側に残るので、その書式を返す
+  const caretInsideMatch =
+    !!preserved && !hasRange && !closedAtCaret &&
+    rawMatches.some((m) => m.kind !== 'codeblock' && preserved.start > m.start && preserved.start < m.end)
 
   if (useMarkerBasedRestore && preserved) {
     const snap = (x: number): number => {
       for (const m of rawMatches) {
-        const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[m.kind as ToggleFormatKind]
+        const { prefix, suffix } = rawMatchMarkers(m)
         if (x > m.start && x < m.start + prefix.length) return m.start + prefix.length
         if (x > m.end - suffix.length && x < m.end) return m.end - suffix.length
       }
@@ -2527,7 +2545,116 @@ export function syncLiveFormatting(root: HTMLElement): ToggleFormatKind[] {
     }
     setSelectionOffsets(root, shift(preserved.start), shift(preserved.end))
   }
-  return closedAtCaret ? enterJustClosedFormat() : []
+  if (closedAtCaret) return enterJustClosedFormat()
+  if (caretInsideMatch) return formatsAtCaretInsideElement()
+  return []
+}
+
+/** カーソル（選択なし）の直前の文字が太字等の実要素の最後の文字である場合（＝太字の文字の
+ * すぐ後にカーソルがある場合）に、その文字を包む書式を外側→内側の順で返し、カーソルを最も内側の
+ * 要素の中の末尾へ移す（続けて入力した文字も同じ書式になるように）。それ以外（書式の途中・書式の
+ * 無い文字の後・行頭・書式を解除した直後の退出点の後）は空配列を返し、カーソルは動かさない。
+ * Composer.tsxがselectionchangeのたびに呼び、戻り値をactiveFormats（ボタンの押下状態）にする
+ * （ユーザーからの要望「太字の文字のすぐ後にカーソルがある場合には、太字ボタンが選択されている
+ * 状態にしてほしい」）。moveCaret=falseならカーソルは動かさない（IMEで変換中の場合）。 */
+export function getFormatsEndingAtCaret(root: HTMLElement, moveCaret: boolean): ToggleFormatKind[] {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return []
+  const range = sel.getRangeAt(0)
+  if (!range.collapsed || !root.contains(range.startContainer)) return []
+  const container = range.startContainer
+  const offset = range.startOffset
+
+  // カーソル直前の文字を持つテキストノードを探す
+  let charNode: Text | null = null
+  if (container.nodeType === Node.TEXT_NODE && offset > 0) {
+    const t = container as Text
+    // 書式の途中（直前の文字の後ろにまだ同じノードの文字が続く）は対象外。ただし続くのが
+    // 退出点等のCARET_MARKERだけなら末尾とみなす
+    if (stripCaretMarker(t.data.slice(offset)) !== '') return []
+    charNode = t
+  } else {
+    let before: Node | null
+    if (container.nodeType === Node.TEXT_NODE) {
+      let n: Node = container
+      while (!n.previousSibling && n.parentNode && n.parentNode !== root) {
+        // 書式の要素の先頭にいる場合だけ外へ出て手前を見る（引用・箇条書き等のブロックの先頭＝行頭では見ない）
+        if (!(n.parentNode as HTMLElement).hasAttribute?.(TOGGLE_FORMAT_ELEMENT_ATTR)) return []
+        n = n.parentNode
+      }
+      before = n.previousSibling
+    } else {
+      before = container.childNodes[offset - 1] ?? null
+    }
+    // 手前の書式の要素の中を末尾まで辿る
+    while (before?.nodeType === Node.ELEMENT_NODE && (before as HTMLElement).hasAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)) {
+      before = before.lastChild
+    }
+    if (before?.nodeType !== Node.TEXT_NODE) return []
+    charNode = before as Text
+  }
+  const visible = stripCaretMarker(charNode.data)
+  // 直前が退出点のCARET_MARKERだけ（書式ボタンで解除した直後）なら対象外
+  if (visible === '' || (charNode === container && charNode.data[offset - 1] === CARET_MARKER)) return []
+
+  // 直前の文字を包む書式の要素（外側→内側）。最も内側の要素の最後の文字でなければ対象外
+  const kinds: ToggleFormatKind[] = []
+  let innermost: HTMLElement | null = null
+  let el: HTMLElement | null = charNode.parentElement
+  while (el && el !== root) {
+    const kind = el.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)
+    if (kind) {
+      kinds.unshift(kind as ToggleFormatKind)
+      if (!innermost) innermost = el
+    }
+    el = el.parentElement
+  }
+  if (!innermost) return []
+  let n: Node = charNode
+  while (n !== innermost) {
+    let next = n.nextSibling
+    while (next && next.nodeType === Node.TEXT_NODE && stripCaretMarker((next as Text).data) === '') next = next.nextSibling
+    if (next) return []
+    n = n.parentNode as Node
+  }
+
+  if (moveCaret && (range.startContainer !== charNode || range.startOffset !== charNode.length)) {
+    const caret = document.createRange()
+    caret.setStart(charNode, charNode.length)
+    caret.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(caret)
+  }
+  return kinds
+}
+
+/** カーソルが書式の実要素の内側にある場合に、その書式を外側→内側の順で返す。restoreSelectionFromMarkers
+ * が置いた退出点用のCARET_MARKERがカーソルの直前にあれば取り除く（要素の内側では退出点は不要で、
+ * 残すと見えない1文字が書式の中に入ったままになるため）。 */
+function formatsAtCaretInsideElement(): ToggleFormatKind[] {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return []
+  const range = sel.getRangeAt(0)
+  let node: Node = range.startContainer
+  let offset = range.startOffset
+  if (node.nodeType === Node.TEXT_NODE && offset > 0 && (node as Text).data[offset - 1] === CARET_MARKER && (node as Text).length > 1) {
+    ;(node as Text).deleteData(offset - 1, 1)
+    offset -= 1
+    const caret = document.createRange()
+    caret.setStart(node, offset)
+    caret.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(caret)
+  }
+  // 入力欄（contenteditable="true"のroot）に着くまで親を辿り、書式の実要素を外側→内側の順に集める
+  const kinds: ToggleFormatKind[] = []
+  let el: HTMLElement | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement)
+  while (el && el.getAttribute('contenteditable') !== 'true') {
+    const kind = el.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)
+    if (kind) kinds.unshift(kind as ToggleFormatKind)
+    el = el.parentElement
+  }
+  return kinds
 }
 
 /** restoreSelectionFromMarkersがカーソルを「閉じたばかりの実要素の直後（CARET_MARKERの直後）」に
@@ -2550,7 +2677,7 @@ function enterJustClosedFormat(): ToggleFormatKind[] {
   const before = prev.previousSibling
   if (
     before?.nodeType === Node.TEXT_NODE &&
-    Object.values(TOGGLE_FORMAT_MARKERS).some(({ prefix }) => (before as Text).data.endsWith(prefix))
+    [...Object.values(TOGGLE_FORMAT_MARKERS).map(({ prefix }) => prefix), '*'].some((prefix) => (before as Text).data.endsWith(prefix))
   ) {
     return []
   }
@@ -2842,6 +2969,13 @@ export function toggleFormatOnSelectionDom(
   return { selectionStart: start, selectionEnd: end }
 }
 
+/** 生Markdownマッチの開き・閉じ記号（「*太字*」だけは1文字ずつ、LiveMatch.markerLength参照）。 */
+function rawMatchMarkers(match: LiveMatch): { prefix: string; suffix: string } {
+  const markers = TOGGLE_FORMAT_MARKERS[match.kind as ToggleFormatKind]
+  if (match.markerLength === undefined) return markers
+  return { prefix: markers.prefix.slice(0, match.markerLength), suffix: markers.suffix.slice(0, match.markerLength) }
+}
+
 /** 1件の生Markdownマッチ（開始・終了記号を含む範囲）を破壊的に処理する: 記号を取り除き、
  * 残りを（入れ子の生Markdownも再帰的に処理して）実要素でラップする。異常構造の場合は部分
  * 破壊を避け、切り出した内容をそのまま戻す（consumeRawMarkdownSyntaxのみから使う）。 */
@@ -2855,7 +2989,7 @@ function consumeOneRawMatch(root: Node, match: LiveMatch): void {
   range.setEnd(endPos.node, endPos.offset)
   const fragment = range.extractContents()
 
-  const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
+  const { prefix, suffix } = rawMatchMarkers(match)
   // extractHiddenMarkerは本来「隠しマーカーspanを作る」関数だが、ここでは返り値のspanは
   // 捨てて「記号の文字を確実に切り落とす」副作用だけを再利用する（引用側の隠しマーカー
   // 方式とは異なり、この経路では記号を隠すのではなく消し去るため）。

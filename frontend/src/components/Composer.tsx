@@ -32,10 +32,10 @@ import {
   wrapRangeAsCodeBlock,
   toggleFormatAtCursorDom,
   toggleFormatOnSelectionDom,
-  isCursorInsideActiveFormats,
   getBlockFormatAt,
   getCodeBlockElementAtSelection,
   getBlockFormatKindAtSelection,
+  getFormatsEndingAtCaret,
   getInlineCodeElementAt,
   convertLinesToListItems,
   convertLinesToQuote,
@@ -304,6 +304,8 @@ export default function Composer({
   // 書式。カーソル位置に対する見た目上のヒントに過ぎず（詳細はcomposerEditing.tsの冒頭コメント
   // 参照）、テキスト自体は常にその場で完全なMarkdownとして存在する。
   const [activeFormats, setActiveFormats] = useState<ToggleFormatKind[]>([])
+  // IMEで変換中かどうか（selectionchangeでカーソルを動かさないようにするため）
+  const composingRef = useRef(false)
   // pendingFormats＝ボタンは押されているが、まだ1文字も入力されていないため本文には一切
   // 挿入していない書式（ユーザーからの報告「記法のボタン押すと一文字分見えない何かが入力される
   // のやめてほしい」への対応）。以前はボタンを押した瞬間に空の開始・終了マーカー対を即座に本文へ
@@ -516,9 +518,8 @@ export default function Composer({
     setPendingFormats([])
   }
 
-  // 書式トグルボタンの押下状態（activeFormats）は、カーソルが現在の書式の終端マーカー列の
-  // 直前から外れた時点でボタンの見た目だけを元に戻す（テキストは一切変更しない。詳細は
-  // composerEditing.tsのisCursorInsideActiveFormatsのコメント参照）。documentレベルの
+  // 書式トグルボタンの押下状態（activeFormats）は、カーソルが動くたびに「カーソルの直前の文字が
+  // 太字等の最後の文字かどうか」から求め直す（getFormatsEndingAtCaret）。documentレベルの
   // selectionchangeを監視し、選択範囲がこのエディタ内・かつ折りたたまれている（選択範囲が
   // 無くカーソルのみ）ときだけ判定する。関数型のsetState（prev）を使うことでactiveFormats
   // 自体をこの効果の依存配列に含める必要を無くしている（購読の再登録を避けるため）。
@@ -533,12 +534,14 @@ export default function Composer({
       // ブロック書式の押下表示は選択範囲があっても開始位置で判定する
       setActiveBlock(getBlockFormatKindAtSelection(root))
       if (!range.collapsed) return
-      setActiveFormats((prev) => {
-        if (prev.length === 0) return prev
-        const cursor = getSelectionOffsets(root)?.start
-        if (cursor === undefined) return prev
-        return isCursorInsideActiveFormats(root, cursor, prev) ? prev : []
-      })
+      // IMEで変換中はカーソルを動かさない・押下状態も変えない（変換が壊れるのを防ぐ）
+      if (composingRef.current) return
+      // 太字等の文字のすぐ後にカーソルがあればそのボタンを押された状態にし、カーソルを書式の内側の
+      // 末尾へ移す（ユーザーからの要望「太字の文字のすぐ後にカーソルがある場合には、太字ボタンが
+      // 選択されている状態にしてほしい」、composerEditing.tsのgetFormatsEndingAtCaret参照）。
+      // それ以外の位置ではボタンを戻す（以前の「書式の外へ出たら戻す」判定もこれに含まれる）。
+      const kinds = getFormatsEndingAtCaret(root, true)
+      setActiveFormats((prev) => (prev.length === kinds.length && prev.every((k, i) => k === kinds[i]) ? prev : kinds))
     }
     document.addEventListener('selectionchange', onSelectionChange)
     return () => document.removeEventListener('selectionchange', onSelectionChange)
@@ -600,6 +603,7 @@ export default function Composer({
   }
 
   const handleCompositionEnd = () => {
+    composingRef.current = false
     const root = editorRef.current
     if (!root) return
     removeCaretMarkerFromDom(root)
@@ -1921,6 +1925,9 @@ export default function Composer({
         aria-label={placeholder}
         data-placeholder={placeholder}
         onInput={handleInput}
+        onCompositionStart={() => {
+          composingRef.current = true
+        }}
         onCompositionEnd={handleCompositionEnd}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
