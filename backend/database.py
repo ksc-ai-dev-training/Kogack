@@ -686,6 +686,35 @@ CREATE TABLE IF NOT EXISTS channel_auto_response_rules (
 );
 ALTER TABLE channel_auto_response_rules ENABLE ROW LEVEL SECURITY;
 
+-- 2026-09-29 スキル（F-12）と自動対応範囲（F-16）の再設計（ユーザーとの合意。要件定義書F-16改訂）。
+-- 要求仕様書REQ-F-11「能力（何ができるか）を定義する」とREQ-F-15「何をAIに任せるかを決める」を
+-- 「スキル＝AIに任せる業務」として1本化し、区分は「スキル（そのまま対応）／スキル（確認してから対応）／
+-- 人に任せる依頼」の3つにした。自動対応可・確認のうえ対応はスキル側の区分（T-11.response_level）へ移り、
+-- T-12は「人に任せる依頼」（response_level='human'）だけを持つ。
+-- 移行は冪等: (1)同名スキルが既にあれば区分だけ引き継ぐ（確認のうえ対応の場合のみ）、(2)無ければ
+-- 進め方の指定が無いスキルとして作る、(3)移したT-12行を消す。2回目以降は(3)により対象0件になる。
+-- 最後にT-12のCHECK制約を'human'のみへ狭める（全行が満たした後なので毎起動の再追加も安全）
+ALTER TABLE channel_skills ADD COLUMN IF NOT EXISTS response_level TEXT NOT NULL DEFAULT 'auto'
+    CHECK (response_level IN ('auto', 'confirm'));
+UPDATE channel_skills s SET response_level = 'confirm', updated_at = now()
+    FROM channel_auto_response_rules r
+    WHERE r.channel_id = s.channel_id AND r.request_category = s.title
+      AND r.response_level = 'confirm' AND s.response_level <> 'confirm';
+INSERT INTO channel_skills (channel_id, title, instructions, response_level)
+    SELECT r.channel_id, r.request_category,
+           'この種類の依頼にはAIが対応してよい（旧「自動対応範囲」の設定から移行。進め方の指定は無いため、'
+           || '参照ドキュメントや会話の内容をもとに対応する）',
+           r.response_level
+    FROM channel_auto_response_rules r
+    WHERE r.response_level IN ('auto', 'confirm')
+      AND NOT EXISTS (
+        SELECT 1 FROM channel_skills s WHERE s.channel_id = r.channel_id AND s.title = r.request_category
+      );
+DELETE FROM channel_auto_response_rules WHERE response_level IN ('auto', 'confirm');
+ALTER TABLE channel_auto_response_rules DROP CONSTRAINT IF EXISTS channel_auto_response_rules_response_level_check;
+ALTER TABLE channel_auto_response_rules ADD CONSTRAINT channel_auto_response_rules_response_level_check
+    CHECK (response_level = 'human');
+
 -- T-23 google_drive_tokens: 層2ドキュメントQ&A（F-19〜F-22）向け、利用者ごとのGoogle Drive
 -- アクセストークン保存先（05-1_詳細設計書_DB設計.html 3.23節）。access_tokenは短命（通常1時間）
 -- なため、refresh_tokenを使って必要な時にサーバー側で更新する（google_auth.pyのrefresh_access_token

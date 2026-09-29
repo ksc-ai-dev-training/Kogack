@@ -594,62 +594,46 @@
         </div>
       </div>
 
-      <!-- 業務と対応範囲（旧「スキル」「自動対応範囲」を画面上だけ統合、2026-09-29） -->
+      <!-- 業務と対応範囲（旧「スキル」「自動対応範囲」を統合し、スキル＝AIに任せる業務として再設計、2026-09-29） -->
       <div class="tab-panel" id="panel-skills">
-        <p class="panel-lede">AIが対応する業務の進め方を登録し（①）、依頼の種類ごとにAIが対応するか人に回すかを決めます（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。</p>
+        <p class="panel-lede">AIに任せる業務をスキルとして登録し（①）、AIに答えさせず人に任せる依頼を決めます（②）。どちらにも当てはまらない業務依頼や②の依頼は、③の引き継ぎ先へ相談するようAIが案内します。</p>
 
         <div class="field-group">
-          <label class="field-label">① AIが対応する業務の手順（スキル）</label>
-          <div class="field-hint" style="margin:0 0 10px;">「依頼を受けたらこう進める」手順を登録します（F-12）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。</div>
+          <label class="field-label">① AIに任せる業務（スキル）</label>
+          <div class="field-hint" style="margin:0 0 10px;">AIに任せる業務と、「依頼を受けたらこう進める」手順を登録します（F-12）。業務ごとに、そのまま対応するか、依頼者に確認してから対応するかを選べます（F-16）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。</div>
         <div class="skill-card">
-          <div class="skill-head"><span class="skill-title">デプロイ手順の案内</span><button class="skill-del" type="button">削除</button></div>
+          <div class="skill-head"><span class="skill-title">デプロイ手順の案内</span><span class="pill on-ok">そのまま対応</span><button class="skill-del" type="button">削除</button></div>
           <textarea rows="3">デプロイ方法に関する質問を受けたら、まずデプロイ手順書.mdを参照し、ステージング検証→バックアップ→本番反映の順で案内する。手順書に無い内容は「担当者に確認してください」と回答する。</textarea>
         </div>
         <div class="skill-card">
-          <div class="skill-head"><span class="skill-title">座席予約状況の確認</span><button class="skill-del" type="button">削除</button></div>
+          <div class="skill-head"><span class="skill-title">座席予約状況の確認</span><span class="pill on-ok">そのまま対応</span><button class="skill-del" type="button">削除</button></div>
           <textarea rows="3">会議室・座席の空き状況を聞かれたら、座席予約システムを参照し、日時・エリアを確認したうえで空き状況を表形式で回答する。</textarea>
         </div>
+        <div class="skill-card">
+          <div class="skill-head"><span class="skill-title">経費精算の申請代行</span><span class="pill on-warn">確認してから対応</span><button class="skill-del" type="button">削除</button></div>
+          <textarea rows="3">経費精算の申請を頼まれたら、日付・金額・用途・領収書の有無を聞き取り、申請フォームの記入内容をまとめて提示する。</textarea>
+        </div>
+        <div class="field-hint" style="margin:0 0 10px;">「確認してから対応」のスキルでは、AIはこれから行う内容を依頼者に示し、同意を得てから手順どおりに進めます。</div>
         <button class="add-skill-btn" type="button">＋ スキルを追加</button>
 
         </div>
 
         <div class="field-group" style="margin-top:26px;">
-          <label class="field-label">② 人に回す依頼</label>
-          <div class="field-hint" style="margin:0 0 10px;">依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。①に手順を登録した業務でも、ここで「人が対応」にすると人に回します。</div>
+          <label class="field-label">② 人に任せる依頼</label>
+          <div class="field-hint" style="margin:0 0 10px;">ここに登録した種類の依頼には、AIは自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。社内ドキュメントを見ればAIが答えられてしまう話題（個別の給与相談など）を、人に任せたいときに使います。</div>
         <table class="auto-table">
-          <thead><tr><th>依頼の種類</th><th>対応区分</th></tr></thead>
+          <thead><tr><th>依頼の種類</th></tr></thead>
           <tbody>
-            <tr>
-              <td>座席予約状況の確認</td>
-              <td class="pill-group"><span class="pill on-ok">AIが対応</span><span class="pill">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>ドキュメント検索・引用</td>
-              <td class="pill-group"><span class="pill on-ok">AIが対応</span><span class="pill">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>やりとりの要約</td>
-              <td class="pill-group"><span class="pill on-ok">AIが対応</span><span class="pill">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>経費精算に関する相談</td>
-              <td class="pill-group"><span class="pill">AIが対応</span><span class="pill on-human">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>契約書フォーマットの相談</td>
-              <td class="pill-group"><span class="pill">AIが対応</span><span class="pill on-human">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>本番デプロイの実行代行</td>
-              <td class="pill-group"><span class="pill">AIが対応</span><span class="pill on-human">人が対応</span></td>
-            </tr>
+            <tr><td>給与・人事評価の個別相談</td></tr>
+            <tr><td>契約書フォーマットの相談</td></tr>
+            <tr><td>本番デプロイの実行代行</td></tr>
           </tbody>
         </table>
         </div>
 
         <div class="field-group" style="margin-top:26px;">
           <label class="field-label">③ 引き継ぎ先</label>
-          <div class="field-hint" style="margin:0 0 10px;">②で「人が対応」にした依頼と、①のどのスキルにも当てはまらない業務依頼が来たとき、誰に引き継ぐかを設定します（F-17）。</div>
+          <div class="field-hint" style="margin:0 0 10px;">②の人に任せる依頼と、①のどのスキルにも当てはまらない業務依頼が来たとき、誰に引き継ぐかを設定します（F-17）。</div>
 
           <div class="radio-card selected">
             <div class="radio-dot"></div>
@@ -712,7 +696,8 @@
     <span style="color:#fbbf24;">1.15版で改称:</span> 画面名を「チャンネルAI設定」から「チャンネル設定」に変更した。チャンネル管理者・定期投稿・自動応答トリガーとAI設定以外の項目が増え、旧名称が実態と合わなくなったため。画面ID・ファイル名は変更していない。要件定義書・基本設計書にも反映済み。<br>
     <span style="color:#fbbf24;">1.16版で改名:</span> モックアップのファイル名も<code>S-06_チャンネルAI設定.html</code>から<code>S-06_チャンネル設定.html</code>に変更した。参照している全ファイル（一覧・S-03・補足03・補足06）のリンクを更新済み。<br>
     <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル管理者」タブにチャンネル名・説明文の編集欄と、チャンネルを完全に削除する操作（危険な操作。削除対象のチャンネル名を再入力して初めて「削除する」ボタンが有効になる）を追加した。要件定義書F-02・権限マトリクスに反映済み（チャンネル名・説明文の編集は今回新規、削除自体は基本設計書に以前から記載されていたが未実装だった）。<br>
-    <span style="color:#fbbf24;" class="diff-new">1.20版で統合:</span> <span class="diff-new">「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（2026-09-29、ユーザーからの要望）。上から「① AIが対応する業務の手順」（旧・スキル、F-12）・「② 人に回す依頼」（旧・自動対応範囲、F-16）・「③ 引き継ぎ先」（F-17）の順に並べる（AIが何をするかを先に見せるため手順を先頭にした）。DB・API・機能は別々のまま。実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」は選択肢から外し、「自動対応可」は「AIが対応」に言い換えた。基本設計書4.8節に反映済み。</span>
+    <span style="color:#fbbf24;" class="diff-new">1.20版で統合:</span> <span class="diff-new">「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（2026-09-29、ユーザーからの要望）。上から「① AIが対応する業務の手順」（旧・スキル、F-12）・「② 人に回す依頼」（旧・自動対応範囲、F-16）・「③ 引き継ぎ先」（F-17）の順に並べる（AIが何をするかを先に見せるため手順を先頭にした）。DB・API・機能は別々のまま。実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」は選択肢から外し、「自動対応可」は「AIが対応」に言い換えた。基本設計書4.8節に反映済み。</span><br>
+    <span style="color:#fbbf24;" class="diff-new">1.21版で再設計:</span> <span class="diff-new">要求仕様書REQ-F-11・REQ-F-15を踏まえ、スキルを「AIに任せる業務」と位置づけ直した（2026-09-29、要件定義書F-16改訂）。①「AIに任せる業務（スキル）」はスキルごとに「そのまま対応／確認してから対応」を選び、②「人に任せる依頼」は区分の選択が無い一覧にした。旧・自動対応範囲の「自動対応可」「確認のうえ対応」の行はスキルへ移行する。基本設計書4.8節に反映済み。</span>
   </div>
 
 <script>

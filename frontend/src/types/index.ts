@@ -93,7 +93,8 @@ export interface AiSettings {
  * 自由に追加・削除できる（固定候補ではない） */
 export interface AutoResponseRule {
   request_category: string
-  response_level: 'auto' | 'confirm' | 'human'
+  /** 2026-09-29の再設計で「人に任せる依頼」だけを持つようになった（AIに任せる業務はSkill側） */
+  response_level: 'human'
 }
 
 /** T-11 channel_skills（A-28〜A-30, F-12） */
@@ -101,6 +102,8 @@ export interface Skill {
   id: string
   title: string
   instructions: string
+  /** 対応区分（2026-09-29の再設計、F-16）。auto=そのまま対応、confirm=確認してから対応 */
+  response_level: 'auto' | 'confirm'
 }
 
 export interface ChannelMember {

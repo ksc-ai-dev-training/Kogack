@@ -1203,23 +1203,24 @@ function MentionReminderSection({
   )
 }
 
-const AUTO_RESPONSE_LEVELS: { value: AutoResponseRule['response_level']; label: string }[] = [
-  { value: 'auto', label: 'AIが対応' },
-  { value: 'confirm', label: '確認のうえ対応' },
-  { value: 'human', label: '人が対応' },
+// スキルの対応区分（A-28/A-29のresponse_level、2026-09-29の再設計）。「人が対応」はスキルではなく
+// ②人に任せる依頼（A-31）の側で扱う。確認してから対応は、社内システムへの書き込み（F-24）・
+// 実行前確認ダイアログ（F-25）ができるまでは、AIがチャット上で依頼者に確認してから進める
+// （backend/services/ai_agent.py _build_skills_section）
+const SKILL_LEVELS: { value: Skill['response_level']; title: string; sub: string }[] = [
+  { value: 'auto', title: 'そのまま対応', sub: '依頼を受けたら、AIが手順どおりに進めます。' },
+  {
+    value: 'confirm',
+    title: '確認してから対応',
+    sub: 'AIがこれから行う内容を依頼者に示し、同意を得てから手順どおりに進めます。',
+  },
 ]
 
-// 「確認のうえ対応」は実行前確認（F-25）が未実装で「AIが対応」と同じ動きしかしないため、選択肢には
-// 出さない（2026-09-29、ユーザーとの合意）。既にこの区分になっている行だけは、データを失わないよう
-// その行に限って表示を残す。F-25を実装したらこの絞り込みを外す
-const visibleLevels = (current: AutoResponseRule['response_level']) =>
-  AUTO_RESPONSE_LEVELS.filter((lv) => lv.value !== 'confirm' || current === 'confirm')
-
 // 「業務と対応範囲」タブ（2026-09-29、ユーザーからの要望で旧「スキル」タブと旧「自動対応範囲」タブを
-// 画面上だけ1つにまとめた。DB（T-11/T-12）・API（A-28〜A-31・A-45）は別々のまま）。どちらも
-// 「この種類の依頼が来たらAIはどうするか」を決める設定で、引き継ぎ先も両方から使われるため、
-// ①AIが対応する業務の手順 ②人に回す依頼 ③引き継ぎ先 の順に1画面で見渡せるようにする（当初は
-// ①②が逆だったが、AIが何をするかを先に見せたいというユーザーの要望で同日入れ替えた）。
+// 1つにまとめた）。同日、要求仕様書REQ-F-11（スキル＝AIの能力）・REQ-F-15（何をAIに任せるか）に
+// 沿って「スキル＝AIに任せる業務」に1本化する再設計を行い、区分を「スキル（そのまま対応）／スキル
+// （確認してから対応）／人に任せる依頼」の3つにした（要件定義書F-16改訂、基本設計書4.8節）。
+// ①AIに任せる業務（スキル、A-28〜A-30） ②人に任せる依頼（A-31） ③引き継ぎ先（A-45）の順に並べる。
 // 旧URL（?tab=skills・?tab=auto）はどちらもこのタブを開く
 function TasksTab({
   channelId,
@@ -1233,12 +1234,12 @@ function TasksTab({
   return (
     <div className="max-w-[700px]">
       <p className="mb-6 text-[12.5px] leading-relaxed text-ink-muted">
-        AIが対応する業務の進め方を登録し（①）、依頼の種類ごとにAIが対応するか人に回すかを決めます（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。
+        AIに任せる業務をスキルとして登録し（①）、AIに答えさせず人に任せる依頼を決めます（②）。どちらにも当てはまらない業務依頼や②の依頼は、③の引き継ぎ先へ相談するようAIが案内します。
       </p>
-      <SectionHeading no="①" title="AIが対応する業務の手順（スキル）" />
+      <SectionHeading no="①" title="AIに任せる業務（スキル）" />
       <SkillsSection channelId={channelId} settings={settings} mutate={mutate} />
       <div className="mt-10" />
-      <SectionHeading no="②" title="人に回す依頼" />
+      <SectionHeading no="②" title="人に任せる依頼" />
       <AutoResponseSection channelId={channelId} settings={settings} mutate={mutate} />
       <div className="mt-10" />
       <SectionHeading no="③" title="引き継ぎ先" />
@@ -1255,7 +1256,8 @@ function SectionHeading({ no, title }: { no: string; title: string }) {
   )
 }
 
-// ②人に回す依頼＝旧「自動対応範囲」タブ（A-31、F-16。TasksTabの一部）。
+// ②人に任せる依頼＝旧「自動対応範囲」タブ（A-31、F-16。TasksTabの一部）。2026-09-29の再設計で
+// AIに任せる業務はスキル側へ移ったため、ここは「人が対応」の依頼だけを登録する一覧になった。
 // 「人が対応」区分の判定方法は設計書が規定していない（グレー）ため、
 // ユーザーに確認のうえ、区分一覧をシステムプロンプトに含めてAI自身に判断・引き継ぎさせる方式を
 // 採用した（追加の分類LLM呼び出しはしない。services/ai_agent.py _build_auto_response_sectionを参照）。
@@ -1283,10 +1285,6 @@ function AutoResponseSection({
   const [baseline, setBaseline] = useState(JSON.stringify(settings.auto_response_rules))
   useReportDirty(JSON.stringify(rules) !== baseline)
 
-  const setLevel = (category: string, level: AutoResponseRule['response_level']) => {
-    setRules((prev) => prev.map((r) => (r.request_category === category ? { ...r, response_level: level } : r)))
-  }
-
   const removeRule = (category: string) => {
     setRules((prev) => prev.filter((r) => r.request_category !== category))
     if (editingCategory === category) setEditingCategory(null)
@@ -1299,7 +1297,7 @@ function AutoResponseSection({
       toast('同じ依頼内容が既に登録されています', 'error')
       return
     }
-    setRules((prev) => [...prev, { request_category: trimmed, response_level: 'auto' }])
+    setRules((prev) => [...prev, { request_category: trimmed, response_level: 'human' }])
     setNewCategory('')
   }
 
@@ -1334,7 +1332,7 @@ function AutoResponseSection({
       })
       setBaseline(JSON.stringify(rules))
       await mutate()
-      toast('人に回す依頼を保存しました')
+      toast('人に任せる依頼を保存しました')
     } catch (e) {
       toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
     } finally {
@@ -1342,16 +1340,10 @@ function AutoResponseSection({
     }
   }
 
-  const levelClass = (level: AutoResponseRule['response_level']) => {
-    if (level === 'auto') return 'border-transparent bg-ok-bg text-ok-text'
-    if (level === 'confirm') return 'border-transparent bg-bot-bg text-bot-text'
-    return 'border-danger-border bg-danger-bg text-danger-text'
-  }
-
   return (
     <div>
       <p className="mb-4 text-[12.5px] leading-relaxed text-ink-muted">
-        依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。①に手順を登録した業務でも、ここで「人が対応」にすると人に回します。
+        ここに登録した種類の依頼には、AIは自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。社内ドキュメントを見ればAIが答えられてしまう話題（個別の給与相談など）を、人に任せたいときに使います。
       </p>
 
       {rules.length === 0 ? (
@@ -1362,7 +1354,6 @@ function AutoResponseSection({
             <thead className="bg-surface-subtle text-[11px] text-ink-subtle">
               <tr>
                 <th className="px-3.5 py-2 font-bold">依頼の種類</th>
-                <th className="px-3.5 py-2 font-bold">対応区分</th>
                 <th className="px-3.5 py-2" />
               </tr>
             </thead>
@@ -1387,24 +1378,6 @@ function AutoResponseSection({
                       ) : (
                         r.request_category
                       )}
-                    </td>
-                    <td className="px-3.5 py-2.5">
-                      <div className="flex gap-1.5">
-                        {visibleLevels(r.response_level).map((lv) => (
-                          <button
-                            key={lv.value}
-                            type="button"
-                            onClick={() => setLevel(r.request_category, lv.value)}
-                            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                              r.response_level === lv.value
-                                ? levelClass(lv.value)
-                                : 'border-line-strong text-ink-subtle hover:border-accent-600 hover:text-accent-700'
-                            }`}
-                          >
-                            {lv.label}
-                          </button>
-                        ))}
-                      </div>
                     </td>
                     <td className="px-3.5 py-2.5 text-right">
                       {isEditing ? (
@@ -1458,7 +1431,7 @@ function AutoResponseSection({
           onKeyDown={(e) => {
             if (e.key === 'Enter') addRule()
           }}
-          placeholder="例: 経費精算に関する相談"
+          placeholder="例: 給与・人事評価の個別相談"
           maxLength={100}
           className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
@@ -1492,11 +1465,14 @@ function AutoResponseSection({
 function SkillFormFields({
   title, onTitleChange,
   instructions, onInstructionsChange,
+  responseLevel, onResponseLevelChange,
 }: {
   title: string
   onTitleChange: (v: string) => void
   instructions: string
   onInstructionsChange: (v: string) => void
+  responseLevel: Skill['response_level']
+  onResponseLevelChange: (v: Skill['response_level']) => void
 }) {
   return (
     <>
@@ -1521,11 +1497,26 @@ function SkillFormFields({
           className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
       </div>
+      <div className="mt-3.5">
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">対応のしかた</label>
+        <div className="space-y-2">
+          {SKILL_LEVELS.map((lv) => (
+            <RadioCard
+              key={lv.value}
+              title={lv.title}
+              sub={lv.sub}
+              selected={responseLevel === lv.value}
+              onClick={() => onResponseLevelChange(lv.value)}
+            />
+          ))}
+        </div>
+      </div>
     </>
   )
 }
 
-// ①AIが対応する業務の手順＝旧「スキル」タブ（A-28〜A-30、F-12。TasksTabの一部）。定期投稿・
+// ①AIに任せる業務＝旧「スキル」タブ（A-28〜A-30、F-12・F-16。TasksTabの一部）。スキルごとに
+// 対応区分（そのまま対応／確認してから対応）を持つ（2026-09-29の再設計）。定期投稿・
 // トリガーと同じ「新規作成パネル＋編集モーダル」の構成。引き継ぎ先は①②の両方から使われるため
 // HandoffSection（③）へ分けた
 function SkillsSection({
@@ -1542,6 +1533,7 @@ function SkillsSection({
   const [editingItem, setEditingItem] = useState<Skill | null>(null)
   const [title, setTitle] = useState('')
   const [instructions, setInstructions] = useState('')
+  const [responseLevel, setResponseLevel] = useState<Skill['response_level']>('auto')
   const [saving, setSaving] = useState(false)
 
   const submit = async () => {
@@ -1553,12 +1545,13 @@ function SkillsSection({
     try {
       await apiFetch(`/api/channels/${channelId}/skills`, {
         method: 'POST',
-        body: JSON.stringify({ title: title.trim(), instructions: instructions.trim() }),
+        body: JSON.stringify({ title: title.trim(), instructions: instructions.trim(), response_level: responseLevel }),
       })
       toast('スキルを追加しました')
       await mutate()
       setTitle('')
       setInstructions('')
+      setResponseLevel('auto')
     } catch (e) {
       toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
     } finally {
@@ -1587,14 +1580,23 @@ function SkillsSection({
   return (
     <div>
       <p className="mb-4 text-[12.5px] leading-relaxed text-ink-muted">
-        「依頼を受けたらこう進める」という具体的な手順を登録します（F-12）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。
+        AIに任せる業務と、「依頼を受けたらこう進める」手順を登録します（F-12）。業務ごとに、そのまま対応するか、依頼者に確認してから対応するかを選べます（F-16）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。
       </p>
 
       <ul className="mb-6 space-y-2.5">
         {settings.skills.length === 0 && <p className="text-[12px] text-ink-subtle">スキルはまだありません。</p>}
         {settings.skills.map((skill) => (
           <li key={skill.id} className="rounded-[10px] border border-line px-3.5 py-3">
-            <div className="text-[13px] font-bold text-ink">{skill.title}</div>
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-bold text-ink">{skill.title}</span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10.5px] font-bold ${
+                  skill.response_level === 'confirm' ? 'bg-bot-bg text-bot-text' : 'bg-ok-bg text-ok-text'
+                }`}
+              >
+                {skill.response_level === 'confirm' ? '確認してから対応' : 'そのまま対応'}
+              </span>
+            </div>
             <div className="mt-1.5 line-clamp-3 text-[12.5px] leading-relaxed text-ink-muted">{skill.instructions}</div>
             <div className="mt-2.5 flex justify-end gap-1.5">
               <button
@@ -1623,6 +1625,8 @@ function SkillsSection({
           onTitleChange={setTitle}
           instructions={instructions}
           onInstructionsChange={setInstructions}
+          responseLevel={responseLevel}
+          onResponseLevelChange={setResponseLevel}
         />
         <button
           type="button"
@@ -1647,7 +1651,7 @@ function SkillsSection({
   )
 }
 
-// ③引き継ぎ先（A-45、F-17。TasksTabの一部）。②で「人が対応」にした依頼と、①のどのスキルにも
+// ③引き継ぎ先（A-45、F-17。TasksTabの一部）。②の人に任せる依頼と、①のどのスキルにも
 // 当てはまらない業務依頼の両方で、AIが案内する相談先。参加者から選ぶセレクトのみのため、
 // GeneralTabのトグルと同じく選択時に即保存する
 function HandoffSection({
@@ -1682,7 +1686,7 @@ function HandoffSection({
   return (
     <div>
       <p className="mb-2.5 text-[12.5px] leading-relaxed text-ink-muted">
-        ②で「人が対応」にした依頼と、①のどのスキルにも当てはまらない業務依頼を受けたときに、AIが案内する相談先です（F-17）。未指定の場合はこのチャンネルの管理者を案内します。指定した参加者が退出・無効化された場合は自動的に未指定へ戻ります。
+        ②の人に任せる依頼と、①のどのスキルにも当てはまらない業務依頼を受けたときに、AIが案内する相談先です（F-17）。未指定の場合はこのチャンネルの管理者を案内します。指定した参加者が退出・無効化された場合は自動的に未指定へ戻ります。
       </p>
       <select
         value={settings.fallback_handoff_user_id ?? ''}
@@ -1715,6 +1719,7 @@ function SkillEditModal({
   const toast = useToast()
   const [title, setTitle] = useState(skill.title)
   const [instructions, setInstructions] = useState(skill.instructions)
+  const [responseLevel, setResponseLevel] = useState<Skill['response_level']>(skill.response_level)
   const [saving, setSaving] = useState(false)
 
   const save = async () => {
@@ -1726,7 +1731,7 @@ function SkillEditModal({
     try {
       await apiFetch(`/api/channels/${channelId}/skills/${skill.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ title: title.trim(), instructions: instructions.trim() }),
+        body: JSON.stringify({ title: title.trim(), instructions: instructions.trim(), response_level: responseLevel }),
       })
       toast('スキルを更新しました')
       await onSaved()
@@ -1754,6 +1759,8 @@ function SkillEditModal({
             onTitleChange={setTitle}
             instructions={instructions}
             onInstructionsChange={setInstructions}
+            responseLevel={responseLevel}
+            onResponseLevelChange={setResponseLevel}
           />
         </div>
         <div className="px-[22px] pb-5 pt-4">

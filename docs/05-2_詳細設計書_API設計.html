@@ -70,6 +70,7 @@
       <tr class="diff-new"><td>1.39</td><td>2026-09-29</td><td>A-50（送信予約）で<code>thread_parent_id</code>が宛先と同じチャンネル/DMの本体の発言であることを検証するようにした（従来は未検証で、参加していない非公開チャンネル・DMのスレッドへ返信を送り込め、AI応答経由でその内容を読み出せた）。DM宛ての予約でも<code>mentions</code>を保持するようにした。A-10/A-18の差分ポーリングは<code>since</code>を5秒巻き戻して取得するようにした（トランザクション開始時刻基準の<code>updated_at</code>による取りこぼしの修正）。</td></tr>
       <tr class="diff-new"><td>1.40</td><td>2026-09-29</td><td>A-10/A-18の<code>limit</code>を1〜200に制限した（範囲外は422）。A-14は返信先がスレッドの返信の場合400を返すようにした（返信への返信は対象外）。A-20の語句条件で<code>%</code>・<code>_</code>を文字どおりに扱うようエスケープするようにした。削除済みの発言に紐づくアンケートへの投票・締め切りは404にした。</td></tr>
       <tr class="diff-new"><td>1.41</td><td>2026-09-29</td><td>メンションの催促（ユーザーからの明示的な要望）のため、新規API A-77（催促の有効/無効・待ち時間の更新）を追加し、A-23のレスポンスに<code>mention_reminder_enabled</code>・<code>mention_reminder_hours</code>を追加した（DB設計v1.17 T-08・T-30）。要件定義書上のF-xxに対応付けられた変更ではないため、要件定義書・基本設計書の改訂は無い。</td></tr>
+      <tr class="diff-new"><td>1.42</td><td>2026-09-29</td><td>A-28/A-29にスキルの対応区分<code>response_level</code>（auto=そのまま対応/confirm=確認してから対応）を追加し、A-31を「人に任せる依頼」（response_level='human'のみ）を扱うAPIにした（要件定義書v1.27 F-16、DB設計v1.18）。</td></tr>
     </tbody>
   </table>
 
@@ -360,15 +361,17 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p class="muted"><span class="diff-new"><code>folder_ids</code> は送信された集合でT-10を洗い替える（DELETE→INSERTのトランザクション。差分計算はしない）。存在しないfolder_id（S-08で削除済み等）は黙って無視し、設定保存自体は失敗させない（F-41のメンション対象外指定と同じ考え方）。folder_idsが空配列の場合は「参照ドキュメント無し」として全件削除する。out_of_scope_policyはstrict/generalのいずれか以外は422。実際のDrive同期・索引・AI検索（search_documentsツール、総論8.2節）は次のスライスで実装するため、この設定は現時点ではAI応答に反映されない。</span></p>
 
   <p class="diff-new"><strong>A-28 <span class="badge badge-post">POST</span> /api/channels/{id}/skills</strong></p>
-  <pre class="diff-new"><code>{ "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる" }
+  <pre class="diff-new"><code>{ "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる",
+  "response_level": "auto" }
 // response 201
-{ "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる" }</code></pre>
-  <p class="muted diff-new">T-11 channel_skillsへ1件追加する。title・instructionsはいずれも1文字以上必須（省略・空文字は422）。件数上限は設けない。当該chadmin/adminのみ実行できる。</p>
+{ "id": "9", "title": "議事録の作成", "instructions": "発言ログを箇条書きで要約し、決定事項・次のアクションを最後にまとめる",
+  "response_level": "auto" }</code></pre>
+  <p class="muted diff-new">T-11 channel_skillsへ1件追加する。title・instructionsはいずれも1文字以上必須（省略・空文字は422）。件数上限は設けない。当該chadmin/adminのみ実行できる。<span class="diff-new"><code>response_level</code>（2026-09-29追加、F-16）は<code>'auto'</code>（そのまま対応）/<code>'confirm'</code>（確認してから対応）のいずれかで、省略時は<code>'auto'</code>、それ以外は422。確認してから対応のスキルでは、AIは手順を実行する前に内容をチャット上で依頼者に確認し、同意を得てから進める（AIサポート10.2節）。A-23の<code>skills</code>の各要素にも<code>response_level</code>を含める。</span></p>
 
   <p class="diff-new"><strong>A-29 <span class="badge badge-put">PUT</span> /api/channels/{id}/skills/{skillId}</strong></p>
-  <pre class="diff-new"><code>{ "title": "議事録の作成（改訂）", "instructions": "..." }
+  <pre class="diff-new"><code>{ "title": "議事録の作成（改訂）", "instructions": "...", "response_level": "confirm" }
 // response 200: A-28と同じ形</code></pre>
-  <p class="muted diff-new">部分更新ではなくtitle・instructionsを丸ごと上書きする（A-26振る舞い定義と同じ考え方）。他チャンネルのskillIdや存在しないskillIdは404。</p>
+  <p class="muted diff-new">部分更新ではなくtitle・instructions<span class="diff-new">・response_level（省略時は'auto'）</span>を丸ごと上書きする（A-26振る舞い定義と同じ考え方）。他チャンネルのskillIdや存在しないskillIdは404。</p>
 
   <p class="diff-new"><strong>A-30 <span class="badge badge-delete">DELETE</span> /api/channels/{id}/skills/{skillId}</strong></p>
   <pre class="diff-new"><code>// response 204（存在しないskillIdは404）</code></pre>
@@ -376,12 +379,11 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
 
   <p class="diff-new"><strong>A-31 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/auto-response</strong></p>
   <pre class="diff-new"><code>{ "rules": [
-    { "request_category": "座席予約状況の確認", "response_level": "auto" },
-    { "request_category": "経費精算に関する相談", "response_level": "confirm" },
+    { "request_category": "給与・人事評価の個別相談", "response_level": "human" },
     { "request_category": "契約書フォーマットの相談", "response_level": "human" }
   ] }
 // response 200: A-23と同じ形（auto_response_rulesを含む）</code></pre>
-  <p class="muted diff-new">送信された<code>rules</code>の集合でT-12を洗い替える（A-27参照ドキュメント範囲と同じ「差分計算をしないDELETE→INSERT」パターン）。<code>request_category</code>はチャンネル管理者が自由に決められる文字列で、固定の列挙値ではない（基本設計書8.1節の設計判断、REQ-F-15「担当部署が自ら決められる」を優先）。同じ<code>request_category</code>が複数回送られた場合は配列内の最後の指定を採用する。<code>response_level</code>は<code>'auto'</code>/<code>'confirm'</code>/<code>'human'</code>のいずれか以外は422。「人が対応」区分の判定・引き継ぎは事前の分類APIコールではなく、チャンネルAIの応答生成（8.1節・8.3節）の中でシステムプロンプト経由でAI自身が行う（詳細設計書AIサポート10.2節）。</p>
+  <p class="muted diff-new">送信された<code>rules</code>の集合でT-12を洗い替える（A-27参照ドキュメント範囲と同じ「差分計算をしないDELETE→INSERT」パターン）。<code>request_category</code>はチャンネル管理者が自由に決められる文字列で、固定の列挙値ではない（基本設計書8.1節の設計判断、REQ-F-15「担当部署が自ら決められる」を優先）。同じ<code>request_category</code>が複数回送られた場合は配列内の最後の指定を採用する。<span class="diff-new">2026-09-29の再設計（要件定義書F-16改訂）で、このAPIは「人に任せる依頼」だけを扱う。<code>response_level</code>は<code>'human'</code>以外は422（AIに任せる業務はスキルとしてA-28/A-29で登録し、区分はスキルの<code>response_level</code>で持つ）。</span>「人が対応」区分の判定・引き継ぎは事前の分類APIコールではなく、チャンネルAIの応答生成（8.1節・8.3節）の中でシステムプロンプト経由でAI自身が行う（詳細設計書AIサポート10.2節）。</p>
 
   <p><strong>A-45 <span class="badge badge-put">PUT</span> /api/channels/{id}/ai-settings/handoff</strong></p>
   <pre><code>{ "fallback_handoff_user_id": "15" }  // nullで既定（チャンネル管理者）へ戻す

@@ -51,8 +51,12 @@
 #     分類するかのアルゴリズムは規定していない（グレー）。ユーザー確認のうえ、専用の分類LLM呼び出しは
 #     追加せず、この区分一覧を通常の応答生成プロンプトに含めてAI自身に判断・引き継ぎ案内をさせる
 #     方式を採用した（F-12スキルの「対応できない依頼は引き継ぐ」と同じ考え方、追加コストなし）。
-#     'confirm'（確認のうえ対応）は実行前確認（F-25・pending_actions）が未実装で書き込み系ツール
-#     自体が存在しないため、現状は'auto'と同じ「通常どおり応答してよい」扱いとし区別しない。
+#     **2026-09-29の再設計（ユーザーとの合意、要件定義書F-16改訂）**: 「スキル＝AIに任せる業務」と
+#     して1本化し、自動対応可・確認のうえ対応はスキルごとの区分（T-11.response_level）へ移した。
+#     T-12は「人に任せる依頼」（'human'）だけを持つ。確認のうえ対応（'confirm'）は、社内システムへの
+#     書き込み（F-24）と実行前確認ダイアログ（F-25）が未実装のため、当面は「手順を実行する前に、
+#     これから行う内容をチャット上で依頼者に確認し、同意を得てから進める」という指示として
+#     _build_skills_sectionで実現する（書き込み系ツールができたらS-07の確認ダイアログへ置き換える）。
 #     実行前確認（F-25）自体は引き続き対象外。T-08.out_of_scope_policyは層2ドキュメントQ&A関連の
 #     ためこのスライスではプロンプトに反映されない（値は保存できるが未使用。ドキュメントQ&A実装時に使う）
 #   - AI利用コストの上限判定・通知（T-14、F-29後半）は対象外。T-13への記録のみ行う
@@ -755,7 +759,9 @@ async def _build_skills_section(channel_id: int, settings: dict) -> str:
     にも配線する必要があり、このスライスでは対象外）"""
     pool = get_pool()
     skills = await pool.fetch(
-        "SELECT title, instructions FROM channel_skills WHERE channel_id = $1 ORDER BY created_at", channel_id
+        """SELECT title, instructions, response_level FROM channel_skills
+           WHERE channel_id = $1 ORDER BY created_at""",
+        channel_id,
     )
     if not skills:
         return ""
@@ -763,8 +769,27 @@ async def _build_skills_section(channel_id: int, settings: dict) -> str:
     lines = ["", "# あなたのスキル", "依頼を受けたときは、次の手順に従って進めること。"]
     for s in skills:
         lines.append(f"## {s['title']}")
+        if s["response_level"] == "confirm":
+            lines.append("（確認してから対応するスキル）")
         lines.append(s["instructions"])
     lines.append("")
+    if any(s["response_level"] == "confirm" for s in skills):
+        # 確認のうえ対応（2026-09-29、モジュール冒頭コメント参照）。確認の返事は、AIの発言への
+        # スレッド返信ならメンション無しで届く（maybe_triggerの「AIの発言へのスレッド返信」）ため、
+        # その返し方を依頼者へ案内させる
+        lines.append(
+            "「確認してから対応するスキル」に当てはまる依頼を受けた場合は、手順をすぐに実行せず、"
+            "これから行う内容を短くまとめて「この内容で進めてよろしいですか？よろしければ、このメッセージに"
+            "返信してお知らせください」と依頼者に確認すること。同意が無いうちは実行したかのように答えないこと"
+            "（「確認してから対応するスキル」という区分名やスキル名は依頼者に言わなくてよい）。"
+            "会話履歴の中で、あなたが既に「この内容で進めてよろしいですか？」のように確認しており、その後に"
+            "依頼者が「はい」「お願いします」「進めてください」などと答えていれば、それが同意である。"
+            "同意を受けたら、もう一度確認し直さず、その返答を手順を最後までやり終えた結果の報告に"
+            "すること（「〜しました」のような完了形で書き、手順に返す内容が決められていればそれを含める）。"
+            "「これから実行します」「〜とお知らせします」「完了したらお知らせします」のような予告で終えないこと"
+            "（あなたは依頼者から話しかけられたときにしか発言できず、後から自分で結果を知らせることはできない）"
+        )
+        lines.append("")
     lines.append(
         f"上記のいずれにも当てはまらない業務依頼を受けた場合は、正直に「その依頼には対応できません」と"
         f"伝えた上で、{handoff_label}へ相談するよう案内すること（存在しない対応ができるかのように答えないこと）"
@@ -772,15 +797,8 @@ async def _build_skills_section(channel_id: int, settings: dict) -> str:
     return "\n".join(lines)
 
 
-_AUTO_RESPONSE_LEVEL_LABEL = {
-    "auto": "自動対応可",
-    "confirm": "確認のうえ対応（現状は自動対応可と同じ扱いでよい。実行前確認の仕組み自体が未実装のため）",
-    "human": "人が対応",
-}
-
-
 async def _build_auto_response_section(channel_id: int, settings: dict) -> str:
-    """T-12 channel_auto_response_rulesを「# あなたが対応してよい依頼の目安」節として列挙する
+    """T-12 channel_auto_response_rules（人に任せる依頼）を「# 人に任せる依頼」節として列挙する
     （F-16、詳細設計書AIサポート10.2節）。基本設計書8.1節は「人が対応」区分の依頼をAI呼び出し無しで
     直接引き継ぐと規定するが、依頼文をどのカテゴリに分類するかのアルゴリズムは規定していない
     （モジュール冒頭コメント参照）。ここでは専用の分類LLM呼び出しを追加せず、区分一覧をそのまま
@@ -788,21 +806,24 @@ async def _build_auto_response_section(channel_id: int, settings: dict) -> str:
     該当する場合は回答本文で引き継ぎ案内をさせる。ルールが1件も登録されていないチャンネルでは
     この節自体を省略する。スキル同様、メンション応答専用で要約生成には使わない"""
     pool = get_pool()
+    # 2026-09-29の再設計でT-12は'human'（人に任せる依頼）だけを持つようになった（冒頭コメント参照）
     rules = await pool.fetch(
-        """SELECT request_category, response_level FROM channel_auto_response_rules
-           WHERE channel_id = $1 ORDER BY created_at""",
+        """SELECT request_category FROM channel_auto_response_rules
+           WHERE channel_id = $1 AND response_level = 'human' ORDER BY created_at""",
         channel_id,
     )
     if not rules:
         return ""
     handoff_label = await _resolve_handoff_label(pool, settings)
-    lines = ["", "# あなたが対応してよい依頼の目安"]
+    lines = ["", "# 人に任せる依頼"]
     for r in rules:
-        lines.append(f"- {r['request_category']}: {_AUTO_RESPONSE_LEVEL_LABEL[r['response_level']]}")
+        lines.append(f"- {r['request_category']}")
     lines.append("")
     lines.append(
-        f"「人が対応」に区分される依頼を受けた場合は、あなた自身で回答を作成せず、正直に「担当者への"
-        f"確認が必要な内容です」と伝えた上で、{handoff_label}へ相談するよう案内すること"
+        f"上記のいずれかに当てはまる依頼を受けた場合は、スキルや参照ドキュメントで答えられそうな場合でも、"
+        f"あなた自身で回答を作成しないこと。代わりに、依頼者に向けて「担当者への確認が必要な内容のため、"
+        f"私からはお答えできません。{handoff_label}に相談してください。」のように伝えること"
+        f"（引き継ぎ先が「このチャンネルの管理者」の場合は、チャンネル参加者の一覧から管理者の名前を添える）"
     )
     return "\n".join(lines)
 

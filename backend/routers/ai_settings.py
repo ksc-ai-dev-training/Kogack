@@ -61,11 +61,20 @@ async def _folder_ids(channel_id: int) -> list[str]:
     return [str(r["folder_id"]) for r in rows]
 
 
+def _skill_out(row) -> dict:
+    return {
+        "id": str(row["id"]), "title": row["title"], "instructions": row["instructions"],
+        "response_level": row["response_level"],
+    }
+
+
 async def _skills(channel_id: int) -> list[dict]:
     rows = await get_pool().fetch(
-        "SELECT id, title, instructions FROM channel_skills WHERE channel_id = $1 ORDER BY created_at", channel_id
+        """SELECT id, title, instructions, response_level FROM channel_skills
+           WHERE channel_id = $1 ORDER BY created_at""",
+        channel_id,
     )
-    return [{"id": str(r["id"]), "title": r["title"], "instructions": r["instructions"]} for r in rows]
+    return [_skill_out(r) for r in rows]
 
 
 async def _auto_response_rules(channel_id: int) -> list[dict]:
@@ -273,36 +282,45 @@ async def update_doc_scope(
     return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))
 
 
+# スキルの対応区分（2026-09-29のスキル・自動対応範囲の再設計、database.pyのT-11移行コメント参照）。
+# auto=そのまま対応、confirm=確認してから対応（手順を実行する前にAIが内容を依頼者に確認する。
+# services/ai_agent._build_skills_section）。「人が対応」はスキルではなくA-31の「人に任せる依頼」側
+SKILL_LEVEL_PATTERN = "^(auto|confirm)$"
+
+
 class CreateSkillRequest(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     instructions: str = Field(min_length=1, max_length=4000)
+    response_level: str = Field(default="auto", pattern=SKILL_LEVEL_PATTERN)
 
 
 @router.post("/{channel_id}/skills", status_code=201)
 async def create_skill(
     channel_id: int, body: CreateSkillRequest, user: CurrentUser = Depends(require_channel_admin),
 ):
-    """A-28: スキル追加（F-12）。「依頼を受けたらこう進める」手順をtitle＋instructionsで登録する。
+    """A-28: スキル追加（F-12・F-16）。「依頼を受けたらこう進める」手順をtitle＋instructionsで登録し、
+    対応区分（response_level: auto=そのまま対応／confirm=確認してから対応）を持たせる。
     services/ai_agent.pyがシステムプロンプトの「# あなたのスキル」節で列挙する"""
     await _get_or_create(channel_id)
     pool = get_pool()
     title = body.title.strip()
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
-            """INSERT INTO channel_skills (channel_id, title, instructions) VALUES ($1, $2, $3)
-               RETURNING id, title, instructions""",
-            channel_id, title, body.instructions.strip(),
+            """INSERT INTO channel_skills (channel_id, title, instructions, response_level)
+               VALUES ($1, $2, $3, $4) RETURNING id, title, instructions, response_level""",
+            channel_id, title, body.instructions.strip(), body.response_level,
         )
         await audit_log.record(
             conn, "channel_ai_setting_change", user.id, f"スキル「{title}」を追加しました",
             target_channel_id=channel_id, target_field="skill",
         )
-    return {"id": str(row["id"]), "title": row["title"], "instructions": row["instructions"]}
+    return _skill_out(row)
 
 
 class UpdateSkillRequest(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     instructions: str = Field(min_length=1, max_length=4000)
+    response_level: str = Field(default="auto", pattern=SKILL_LEVEL_PATTERN)
 
 
 @router.put("/{channel_id}/skills/{skill_id}")
@@ -314,9 +332,9 @@ async def update_skill(
     title = body.title.strip()
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
-            """UPDATE channel_skills SET title = $3, instructions = $4, updated_at = now()
-               WHERE id = $1 AND channel_id = $2 RETURNING id, title, instructions""",
-            skill_id, channel_id, title, body.instructions.strip(),
+            """UPDATE channel_skills SET title = $3, instructions = $4, response_level = $5, updated_at = now()
+               WHERE id = $1 AND channel_id = $2 RETURNING id, title, instructions, response_level""",
+            skill_id, channel_id, title, body.instructions.strip(), body.response_level,
         )
         if row is None:
             raise HTTPException(404, detail="スキルが見つかりません")
@@ -324,7 +342,7 @@ async def update_skill(
             conn, "channel_ai_setting_change", user.id, f"スキル「{title}」を更新しました",
             target_channel_id=channel_id, target_field="skill",
         )
-    return {"id": str(row["id"]), "title": row["title"], "instructions": row["instructions"]}
+    return _skill_out(row)
 
 
 @router.delete("/{channel_id}/skills/{skill_id}", status_code=204)
@@ -427,14 +445,18 @@ class UpdateAutoResponseRequest(BaseModel):
 async def update_auto_response(
     channel_id: int, body: UpdateAutoResponseRequest, user: CurrentUser = Depends(require_channel_admin),
 ):
-    """A-31: 自動対応範囲（F-16）。送信されたルール集合でT-12を洗い替える（A-27参照ドキュメント範囲と
-    同じ「差分計算をしないDELETE→INSERT」パターン）。request_categoryはチャンネル管理者が自由に
+    """A-31: 人に任せる依頼（F-16）。送信されたルール集合でT-12を洗い替える（A-27参照ドキュメント範囲と
+    同じ「差分計算をしないDELETE→INSERT」パターン）。**2026-09-29の再設計で、AIに任せる業務（自動対応・
+    確認のうえ対応）はスキル（A-28/A-29のresponse_level）へ移り、ここはresponse_level='human'だけを
+    受け付ける**（DBのCHECK制約も'human'のみ。database.pyのT-11移行コメント参照）。request_categoryはチャンネル管理者が自由に
     追加・削除できる（REQ-F-15「担当部署が自ら決められる」を優先。画面モックアップの6例は固定候補では
     なく記入例。基本設計書6.2節に設計判断を追記）。同じrequest_categoryが複数送られた場合は最後の
     指定を採用する（Pythonのdictでキー重複を解決し、DBのUNIQUE制約違反を避ける）"""
     for r in body.rules:
-        if r.response_level not in ("auto", "confirm", "human"):
-            raise HTTPException(422, detail="response_levelはauto/confirm/humanのいずれかです")
+        if r.response_level != "human":
+            raise HTTPException(
+                422, detail="AIに任せる業務はスキルとして登録してください（ここに登録できるのは「人が対応」のみです）",
+            )
     deduped = {r.request_category.strip(): r.response_level for r in body.rules if r.request_category.strip()}
 
     await _get_or_create(channel_id)
@@ -449,7 +471,7 @@ async def update_auto_response(
             )
         row = await conn.fetchrow("SELECT * FROM channel_ai_settings WHERE channel_id = $1", channel_id)
         await audit_log.record(
-            conn, "channel_ai_setting_change", user.id, "自動対応範囲を更新しました",
+            conn, "channel_ai_setting_change", user.id, "人に任せる依頼を更新しました",
             target_channel_id=channel_id, target_field="auto_response",
         )
     return _out(row, await _folder_ids(channel_id), await _skills(channel_id), await _auto_response_rules(channel_id))

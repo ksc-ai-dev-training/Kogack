@@ -17,7 +17,7 @@
     <p class="subtitle">AIエージェント常駐型社内チャットシステム（コードネーム: Kogack）</p>
     <div class="meta">
       <span>作成日: 2026-08-19</span>
-      <span>版数: 1.45</span>
+      <span>版数: 1.46</span>
       <span>作成: コガソフトウェア株式会社</span>
     </div>
     <p class="note">本ドキュメントは新人社員向けAI開発研修の成果物です</p>
@@ -74,6 +74,7 @@
       <tr class="diff-new"><td>1.43</td><td>2026-09-17</td><td>チャンネルごとのAIモデル選択機能を追加した（ユーザーからの明示的な要望「アプリ上でAIモデルを選択できるようにする機能が欲しい」）。従来「使用モデルは環境変数AI_MODELのみで指定し、画面上でのモデル切替機能は設けない」としていた方針（2.2節）を反転し、S-06「基本設定」タブでチャンネル管理者がチャンネルごとに上書きできるようにした。設定範囲を姉妹プロジェクトKeirekiと同じアプリ全体1設定にするか、チャンネルごとにするかをユーザーに確認し、既存のチャンネルAI設定（persona_name等）と一貫させるためチャンネルごと（T-08 channel_ai_settingsへai_model列を追加）を選んだ経緯を8.1節に設計判断として追記した。2.2節のAI行を更新した。詳細設計書API設計（A-24、v1.35）を一貫して更新した。要件定義書上のF-xxに対応付けられた変更ではないため要件定義書・画面モックアップの改訂は無い。</td></tr>
       <tr class="diff-new"><td>1.44</td><td>2026-09-28</td><td>チャンネルAIの発言へのスレッド返信では、メンション無しでもAIが応答するようにした（ユーザーからの明示的な要望）。従来の「スレッド返信内では反応モードに関わらず常にメンション必須」という8.1節の設計判断に、元発言がAI自身の発言の場合の例外（その返信で他の利用者をメンションしている場合を除く）を追記した。要件定義書上のF-xxに対応付けられた変更ではないため要件定義書・画面モックアップの改訂は無い。操作マニュアル（v1.22）を一貫して更新した。</td></tr>
       <tr class="diff-new"><td>1.45</td><td>2026-09-29</td><td>S-06の「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（ユーザーからの要望。どちらも「この種類の依頼が来たらAIはどうするか」を決める設定で、引き継ぎ先も両方から使われるのに、2つのタブに分かれていて違いが分かりにくいという指摘）。DB（T-11/T-12）・API（A-28〜A-31・A-45）・機能（F-12・F-16・F-17）は別々のまま。あわせて、実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」を選択肢から外した。4.8節を改訂し、設計判断をcalloutに残した。画面モックアップS-06・詳細設計書画面設計・操作マニュアルを一貫して更新した。要件定義書は変更なし。</td></tr>
+      <tr class="diff-new"><td>1.46</td><td>2026-09-29</td><td>スキル（F-12）と自動対応範囲（F-16）の関係を改めた（要件定義書v1.27、ユーザーとの合意）。スキルを「AIに任せる業務」と位置づけ、区分を「スキル（そのまま対応）／スキル（確認してから対応）／人に任せる依頼」の3つにした。T-11にresponse_level（auto/confirm）を追加し、T-12は「人に任せる依頼」（human）だけを持つようにした（既存の自動対応可・確認のうえ対応の行はスキルへ移行）。「確認してから対応」は、F-24・F-25ができるまでAIがチャット上で依頼者に確認し同意を得てから進める。4.8節・5章・6.2節・7章・8.1節・8.3節を改訂し、4.8節の設計判断を書き改めた。</td></tr>
     </tbody>
   </table>
 
@@ -348,7 +349,7 @@
       <tr><td>S-03</td><td>チャンネル会話</td><td><code>/channels/:channelId</code></td><td>チャンネル参加者</td><td>メッセージ一覧・投稿欄。AIの発言はバッジで明示。連携先システムの参照結果もここに表示する。要約ボタンあり</td></tr>
       <tr><td>S-04</td><td>スレッド表示</td><td><code>/channels/:channelId?thread=:messageId</code></td><td>チャンネル参加者</td><td>特定の発言に対する返信をまとめて表示するパネル。S-03に重ねて右側に表示する</td></tr>
       <tr><td>S-05</td><td>横断検索</td><td><code>/search?q=...</code></td><td>全ロール</td><td>発言・ファイル・ドキュメント根拠の横断検索。結果は利用者の参照権限の範囲に限定</td></tr>
-      <tr><td>S-06</td><td><span class="diff-new">チャンネル設定</span></td><td><code>/channels/:channelId/settings</code></td><td>本人が管理者権限を持つチャンネルの<span class="badge badge-chadmin">chadmin</span>, <span class="badge badge-admin">admin</span></td><td>「チャンネル管理者」<span class="diff-new">（chadminの追加・解除。F-33）、「定期投稿」（F-36）、「自動応答トリガー」（F-38）</span>と「AI設定の項目」（キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・自動対応範囲）の2グループのタブ構成の画面。<span class="diff-new">AI設定以外の項目が増えたため、画面名を「チャンネルAI設定」から「チャンネル設定」に改称した。</span></td></tr>
+      <tr><td>S-06</td><td><span class="diff-new">チャンネル設定</span></td><td><code>/channels/:channelId/settings</code></td><td>本人が管理者権限を持つチャンネルの<span class="badge badge-chadmin">chadmin</span>, <span class="badge badge-admin">admin</span></td><td>「チャンネル管理者」<span class="diff-new">（chadminの追加・解除。F-33）、「定期投稿」（F-36）、「自動応答トリガー」（F-38）</span>と「AI設定の項目」（キャラクタ・振る舞い定義・参照ドキュメント範囲・<span class="diff-new">業務と対応範囲（スキル・人に任せる依頼）</span>・反応モード）の2グループのタブ構成の画面。<span class="diff-new">AI設定以外の項目が増えたため、画面名を「チャンネルAI設定」から「チャンネル設定」に改称した。</span></td></tr>
       <tr><td>S-07</td><td>AI操作確認ダイアログ</td><td>（URLなし・モーダル）</td><td>依頼した本人</td><td>AIが社内システムへの登録・変更を実行する前に、実行内容を提示し同意を得るモーダル。S-03/S-04上に表示する</td></tr>
       <tr><td>S-08</td><td>管理コンソール</td><td><code>/admin</code></td><td><span class="badge badge-admin">admin</span></td><td>4タブ構成: 「利用者管理」「ドキュメント参照範囲」「AI利用状況・コスト」「監査ログ」</td></tr>
     </tbody>
@@ -506,8 +507,8 @@
     <li><strong>参照ドキュメント範囲:</strong> S-08で登録された候補フォルダの中から、このチャンネルの回答根拠とする範囲を選択する（F-11）。選択していても質問者本人に閲覧権限がない文書は回答対象から除外される（5.1節）。<span class="diff-new">あわせて、指定範囲外の質問への対応方針（「厳格に制限」／「一般回答を許可」）を設定する（8.2節）。</span></li>
     <li class="diff-new"><strong>業務と対応範囲:</strong> 旧「スキル」「自動対応範囲」の2タブを1つにまとめたもの。上から次の3つの欄で構成する。
       <ol>
-        <li><strong>AIが対応する業務の手順</strong>（旧「スキル」、F-12）: 「依頼を受けたらこう進める」手順をテキストで登録する。スキルを1件以上登録すると、どのスキルにも当てはまらない業務依頼には対応できない旨を伝えて引き継ぎ先を案内する。</li>
-        <li><strong>人に回す依頼</strong>（旧「自動対応範囲」、F-16）: 依頼の種類ごとに「AIが対応／人が対応」を設定する。「人が対応」の依頼は、AIが同一チャンネル内で引き継ぎ先にメンションして引き継ぐ（F-17、DMは使わない）。</li>
+        <li><strong>AIに任せる業務（スキル）</strong>（F-12・F-16）: 「依頼を受けたらこう進める」手順をテキストで登録し、スキルごとに対応区分「そのまま対応」「確認してから対応」を選ぶ。確認してから対応のスキルでは、AIは手順を実行する前にこれから行う内容をチャット上で依頼者に示し、同意を得てから進める（F-24・F-25ができるまでの暫定の実現方法）。スキルを1件以上登録すると、どのスキルにも当てはまらない業務依頼には対応できない旨を伝えて引き継ぎ先を案内する。</li>
+        <li><strong>人に任せる依頼</strong>（F-16）: AIに答えさせない依頼の種類を一覧で登録する。当てはまる依頼には、スキルや参照ドキュメントで答えられそうな場合でも、AIは自分で答えず、同一チャンネル内で引き継ぎ先にメンションして引き継ぐ（F-17、DMは使わない）。</li>
         <li><strong>引き継ぎ先</strong>（F-17）: 1と2の両方で使う相談先（既定のチャンネル管理者、または指定した参加者）。</li>
       </ol>
     </li>
@@ -516,7 +517,7 @@
   </ul>
 
   <div class="callout diff-new">
-    <strong>設計判断（スキルと自動対応範囲を画面上だけ1つのタブにまとめた理由）:</strong> 両者はどちらも「この種類の依頼が来たらAIはどうするか」を決める設定で、利用者からは同じ問いへの答えが2つのタブに分かれて見えていた。引き継ぎ先はスキルタブで設定するのに自動対応範囲の「人が対応」でも使われる、スキルに手順を書いても自動対応範囲で「人が対応」にすると人に回される、といった相互の関係も別タブでは見えにくかった。一方、スキルは手順を書き込む重い設定、自動対応範囲は区分を選ぶだけの軽い設定で性質が異なり、要件定義書でも別機能（F-12・F-16）として定義されているため、データ（T-11/T-12）とAPIは統合せず、画面だけを「AIが対応する業務の手順 → 人に回す依頼 → 引き継ぎ先」の順に1タブへ並べた（AIが何をするかを先に見せるため、手順を先頭にした）。あわせて「確認のうえ対応」は、実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかせず利用者を迷わせるため選択肢から外した（既にこの区分になっている行だけは表示を残す）。F-25を実装したら選択肢に戻す。
+    <strong>設計判断（スキルを「AIに任せる業務」とし、自動対応範囲の区分をスキル側に持たせた理由）:</strong> 当初はスキル（F-12、手順）と自動対応範囲（F-16、依頼内容ごとの自動対応可／確認のうえ対応／人が対応）を別々の一覧で設定しており、スキルに手順を書いたのに自動対応範囲で「人が対応」にすると人に回される、といった食い違いが起こりえた。利用者から2つの違いが分かりにくいと指摘を受け、まず画面を1タブにまとめたうえで、要求仕様書REQ-F-11（スキルは「何ができるか」という能力の定義）とREQ-F-15（何をAIに任せるかを担当部署が決める）を読み直し、「スキルを持たせた業務＝AIに任せる業務」と位置づけ直した。これにより区分は「スキル（そのまま対応）／スキル（確認してから対応）／人に任せる依頼」の3つになり、自動対応可・確認のうえ対応はスキルごとの属性（T-11.response_level）、人が対応だけがスキルと別の一覧（T-12）になる。人に任せる依頼をなくさずに残したのは、スキルに無い業務依頼はもともと引き継ぎ先に回る一方、社内ドキュメントを見ればAIが答えられてしまう話題（個別の給与相談など）を「答えずに人へ回す」と明示する手段が別に必要なため。「確認してから対応」は、要求仕様書ではREQ-F-24（社内システムへの登録・変更の実行前確認）とつながるが、書き込み系の連携（F-24）と確認ダイアログ（F-25）は対象外のため、それまではAIがチャット上で内容を確認し、依頼者の同意（AIの確認メッセージへのスレッド返信など）を得てから手順を進める方式で意味を持たせた。F-24・F-25を実装したら、書き込みを伴うスキルではS-07の確認ダイアログに置き換える。画面は「AIに任せる業務 → 人に任せる依頼 → 引き継ぎ先」の順に並べ、AIが何をするかを先に見せる。
   </div>
 
   <h3>4.9 S-07 AI操作確認ダイアログ</h3>
@@ -574,7 +575,7 @@
   </table>
 
   <h3>5.5 F-08〜F-12, F-15, F-16 チャンネルAI設定</h3>
-  <p><strong>処理概要:</strong> チャンネルごとのAI有効/無効（F-08）、振る舞い定義（プロンプト。F-09）、キャラクタ（F-10。<span class="diff-new">アイコンはA-61で画像をアップロードして設定できる。F-37</span>）、参照ドキュメント範囲（F-11。<span class="diff-new">指定範囲外の質問への対応方針を含む</span>）、スキル（F-12。<span class="diff-new">スキルにない業務依頼の引き継ぎ先を含む</span>）、反応モード（F-15）、自動対応範囲（F-16）の設定・保存。振る舞い定義の変更は監査ログ（T-16）に記録する。詳細はS-06（4.8節）・AIエージェント設計8.3節を参照。</p>
+  <p><strong>処理概要:</strong> チャンネルごとのAI有効/無効（F-08）、振る舞い定義（プロンプト。F-09）、キャラクタ（F-10。<span class="diff-new">アイコンはA-61で画像をアップロードして設定できる。F-37</span>）、参照ドキュメント範囲（F-11。<span class="diff-new">指定範囲外の質問への対応方針を含む</span>）、スキル（F-12。<span class="diff-new">スキルにない業務依頼の引き継ぎ先を含む</span>）<span class="diff-new">とスキルごとの対応区分・人に任せる依頼（F-16）</span>、反応モード（F-15）の設定・保存。振る舞い定義の変更は監査ログ（T-16）に記録する。詳細はS-06（4.8節）・AIエージェント設計8.3節を参照。</p>
   <table>
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
     <tbody><tr><td>S-06</td><td>A-23〜A-31<span class="diff-new">, A-45, A-61</span></td><td>T-08, T-09, T-10, T-11, T-12, T-16</td></tr></tbody>
@@ -588,7 +589,7 @@
   </table>
 
   <h3>5.7 F-17 人への引き継ぎ・F-18 AI発言の明示</h3>
-  <p><strong>処理概要:</strong> AIが対応できない依頼（自動対応範囲「人が対応」に区分された依頼）を、同じチャンネル内で引き継ぎ先にメンションして引き継ぐ（F-17。DMは使わない。経緯が他の参加者からも見えるようにするため）。<span class="diff-new">引き継ぎ先は既定でチャンネル管理者（T-03の当該チャンネルchadmin）だが、S-06のスキルタブでチャンネルごとに特定の参加者へ変更できる（T-08.fallback_handoff_user_id）。</span>AIの発言には常時<span class="badge badge-ai">AI</span>バッジを表示し、人間の発言と判別できるようにする（F-18）。</p>
+  <p><strong>処理概要:</strong> AIが対応できない依頼（<span class="diff-new">「人に任せる依頼」に当てはまる依頼、およびどのスキルにも当てはまらない業務依頼</span>）を、同じチャンネル内で引き継ぎ先にメンションして引き継ぐ（F-17。DMは使わない。経緯が他の参加者からも見えるようにするため）。<span class="diff-new">引き継ぎ先は既定でチャンネル管理者（T-03の当該チャンネルchadmin）だが、S-06の<span class="diff-new">業務と対応範囲タブ</span>でチャンネルごとに特定の参加者へ変更できる（T-08.fallback_handoff_user_id）。</span>AIの発言には常時<span class="badge badge-ai">AI</span>バッジを表示し、人間の発言と判別できるようにする（F-18）。</p>
   <table>
     <thead><tr><th>関連画面</th><th>関連API</th><th>関連テーブル</th></tr></thead>
     <tbody><tr><td>S-03</td><td>A-11</td><td>T-05, T-12</td></tr></tbody>
@@ -888,8 +889,8 @@
       <tr><td>T-08</td><td><code>channel_ai_settings</code></td><td>チャンネルAI設定</td><td>チャンネルごとのAI設定。channel_id（FK、UNIQUE）、is_ai_enabled、persona_name／persona_icon_url<span class="diff-new">（A-61で画像をアップロードし、返却されたURLをA-25で保存する。未設定時は「AI」の2文字アバターで代替）</span>／persona_tone、behavior_prompt、reaction_mode（'mention_only'/'proactive'）、<span class="diff-new">out_of_scope_policy（'strict'/'general'。指定範囲外の質問への対応方針。F-11）、fallback_handoff_user_id（スキルにない業務依頼の引き継ぎ先。NULL時はT-03の当該チャンネルchadminへ引き継ぐ。F-17）、</span>updated_by・updated_at（監査ログの参照元）</td></tr>
       <tr><td>T-09</td><td><code>doc_folders</code></td><td>参照ドキュメントフォルダ（全体候補）</td><td>S-08で管理者が登録するGoogle Driveフォルダの全体候補。drive_folder_id（UNIQUE）、drive_folder_name、added_by</td></tr>
       <tr><td>T-10</td><td><code>channel_doc_folders</code></td><td>チャンネル別 参照ドキュメント範囲</td><td>T-09の候補のうち、各チャンネルが参照範囲として選択したもの。(channel_id, folder_id) 主キー</td></tr>
-      <tr><td>T-11</td><td><code>channel_skills</code></td><td>スキル</td><td>チャンネルAIに割り当てる「依頼を受けたらこう進める」手順。channel_id、title、instructions</td></tr>
-      <tr><td>T-12</td><td><code>channel_auto_response_rules</code></td><td>自動対応範囲</td><td>依頼内容カテゴリごとの対応区分。channel_id、request_category、response_level（'auto'/'confirm'/'human'）。(channel_id, request_category) UNIQUE</td></tr>
+      <tr><td>T-11</td><td><code>channel_skills</code></td><td>スキル</td><td>チャンネルAIに割り当てる「依頼を受けたらこう進める」手順（AIに任せる業務）。channel_id、title、instructions<span class="diff-new">、response_level（'auto'=そのまま対応/'confirm'=確認してから対応。F-16）</span></td></tr>
+      <tr><td>T-12</td><td><code>channel_auto_response_rules</code></td><td>自動対応範囲<span class="diff-new">（人に任せる依頼）</span></td><td><span class="diff-new">AIに答えさせず人に任せる依頼の種類。</span>channel_id、request_category、response_level（<span class="diff-new">'human'のみ。2026-09-29に自動対応可・確認のうえ対応はT-11のresponse_levelへ移した</span>）。(channel_id, request_category) UNIQUE</td></tr>
       <tr><td>T-13</td><td><code>ai_usage_logs</code></td><td>AI利用ログ</td><td>AI呼び出しごとの記録。channel_id／dm_id、requested_by、model、input_tokens・output_tokens、estimated_cost_yen、created_at。<strong>質問文・回答文は保存しない</strong>（8.6節）</td></tr>
       <tr><td>T-14</td><td><code>ai_usage_limits</code></td><td>AI利用上限設定</td><td>scope（'global'/'channel'）、channel_id（scope='channel'時）、monthly_limit_yen、notify_threshold_pct（DEFAULT 80）、notify_email</td></tr>
       <tr><td>T-15</td><td><code>pending_actions</code></td><td>実行前確認待ちの操作</td><td>S-07で提示する操作。message_id、requested_by、system_name、action_type、action_payload（JSONB）、status（'pending'/'confirmed'/'cancelled'）、decided_by・decided_at</td></tr>
@@ -1052,7 +1053,7 @@
       <tr><td>A-28</td><td><span class="badge badge-post">POST</span></td><td><code>/api/channels/{id}/skills</code></td><td>当該chadmin/admin</td><td>スキル追加</td></tr>
       <tr><td>A-29</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/skills/{skillId}</code></td><td>当該chadmin/admin</td><td>スキル更新</td></tr>
       <tr><td>A-30</td><td><span class="badge badge-delete">DELETE</span></td><td><code>/api/channels/{id}/skills/{skillId}</code></td><td>当該chadmin/admin</td><td>スキル削除</td></tr>
-      <tr><td>A-31</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/auto-response</code></td><td>当該chadmin/admin</td><td>自動対応範囲の更新</td></tr>
+      <tr><td>A-31</td><td><span class="badge badge-put">PUT</span></td><td><code>/api/channels/{id}/ai-settings/auto-response</code></td><td>当該chadmin/admin</td><td><span class="diff-new">人に任せる依頼</span>の更新</td></tr>
       <tr><td>A-33</td><td><span class="badge badge-get">GET</span></td><td><code>/api/pending-actions/{id}</code></td><td>依頼した本人</td><td>実行前確認の内容取得（S-07表示用）</td></tr>
       <tr><td>A-34</td><td><span class="badge badge-post">POST</span></td><td><code>/api/pending-actions/{id}/confirm</code></td><td>依頼した本人</td><td>実行を確定（本リリースでは呼び出し先の書き込み操作自体が対象外のためモック応答）</td></tr>
       <tr><td>A-35</td><td><span class="badge badge-post">POST</span></td><td><code>/api/pending-actions/{id}/cancel</code></td><td>依頼した本人</td><td>キャンセル</td></tr>
@@ -1109,7 +1110,7 @@
   </div>
 
   <div class="callout diff-new">
-    <strong>設計判断（自動対応範囲「人が対応」の判定方式、およびrequest_categoryを自由編集にした理由）:</strong> 本節の元の記述（下記手順3）は「「人が対応」に区分される場合はAI呼び出しを行わず、引き継ぎメッセージを直接投稿する」としていたが、依頼文をどのカテゴリ（T-12 request_category）に分類するかのアルゴリズム自体は規定していなかった。厳密に実装するには、投稿ごとに「どの区分に該当するか」を判定する軽量な事前分類LLM呼び出しを追加する必要があり、反応モード（上記callout）と同じ「追加LLM呼び出し＝コスト増」のトレードオフが生じる。ユーザーと協議のうえ、F-12スキルの「対応できない依頼は自分で引き継ぐ」という既存の仕組みと揃え、専用の分類呼び出しは追加せず、区分一覧をシステムプロンプトの一部としてAI自身に渡し、通常の応答生成（1回のLLM呼び出し）の中でAIが「人が対応」該当を自己判断し、回答本文で引き継ぎ案内をする方式を採用した（<code>services/ai_agent.py</code> <code>_build_auto_response_section</code>）。したがって下記手順3・4は「AI呼び出しを行わない」ハードな事前遮断ではなく、AIが1回の応答の中で判断する仕組みである点に注意（<code>services/trigger_matcher.py</code>のような同期・LLM不要の判定とは異なる）。また「確認のうえ対応」（confirm）は実行前確認（F-25・pending_actions）が書き込み系ツール自体の未実装により到達しないため、現状は「自動対応可」と同じ扱いで区別しない。<br><br>
+    <strong>設計判断（自動対応範囲「人が対応」の判定方式、およびrequest_categoryを自由編集にした理由）:</strong> 本節の元の記述（下記手順3）は「「人が対応」に区分される場合はAI呼び出しを行わず、引き継ぎメッセージを直接投稿する」としていたが、依頼文をどのカテゴリ（T-12 request_category）に分類するかのアルゴリズム自体は規定していなかった。厳密に実装するには、投稿ごとに「どの区分に該当するか」を判定する軽量な事前分類LLM呼び出しを追加する必要があり、反応モード（上記callout）と同じ「追加LLM呼び出し＝コスト増」のトレードオフが生じる。ユーザーと協議のうえ、F-12スキルの「対応できない依頼は自分で引き継ぐ」という既存の仕組みと揃え、専用の分類呼び出しは追加せず、区分一覧をシステムプロンプトの一部としてAI自身に渡し、通常の応答生成（1回のLLM呼び出し）の中でAIが「人が対応」該当を自己判断し、回答本文で引き継ぎ案内をする方式を採用した（<code>services/ai_agent.py</code> <code>_build_auto_response_section</code>）。したがって下記手順3・4は「AI呼び出しを行わない」ハードな事前遮断ではなく、AIが1回の応答の中で判断する仕組みである点に注意（<code>services/trigger_matcher.py</code>のような同期・LLM不要の判定とは異なる）。<span class="diff-new">なお2026-09-29に、自動対応可・確認のうえ対応はスキルごとの区分（T-11.response_level）へ移り、T-12は「人が対応」だけを持つようになった（4.8節の設計判断）。確認してから対応のスキルは、実行前確認（F-25・pending_actions）ができるまで、AIがチャット上で依頼者に確認してから進める指示としてシステムプロンプトに含める（<code>_build_skills_section</code>）。</span><br><br>
     request_category（依頼内容カテゴリ）は、画面モックアップが6件の例を示しているため固定候補のようにも見えるが、要件定義書REQ-F-15が「チャンネルの担当部署が、何をAIに任せるかを自ら決められること」と明記しているため、チャンネル管理者が自由に追加・削除できる仕様とした（A-31、T-12.request_categoryはUNIQUE(channel_id, request_category)のみで、固定の列挙値ではない）。画面モックアップの6例は記入例であり、実装のUIも「＋追加」で任意の名称を登録できる。
   </div>
 
@@ -1121,8 +1122,8 @@
     <li>A-11（メッセージ投稿）でメンションを検知すると、FastAPIは<code>services/ai_agent.py</code>の処理を非同期タスクとして起動し、A-11自体は即座に投稿完了を返す（REQ-N-05、8.7節）。<span class="diff-new">A-11では同時に<code>services/trigger_matcher.py</code>による自動応答トリガー（F-38、5.19節）の判定も行うが、こちらはLLM呼び出しを伴わず同期的に完結するためAIエージェント処理とは別系統である。</span></li>
     <li>対象チャンネルの T-08 channel_ai_settings（振る舞い定義・キャラクタ・反応モード）、T-11 channel_skills、T-12 channel_auto_response_rules を取得する。</li>
     <li>チャンネル履歴（直近30日・直近200件のいずれか少ない方。F-13）を取得し、システムプロンプトに含める（8.3節）。</li>
-    <li>依頼内容を自動対応範囲（T-12）と照合し、「人が対応」に区分される場合はAI呼び出しを行わず、チャンネル管理者へのメンション付き引き継ぎメッセージを直接投稿する（F-17）。<span class="diff-new">実装は上記callout のとおり、AI自身が1回の応答生成の中で判断・案内する方式（プロンプトベース）である。</span></li>
-    <li>「自動対応可」「確認のうえ対応」の場合、OpenAI APIをFunction Calling付きで呼び出す。ツールとして <code>search_documents</code>（8.2節）、<code>get_seat_availability</code>（8.4節）を、質問者のロールに応じて渡す。</li>
+    <li>依頼内容を<span class="diff-new">人に任せる依頼</span>（T-12）と照合し、当てはまる場合はAI呼び出しを行わず、チャンネル管理者へのメンション付き引き継ぎメッセージを直接投稿する（F-17）。<span class="diff-new">実装は上記callout のとおり、AI自身が1回の応答生成の中で判断・案内する方式（プロンプトベース）である。</span></li>
+    <li><span class="diff-new">それ以外の場合</span>、OpenAI APIをFunction Calling付きで呼び出す。<span class="diff-new">スキルの「確認してから対応」に当てはまる依頼では、手順を実行する前に内容をチャット上で依頼者に確認し、同意を得てから進める。</span>ツールとして <code>search_documents</code>（8.2節）、<code>get_seat_availability</code>（8.4節）を、質問者のロールに応じて渡す。</li>
     <li>ツール呼び出しの結果を踏まえてAIが最終回答を生成する。回答文と、根拠・参照結果はメッセージ本文＋T-07 message_blocksとして保存し、T-05に sender_type='ai' の発言として投稿する。</li>
     <li>呼び出しごとにモデル・トークン数・概算コストを T-13 ai_usage_logs に記録する（8.6節）。</li>
     <li>フロントエンドは3秒間隔のポーリングで新着メッセージ（「生成中」状態を含む）を取得し表示する（8.7節）。</li>
@@ -1146,11 +1147,11 @@
     <li>キャラクタ（persona_name・persona_tone）に基づく口調の指示</li>
     <li>振る舞い定義（behavior_prompt）の全文</li>
     <li>割り当てられたスキル（channel_skills.instructions）の一覧</li>
-    <li>自動対応範囲（channel_auto_response_rules）の要約（何を自動で答えてよいか）</li>
+    <li><span class="diff-new">人に任せる依頼（channel_auto_response_rules）の一覧と、スキルごとの対応区分（そのまま対応／確認してから対応）</span></li>
     <li class="diff-new">指定範囲外の質問への対応方針（out_of_scope_policy）と、スキルにない業務依頼の引き継ぎ先（fallback_handoff_user_id、8.1節F-17参照）</li>
     <li>「過去のやり取りを参照する場合は参考情報である旨を必ず示す」「文書を根拠にできる場合は過去のやり取りより優先する」等、5.3節の断定回避ルール（全チャンネル共通の固定指示）</li>
   </ol>
-  <p>チャンネル管理者が編集するのは1〜3<span class="diff-new">・5</span>のみで、4の自動対応範囲はUI（S-06）で別途構造化して保存し、AIへの指示文には自動生成して埋め込む。<span class="diff-new">末尾の断定回避ルール</span>は全チャンネル共通のシステム指示としてアプリ側で固定する。</p>
+  <p>チャンネル管理者が編集するのは1〜3<span class="diff-new">・5</span>のみで、4の<span class="diff-new">人に任せる依頼・スキルの対応区分</span>はUI（S-06）で別途構造化して保存し、AIへの指示文には自動生成して埋め込む。<span class="diff-new">末尾の断定回避ルール</span>は全チャンネル共通のシステム指示としてアプリ側で固定する。</p>
 
   <h3>8.4 外部システム連携（座席予約システム、F-23）</h3>
   <p>座席予約システムの空き状況参照は、Function Callingの<code>get_seat_availability(date, time_range, area)</code>ツールとして実装する。AIがツールを呼び出すと、<code>services/seat_reservation_client.py</code>が座席予約システムのREST APIを呼び出し、結果をT-07 message_blocks（block_type='external_system'）として整形する。</p>
