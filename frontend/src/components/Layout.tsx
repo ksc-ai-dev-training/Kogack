@@ -97,8 +97,8 @@ export default function Layout({ me, children }: { me: Me; children: React.React
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
   // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。S-06は9タブ
-  // （チャンネル管理者・基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・業務と対応範囲・
-  // 反応モード・定期投稿・自動応答トリガー）を実装済み。「業務と対応範囲」は旧「スキル」「自動対応範囲」
+  // （チャンネル管理者・基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・スキルと対応範囲設定・
+  // 反応モード・定期投稿・自動応答トリガー）を実装済み。「スキルと対応範囲設定」は旧「スキル」「自動対応範囲」
   // を2026-09-29に統合したもので、旧URLの?tab=autoもこの項目を選択状態にする
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
@@ -240,7 +240,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=skills`}
                   className={navItemClass(settingsTab === 'skills' || settingsTab === 'auto')}
                 >
-                  <span className="text-sm">🛠️</span>業務と対応範囲
+                  <span className="text-sm">🛠️</span>スキルと対応範囲設定
                 </GuardedLink>
               </li>
               <li>

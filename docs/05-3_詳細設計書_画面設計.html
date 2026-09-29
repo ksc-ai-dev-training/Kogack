@@ -36,6 +36,7 @@
       <tr class="diff-new"><td>1.5</td><td>2026-09-02</td><td>ProfileCard（F-40）に「DMを送る」ボタン（A-16, A-17）を追加した。userIdが自分自身以外のときのみ表示し、既存の一対一DMがあれば再利用、無ければA-17で新規開始してから遷移する。S-03項目表・ProfileCardコンポーネント定義（8.5節・11章）を更新した。</td></tr>
       <tr class="diff-new"><td>1.6</td><td>2026-09-29</td><td>S-06の「スキル」「自動対応範囲」タブを画面上だけ「業務と対応範囲」タブ1つにまとめた（基本設計書v1.45 4.8節）。あわせて「反応モード」タブにメンションの催促の設定欄（A-77）を追記した。</td></tr>
       <tr class="diff-new"><td>1.7</td><td>2026-09-29</td><td>S-06「業務と対応範囲」タブを、スキル・自動対応範囲の再設計（要件定義書v1.27 F-16）に合わせて改訂した。①AIに任せる業務（スキルごとに「そのまま対応／確認してから対応」を選ぶ）②人に任せる依頼（区分の選択は無く一覧のみ）③引き継ぎ先。</td></tr>
+      <tr class="diff-new"><td>1.8</td><td>2026-09-29</td><td>S-06のタブ名を「業務と対応範囲」から「スキルと対応範囲設定」に改めた（ユーザーからの要望）。</td></tr>
     </tbody>
   </table>
 
@@ -103,7 +104,7 @@
   </table>
 
   <h3>8.4 S-06 チャンネル設定</h3>
-  <p><span class="diff-new">9個</span>のタブで構成する（画面モックアップの検討で「チャンネル管理者」「定期投稿」「自動応答トリガー」を「AI設定の項目」から独立させた、基本設計書1.1節・4.10節）。<span class="diff-new">旧「スキル」「自動対応範囲」タブは2026-09-29に画面上だけ「業務と対応範囲」タブへ統合した（基本設計書4.8節）。旧URLの<code>?tab=skills</code>・<code>?tab=auto</code>はどちらも統合後のタブを開く。</span></p>
+  <p><span class="diff-new">9個</span>のタブで構成する（画面モックアップの検討で「チャンネル管理者」「定期投稿」「自動応答トリガー」を「AI設定の項目」から独立させた、基本設計書1.1節・4.10節）。<span class="diff-new">旧「スキル」「自動対応範囲」タブは2026-09-29に画面上だけ「スキルと対応範囲設定」タブへ統合した（基本設計書4.8節）。旧URLの<code>?tab=skills</code>・<code>?tab=auto</code>はどちらも統合後のタブを開く。</span></p>
   <table>
     <thead><tr><th>タブ</th><th>項目</th><th>種別</th><th>対応API</th></tr></thead>
     <tbody>
@@ -112,7 +113,7 @@
       <tr><td>キャラクタ</td><td>アイコン（画像アップロード）／名前／口調</td><td>画像＋テキスト</td><td>A-61→A-25</td></tr>
       <tr><td>振る舞い定義</td><td>プロンプト本文</td><td>テキストエリア</td><td>A-26（上書き保存、監査ログ記録）</td></tr>
       <tr><td>参照ドキュメント範囲</td><td>フォルダ/文書チェックボックスツリー、指定範囲外の対応方針（厳格に制限／一般回答を許可）</td><td>チェックボックス＋ラジオ</td><td>A-27</td></tr>
-      <tr class="diff-new"><td>業務と対応範囲</td><td>① AIに任せる業務（スキル）：スキル一覧（区分バッジ「そのまま対応／確認してから対応」、編集/削除）、＋スキルを追加（スキル名・進め方・対応のしかたの2択）<br>② 人に任せる依頼：依頼の種類の一覧（編集/削除）、＋追加、保存<br>③ 引き継ぎ先：参加者から選択（選択時に即保存）</td><td>一覧＋モーダル＋ラジオカード、テーブル、セレクト</td><td>①A-28〜A-30、②A-31、③A-45</td></tr>
+      <tr class="diff-new"><td>スキルと対応範囲設定</td><td>① AIに任せる業務（スキル）：スキル一覧（区分バッジ「そのまま対応／確認してから対応」、編集/削除）、＋スキルを追加（スキル名・進め方・対応のしかたの2択）<br>② 人に任せる依頼：依頼の種類の一覧（編集/削除）、＋追加、保存<br>③ 引き継ぎ先：参加者から選択（選択時に即保存）</td><td>一覧＋モーダル＋ラジオカード、テーブル、セレクト</td><td>①A-28〜A-30、②A-31、③A-45</td></tr>
       <tr><td>反応モード</td><td>メンション時のみ応答／投稿に自ら反応<span class="diff-new">、メンションの催促（オン/オフ、催促するまでの時間）</span></td><td>ラジオ<span class="diff-new">＋トグル＋セレクト</span></td><td>A-24<span class="diff-new">、A-77</span></td></tr>
       <tr><td>定期投稿</td><td>ルール一覧（編集/削除/一時停止）、追加フォーム（送り主表示名<span class="required-mark">*</span>、アイコン、本文<span class="required-mark">*</span>、頻度、初回送信日時<span class="required-mark">*</span>）</td><td>一覧＋フォーム</td><td>A-53〜A-56</td></tr>
       <tr><td>自動応答トリガー</td><td>ルール一覧（編集/削除/一時停止）、追加フォーム（種類：キーワード/絵文字<span class="required-mark">*</span>、値<span class="required-mark">*</span>、実行する処理＝固定、投稿本文<span class="required-mark">*</span>、送り主表示名<span class="required-mark">*</span>、アイコン）</td><td>一覧＋フォーム</td><td>A-63〜A-66</td></tr>
@@ -234,7 +235,7 @@
       <tr><td>SearchBox / ModifierPicker<br>Local / S-05</td><td>value, onSubmit, onModifierResolve</td><td>rawText, popoverOpen<br>→ <code>useChannels</code>（in:候補）, <code>useUserSearch</code>（from:/with:候補、A-68）</td><td>入力文字列をトークン分解し、<code>in:</code>/<code>from:</code>/<code>with:</code>検出時にui/Popover＋ui/UserPickerで候補を出す（API設計6.5節）。確定済み条件をui/Chipで表示し、個別に解除できる</td></tr>
       <tr><td>ChannelSettings<br>Page / S-06</td><td>なし（<code>useParams().channelId</code>）</td><td>tab<br>→ <code>useChannel</code>（A-06、chadmin判定）, <code>useChannelAiSettings</code>（A-23）</td><td>10タブの切替と、各タブへの<code>onSaved = () => mutate()</code>の配布（ui/Tabs使用）</td></tr>
       <tr><td>AdminsTab / RecurringPostsTab / TriggerRulesTab<br>Tab / S-06</td><td>channelId, onSaved</td><td>各タブ固有（追加フォーム入力等）<br>→ A-47/A-48、A-53〜A-56、A-63〜A-66</td><td>チャンネル管理者の追加解除（F-33）、定期投稿（F-36）、自動応答トリガー（F-38）の一覧・作成・編集・削除・一時停止</td></tr>
-      <tr><td>BasicTab 〜 <span class="diff-new">TasksTab（6タブ）</span><br>Tab / S-06</td><td>channelId, settings: ChannelAiSettings, onSaved</td><td>各タブのフォーム入力<br>→ A-24〜A-31、A-45、A-61</td><td>AI有効/無効・キャラクタ・振る舞い定義・参照ドキュメント範囲・<span class="diff-new">業務と対応範囲（AutoResponseSection・SkillsSection・HandoffSectionの3部品）</span>・反応モードの編集。初期値は<code>settings</code>から生成し、保存成功で<code>onSaved()</code>を呼ぶ（useChannelAiSettingsを再取得）</td></tr>
+      <tr><td>BasicTab 〜 <span class="diff-new">TasksTab（6タブ）</span><br>Tab / S-06</td><td>channelId, settings: ChannelAiSettings, onSaved</td><td>各タブのフォーム入力<br>→ A-24〜A-31、A-45、A-61</td><td>AI有効/無効・キャラクタ・振る舞い定義・参照ドキュメント範囲・<span class="diff-new">スキルと対応範囲設定（AutoResponseSection・SkillsSection・HandoffSectionの3部品）</span>・反応モードの編集。初期値は<code>settings</code>から生成し、保存成功で<code>onSaved()</code>を呼ぶ（useChannelAiSettingsを再取得）</td></tr>
       <tr><td>AdminConsole<br>Page / S-08</td><td>なし</td><td>tab<br>→ <code>useMe</code></td><td>4タブの切替のみ（ui/Tabs使用）。各タブは独立してデータを取得する</td></tr>
       <tr><td>UsersTab<br>Tab / S-08</td><td>なし</td><td>なし<br>→ <code>useAdminUsers</code>（A-36）, A-37, <code>useConfirm</code></td><td>ロール変更・有効/無効化。chadminはチャンネル管理者列に参考表示のみ（基本設計書3.3節）。無効化は確認ダイアログを経由</td></tr>
       <tr><td>DocFoldersTab<br>Tab / S-08</td><td>なし</td><td>newFolderId<br>→ <code>useDocFolders</code>（A-38）, A-39/A-40, A-41, <code>useConfirm</code></td><td>参照ドキュメントフォルダ候補の追加・削除・「今すぐ同期」</td></tr>
