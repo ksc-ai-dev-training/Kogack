@@ -217,6 +217,8 @@ export interface Message {
   generation_status: 'generating' | null
   /** F-14 やりとりの要約で生成された発言かどうか（要約ボタン経由。通常のAIメンション応答はfalse） */
   is_summary?: boolean
+  /** メンションの催促でAIが投稿した定型文（2026-09-29）。LLMの生成物ではないため注意書きを出さない */
+  is_reminder?: boolean
   /** 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージを編集できるようにしたい」）。
    * trueのとき本文の隣に「（編集済み）」を表示する */
   is_edited?: boolean

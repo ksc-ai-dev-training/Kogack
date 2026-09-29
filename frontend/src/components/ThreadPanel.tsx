@@ -347,7 +347,7 @@ export default function ThreadPanel({
                   )}
                 </div>
               )}
-              {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && (
+              {parentMessage.sender_type === 'ai' && parentMessage.generation_status !== 'generating' && !parentMessage.is_reminder && (
                 // F-30（MessageList.tsxと同じ）。元発言はMessageListを経由せずここで個別に描画しているため
                 // 別途対応が必要（AI発言に人間がスレッド返信した場合、元発言側にも表示する）
                 <div className="mt-[7px] flex items-center gap-[5px] text-[11px] text-ink-subtle">

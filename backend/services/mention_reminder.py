@@ -87,8 +87,9 @@ async def _remind(row) -> None:
         if reminder_id is None:
             return
         reminder_message_id = await conn.fetchval(
-            """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body, bot_display_name, bot_icon_url)
-               VALUES ($1, $2, 'ai', $3, $4, $5) RETURNING id""",
+            """INSERT INTO messages
+                   (channel_id, thread_parent_id, sender_type, body, bot_display_name, bot_icon_url, is_reminder)
+               VALUES ($1, $2, 'ai', $3, $4, $5, true) RETURNING id""",
             row["channel_id"], row["root_id"], body, row["persona_name"] or "Kogack AI", row["persona_icon_url"],
         )
         await insert_mention_blocks(

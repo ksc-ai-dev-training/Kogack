@@ -45,7 +45,7 @@
       <tr class="diff-new"><td>1.14</td><td>2026-09-07</td><td>新規T-23 google_drive_tokensを追加した。層2ドキュメントQ&A（F-19〜F-22）に向けたGoogle Drive連携の最初のスライスとして、GCP側のDrive API有効化・OAuthスコープの全社展開について千田氏の許可を得て着手した。利用者ごとのGoogle Driveアクセストークン（access_token・refresh_token・有効期限）を保存し、期限切れ時はrefresh_tokenで自動更新する（services/google_drive.py）。索引作成・埋め込みベクトル化・検索本体は次のスライス。</td></tr>
       <tr class="diff-new"><td>1.15</td><td>2026-09-17</td><td>T-08 channel_ai_settingsへ<code>ai_model</code>列を追加した。チャンネルごとのAIモデル選択機能（基本設計書v1.43、ユーザーからの明示的な要望）に伴う変更。選択肢はDBのCHECK制約では縛らず、API層（services/ai_client.MODEL_COSTSのキー集合）で検証する設計とした（新しいモデルの単価行を追加するだけでDBスキーマ変更無しに選択肢が増えるようにするため）。**当初はTEXT・NULL可（NULL＝AI_MODEL環境変数の既定値に追従する間接参照）で実装したが、同日中にユーザーから「『既定（...）を使う』という選択肢自体をなくし、どのチャンネルも常にgpt-4.1-nanoが具体的に選択されている状態にしたい」との要望を受け、NOT NULL DEFAULT 'gpt-4.1-nano'へ変更した**（既存のNULL行はbackfillしてからNOT NULLを付与する冪等な移行、database.py参照）。本節のみで完結する変更のため、この局所的な更新（T-25〜T-27等、他の実装済みテーブルの網羅的なbackfillは含まない）に留める。</td></tr>
       <tr class="diff-new"><td>1.16</td><td>2026-09-17</td><td>T-13 ai_usage_logsへ<code>message_id</code>（FK→messages.id、ON DELETE SET NULL）・<code>request_payload</code>（JSONB）を追加した。ユーザーからの明示的な要望「AIとのやりとり（システムがAPIに投げている内容）を画面上確認できるようにしてほしい」に対応するもので、AI発言ごとに実際にOpenAI APIへ送信したmessages配列（システムプロンプト・会話履歴・ツール呼び出しの往復を含む）を記録する。既存の「質問文・回答文は保持しない」方針（T-13の従来からの設計判断）とは対象が異なり、回答本文の重複保存ではなくリクエスト内容そのものの記録である旨を明記した。新規API（A-76、API設計4.3節）・S-03/S-04のAI発言に閲覧ボタンを追加した（詳細設計書API設計、v1.37）。要件定義書上のF-xxに対応付けられた変更ではないため要件定義書・基本設計書の改訂は無い。</td></tr>
-      <tr class="diff-new"><td>1.17</td><td>2026-09-29</td><td>メンションの催促（ユーザーからの明示的な要望、要件定義書上のF-xxに対応付けられていない新規機能）に伴い、T-08 channel_ai_settingsへ<code>mention_reminder_enabled</code>・<code>mention_reminder_hours</code>・<code>mention_reminder_enabled_at</code>を追加し、新規T-30 mention_remindersを追加した（3.19節）。新規API A-77（API設計4.6節）。</td></tr>
+      <tr class="diff-new"><td>1.17</td><td>2026-09-29</td><td>メンションの催促（ユーザーからの明示的な要望、要件定義書上のF-xxに対応付けられていない新規機能）に伴い、T-08 channel_ai_settingsへ<code>mention_reminder_enabled</code>・<code>mention_reminder_hours</code>・<code>mention_reminder_enabled_at</code>を追加し、新規T-30 mention_remindersを追加した（3.19節）。新規API A-77（API設計4.6節）。催促の発言を見分けるためT-05 messagesへ<code>is_reminder</code>列を追加した。あわせてT-08.ai_modelの既定値の記載を実装どおり'gpt-5-mini'に直した（起動のたびにgpt-4.1-nanoをgpt-5-miniへ書き換えていた移行処理も撤去した）。</td></tr>
     </tbody>
   </table>
 
@@ -141,6 +141,7 @@
       <tr><td>recurring_post_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→recurring_posts.id<span class="diff-new">（ON DELETE SET NULL。ルール削除後も発言自体は残す、基本設計書6.2節「設計判断」）</span></td></tr>
       <tr><td>trigger_rule_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→trigger_rules.id<span class="diff-new">（ON DELETE SET NULL、同上）</span>。CHECK (recurring_post_id IS NULL OR trigger_rule_id IS NULL)</td></tr>
       <tr class="diff-new"><td>is_summary</td><td>BOOLEAN</td><td>NOT NULL</td><td>false</td><td>F-14。要約ボタン（A-15）で生成された発言のときのみtrue。通常のAIメンション応答はfalse（本文中の会話上で要約機能由来と分かるようにするための表示用フラグ、要件定義書上のF-xxに対応付けられた変更ではない）</td></tr>
+      <tr class="diff-new"><td>is_reminder</td><td>BOOLEAN</td><td>NOT NULL</td><td>false</td><td>2026-09-29追加。メンションの催促（3.19節）でAIが投稿した定型文のときのみtrue。LLMの生成物ではないため、フロントはこの発言にF-30の注意書き（AIの回答には誤りが含まれる場合があります）を出さない</td></tr>
       <tr><td>deleted_at / deleted_by</td><td>TIMESTAMPTZ / BIGINT</td><td>NULL可</td><td>-</td><td>論理削除。deleted_byはFK→users.id</td></tr>
       <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
@@ -209,7 +210,7 @@
       <tr><td>reaction_mode</td><td>TEXT</td><td>NOT NULL</td><td>'mention_only'</td><td>CHECK IN ('mention_only','proactive')</td></tr>
       <tr><td>out_of_scope_policy</td><td>TEXT</td><td>NOT NULL</td><td>'strict'</td><td>CHECK IN ('strict','general')（F-11）</td></tr>
       <tr><td>fallback_handoff_user_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。NULL時は当該チャンネルchadminへ引き継ぐ（F-17）</td></tr>
-      <tr class="diff-new"><td>ai_model</td><td>TEXT</td><td>NOT NULL</td><td>'gpt-4.1-nano'</td><td>2026-09-17追加。当初はNULL可（NULL＝AI_MODEL環境変数の既定値を使う間接参照）だったが、同日中にユーザーの要望で「既定を使う」という抽象的な選択肢自体を撤去し、常に具体的なモデル名を持つNOT NULL DEFAULT 'gpt-4.1-nano'へ変更した。選択肢はDBのCHECK制約では縛らずAPI層（services/ai_client.MODEL_COSTSのキー集合）で検証する</td></tr>
+      <tr class="diff-new"><td>ai_model</td><td>TEXT</td><td>NOT NULL</td><td>'gpt-5-mini'</td><td>同日中に既定をgpt-5-miniへ変更（ユーザーからの要望）。2026-09-17追加。当初はNULL可（NULL＝AI_MODEL環境変数の既定値を使う間接参照）だったが、同日中にユーザーの要望で「既定を使う」という抽象的な選択肢自体を撤去し、常に具体的なモデル名を持つNOT NULL DEFAULT 'gpt-4.1-nano'へ変更した。選択肢はDBのCHECK制約では縛らずAPI層（services/ai_client.MODEL_COSTSのキー集合）で検証する</td></tr>
       <tr class="diff-new"><td>mention_reminder_enabled</td><td>BOOLEAN</td><td>NOT NULL</td><td>false</td><td>2026-09-29追加。メンションの催促の有効/無効（A-77、3.19節）</td></tr>
       <tr class="diff-new"><td>mention_reminder_hours</td><td>INT</td><td>NOT NULL</td><td>24</td><td>2026-09-29追加。催促までの待ち時間（時間）。CHECK 1〜168</td></tr>
       <tr class="diff-new"><td>mention_reminder_enabled_at</td><td>TIMESTAMPTZ</td><td>NULL可</td><td>-</td><td>2026-09-29追加。最後にオフ→オンへ切り替えた時刻。これより前のメンションは催促しない</td></tr>

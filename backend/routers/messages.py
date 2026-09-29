@@ -47,6 +47,8 @@ def _message_out(
         # F-14 やりとりの要約で生成された発言かどうか（ユーザーからの要望、フロントが専用バッジを出す）。
         # スレッド全体の要約はここ（A-13/A-14）を通る唯一の経路
         "is_summary": row["is_summary"],
+        # メンションの催促の定型文（services/mention_reminder.py）。フロントは注意書きを出さない
+        "is_reminder": row["is_reminder"],
         # 発言の編集（ユーザーからの明示的な要望）。他2ルーターと同じ分岐に揃えておく
         "is_edited": row["edited_at"] is not None,
         "blocks": blocks or [],

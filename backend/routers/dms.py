@@ -206,6 +206,8 @@ def _message_out(
         # F-14 やりとりの要約はチャンネルのみ対応（A-15がチャンネル専用API）のためDMでは常にfalseだが、
         # 他2ルーターと同じ分岐に揃えておく
         "is_summary": row["is_summary"],
+        # メンションの催促の定型文（services/mention_reminder.py）。フロントは注意書きを出さない
+        "is_reminder": row["is_reminder"],
         # 発言の編集（ユーザーからの明示的な要望）。他2ルーターと同じ分岐に揃えておく
         "is_edited": row["edited_at"] is not None,
         # F-41 @メンション（バグ修正2026-09-04でDMも対応。候補元はdirect_message_members）。

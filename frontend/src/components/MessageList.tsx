@@ -2003,12 +2003,13 @@ export default function MessageList({
                     {renderMessageBody(m.body, m.blocks, members, aiPersonaName, customEmoji, isEmojiOnlyBody(m.body, customEmoji))}
                   </div>
                 )}
-                {m.sender_type === 'ai' && m.generation_status !== 'generating' && (
+                {m.sender_type === 'ai' && m.generation_status !== 'generating' && !m.is_reminder && (
                   // F-30 AI回答への注意喚起表示（基本設計書5.12節「S-03の各AI発言下部」、画面モックアップ
                   // S-03の`.ai-disclaimer`）。要件定義書REQ-N-04対応。ChannelSettings.tsxのDocScopeTabの
                   // ヒント文言が「どちらの設定でも常時表示されます」と既に説明していたが、実際には
                   // MessageList側の実装が無く表示されていなかった抜けを、ユーザーからの指摘を受けて
-                  // 実装した（要約ボタン経由の発言（is_summary）も同じAI発言のため対象に含める）
+                  // 実装した（要約ボタン経由の発言（is_summary）も同じAI発言のため対象に含める）。メンションの
+                  // 催促（is_reminder）はLLMを呼ばない定型文のため対象外（ユーザーからの明示的な要望、2026-09-29）
                   <div className="mt-[7px] flex items-center gap-[5px] text-[11px] text-ink-subtle">
                     ⚠ AIの回答には誤りが含まれる場合があります。
                   </div>

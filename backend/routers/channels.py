@@ -566,6 +566,8 @@ def _message_out(
         "thread_reply_count": row["thread_reply_count"],
         # F-14 やりとりの要約で生成された発言かどうか（ユーザーからの要望、フロントが専用バッジを出す）
         "is_summary": row["is_summary"],
+        # メンションの催促の定型文（services/mention_reminder.py）。フロントは注意書きを出さない
+        "is_reminder": row["is_reminder"],
         # 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージを編集できるようにしたい。
         # 編集済みと明記してほしい」）。フロントが本文の隣に「（編集済み）」を出す
         "is_edited": row["edited_at"] is not None,

@@ -117,6 +117,10 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 -- thread_parent_idが通常のAIメンション応答と同じくNULLになり構造上区別できないため、専用の
 -- フラグ列で明示する（services/ai_agent.start_summaryのみが true を立てる）
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_summary BOOLEAN NOT NULL DEFAULT false;
+-- メンションの催促（services/mention_reminder.py、2026-09-29）でAIが投稿した定型文かどうか。
+-- LLMの生成物ではないため、フロントはこの発言にだけ「AIの回答には誤りが含まれる場合があります」
+-- の注意書きを出さない（ユーザーからの明示的な要望）。is_summaryと同じくフラグ列で明示する
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_reminder BOOLEAN NOT NULL DEFAULT false;
 -- F-xx 発言の編集（ユーザーからの明示的な要望「自分が送ったメッセージを送った後でも編集できる
 -- ようにしたい。編集したメッセージには（編集済み）と明記してほしい」）。編集したかどうかの
 -- フラグだけでなく実際の編集時刻も残しておく（監査ログ同様「本文差分は保持しない」設計だが、
@@ -263,18 +267,14 @@ ALTER TABLE channel_ai_settings ENABLE ROW LEVEL SECURITY;
 -- SET DEFAULT/SET NOT NULLとも既に同じ状態への適用は無害なため、AUTO_MIGRATE=1で毎起動
 -- 実行しても安全）。
 ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS ai_model TEXT;
-UPDATE channel_ai_settings SET ai_model = 'gpt-4.1-nano' WHERE ai_model IS NULL;
+UPDATE channel_ai_settings SET ai_model = 'gpt-5-mini' WHERE ai_model IS NULL;
 -- 2026-09-17続報: ユーザーからの明示的な要望「速度は遅くなってもかまわないので、既定モデルを
--- 高性能なものにしましょう」を受け、既定をgpt-4.1-nanoからgpt-5-miniへ変更した。この設定は
--- NOT NULLで各チャンネルへ常に具体的な値を持たせる方式（上記）にしたため、単にDEFAULT句を
--- 変えるだけでは新規チャンネルにしか反映されない。ユーザーに確認のうえ、既存チャンネルの
--- ai_model列（当時の既定値のまま未変更の行）もまとめてbackfillすることにした。**S-06で
--- チャンネル管理者がgpt-4.1-nanoを明示的に選び直していた場合と、単に当時の既定値のまま
--- 一度も変更していない場合を区別する手段がDB上に無いため、両者を区別せず一律に更新する**
--- （前者に該当するチャンネルがあれば後からS-06で選び直してもらう必要がある）。冪等：
--- 2回目以降はUPDATE対象0件・SET DEFAULTも既に同じ状態への適用で無害なため、AUTO_MIGRATE=1で
--- 毎起動実行しても安全。
-UPDATE channel_ai_settings SET ai_model = 'gpt-5-mini' WHERE ai_model = 'gpt-4.1-nano';
+-- 高性能なものにしましょう」を受け、既定をgpt-4.1-nanoからgpt-5-miniへ変更した。当時は既存
+-- チャンネルもまとめて移すため「ai_model = 'gpt-4.1-nano' をgpt-5-miniへ」というUPDATEをここに
+-- 置いていたが、これは冪等ではなかった（バグ修正、2026-09-29）: その後S-06でgpt-4.1-nanoを
+-- 選んだチャンネルも、起動（デプロイ・再起動）のたびにgpt-5-miniへ戻されていた。既存DBの移行は
+-- 当時の起動で済んでいるため、このUPDATEは撤去した。上のNULL埋めもgpt-5-miniにしてあるので、
+-- この列を持たない古いDBから起動した場合の結果は従来と変わらない。
 ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET DEFAULT 'gpt-5-mini';
 ALTER TABLE channel_ai_settings ALTER COLUMN ai_model SET NOT NULL;
 -- persona_nameの既定値を「AI」から「Kogack AI」へ変更した際のbackfill（CREATE TABLE IF NOT EXISTSは
