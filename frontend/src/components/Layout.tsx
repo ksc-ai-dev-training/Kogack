@@ -96,9 +96,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const [scheduledModalOpen, setScheduledModalOpen] = useState(false)
 
   // S-06/S-08表示中はサイドバーをチャンネル一覧ではなく設定用ナビに差し替える（画面モックアップと同じ構成）。
-  // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。S-06は10タブ
-  // （チャンネル管理者・基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・
-  // 自動対応範囲・定期投稿・自動応答トリガー）を実装済み
+  // タブ切替は?tab=クエリパラメータで行う（ThreadPanelの?threadと同じ考え方）。S-06は9タブ
+  // （チャンネル管理者・基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・業務と対応範囲・
+  // 反応モード・定期投稿・自動応答トリガー）を実装済み。「業務と対応範囲」は旧「スキル」「自動対応範囲」
+  // を2026-09-29に統合したもので、旧URLの?tab=autoもこの項目を選択状態にする
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
   const [searchParams] = useSearchParams()
@@ -237,9 +238,9 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               <li>
                 <GuardedLink
                   to={`/channels/${settingsMatch.params.channelId}/settings?tab=skills`}
-                  className={navItemClass(settingsTab === 'skills')}
+                  className={navItemClass(settingsTab === 'skills' || settingsTab === 'auto')}
                 >
-                  <span className="text-sm">🛠️</span>スキル
+                  <span className="text-sm">🛠️</span>業務と対応範囲
                 </GuardedLink>
               </li>
               <li>
@@ -248,14 +249,6 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   className={navItemClass(settingsTab === 'reaction')}
                 >
                   <span className="text-sm">💬</span>反応モード
-                </GuardedLink>
-              </li>
-              <li>
-                <GuardedLink
-                  to={`/channels/${settingsMatch.params.channelId}/settings?tab=auto`}
-                  className={navItemClass(settingsTab === 'auto')}
-                >
-                  <span className="text-sm">🎚️</span>自動対応範囲
                 </GuardedLink>
               </li>
             </ul>

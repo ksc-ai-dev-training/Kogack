@@ -276,9 +276,8 @@
       <button class="tab-btn" data-tab="character" onclick="showTab(this,'character')"><span class="ic">🎭</span>キャラクタ</button>
       <button class="tab-btn" data-tab="prompt" onclick="showTab(this,'prompt')"><span class="ic">📝</span>振る舞い定義</button>
       <button class="tab-btn" data-tab="docs" onclick="showTab(this,'docs')"><span class="ic">📚</span>参照ドキュメント範囲</button>
-      <button class="tab-btn" data-tab="skills" onclick="showTab(this,'skills')"><span class="ic">🛠️</span>スキル</button>
+      <button class="tab-btn" data-tab="skills" onclick="showTab(this,'skills')"><span class="ic">🛠️</span>業務と対応範囲</button>
       <button class="tab-btn" data-tab="reaction" onclick="showTab(this,'reaction')"><span class="ic">💬</span>反応モード</button>
-      <button class="tab-btn" data-tab="auto" onclick="showTab(this,'auto')"><span class="ic">🎚️</span>自動対応範囲</button>
     </nav>
 
     <div class="settings-content">
@@ -595,9 +594,47 @@
         </div>
       </div>
 
-      <!-- スキル -->
+      <!-- 業務と対応範囲（旧「スキル」「自動対応範囲」を画面上だけ統合、2026-09-29） -->
       <div class="tab-panel" id="panel-skills">
-        <p class="panel-lede">「依頼を受けたらこう進める」手順をスキルとして登録し、AIに割り当てます（F-12）。</p>
+        <p class="panel-lede">依頼の種類ごとにAIが対応するか人に回すかを決め（①）、AIが対応する業務の進め方を登録します（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。</p>
+
+        <div class="field-group">
+          <label class="field-label">① 人に回す依頼</label>
+          <div class="field-hint" style="margin:0 0 10px;">依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。②に手順を登録した業務でも、ここで「人が対応」にすると人に回します。</div>
+        <table class="auto-table">
+          <thead><tr><th>依頼の種類</th><th>対応区分</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>座席予約状況の確認</td>
+              <td class="pill-group"><span class="pill on-ok">AIが対応</span><span class="pill">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>ドキュメント検索・引用</td>
+              <td class="pill-group"><span class="pill on-ok">AIが対応</span><span class="pill">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>やりとりの要約</td>
+              <td class="pill-group"><span class="pill on-ok">AIが対応</span><span class="pill">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>経費精算に関する相談</td>
+              <td class="pill-group"><span class="pill">AIが対応</span><span class="pill on-human">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>契約書フォーマットの相談</td>
+              <td class="pill-group"><span class="pill">AIが対応</span><span class="pill on-human">人が対応</span></td>
+            </tr>
+            <tr>
+              <td>本番デプロイの実行代行</td>
+              <td class="pill-group"><span class="pill">AIが対応</span><span class="pill on-human">人が対応</span></td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="field-group" style="margin-top:26px;">
+          <label class="field-label">② AIが対応する業務の手順（スキル）</label>
+          <div class="field-hint" style="margin:0 0 10px;">「依頼を受けたらこう進める」手順を登録します（F-12）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。</div>
         <div class="skill-card">
           <div class="skill-head"><span class="skill-title">デプロイ手順の案内</span><button class="skill-del" type="button">削除</button></div>
           <textarea rows="3">デプロイ方法に関する質問を受けたら、まずデプロイ手順書.mdを参照し、ステージング検証→バックアップ→本番反映の順で案内する。手順書に無い内容は「担当者に確認してください」と回答する。</textarea>
@@ -608,9 +645,11 @@
         </div>
         <button class="add-skill-btn" type="button">＋ スキルを追加</button>
 
+        </div>
+
         <div class="field-group" style="margin-top:26px;">
-          <label class="field-label">スキルにない業務依頼の引き継ぎ先</label>
-          <div class="field-hint" style="margin:0 0 10px;">登録されたスキル・自動対応範囲のどれにも該当しない業務依頼が来たとき、誰に引き継ぐかを設定します（F-17）。</div>
+          <label class="field-label">③ 引き継ぎ先</label>
+          <div class="field-hint" style="margin:0 0 10px;">①で「人が対応」にした依頼と、②のどのスキルにも当てはまらない業務依頼が来たとき、誰に引き継ぐかを設定します（F-17）。</div>
 
           <div class="radio-card selected">
             <div class="radio-dot"></div>
@@ -654,40 +693,6 @@
         </div>
       </div>
 
-      <!-- 自動対応範囲 -->
-      <div class="tab-panel" id="panel-auto">
-        <p class="panel-lede">依頼内容ごとに、AIが自動で対応してよい範囲を区分します（F-16）。</p>
-        <table class="auto-table">
-          <thead><tr><th>依頼内容</th><th>対応区分</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>座席予約状況の確認</td>
-              <td class="pill-group"><span class="pill on-ok">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>ドキュメント検索・引用</td>
-              <td class="pill-group"><span class="pill on-ok">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>やりとりの要約</td>
-              <td class="pill-group"><span class="pill on-ok">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>経費精算に関する相談</td>
-              <td class="pill-group"><span class="pill">自動対応可</span><span class="pill on-warn">確認のうえ対応</span><span class="pill">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>契約書フォーマットの相談</td>
-              <td class="pill-group"><span class="pill">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill on-human">人が対応</span></td>
-            </tr>
-            <tr>
-              <td>本番デプロイの実行代行</td>
-              <td class="pill-group"><span class="pill">自動対応可</span><span class="pill">確認のうえ対応</span><span class="pill on-human">人が対応</span></td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="field-hint">「人が対応」に区分された依頼は、AIが同一チャンネル内でチャンネル管理者にメンションして引き継ぎます（F-17。DMは使いません）。</div>
-      </div>
     </div>
   </div>
 
@@ -698,7 +703,7 @@
 
     <strong>モックアップ注記</strong><br>
     画面ID: <code>S-06</code> ／ 対応機能: <code>F-08,F-09,F-10,F-11,F-12,F-15,F-16,F-36,F-37,F-38</code><br>
-左のタブは「チャンネル設定」（チャンネル管理者）と「AI設定の項目」（基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・スキル・反応モード・自動対応範囲）の2グループに分けている。後者は<a href="../02_要件定義書.html#sec4">要件定義書4.2節</a>の項目に対応する画面ID<code>S-06</code>本来の対応機能（<code>F-08,F-09,F-10,F-11,F-12,F-15,F-16</code>）。編集可能なのは、そのチャンネルの<span class="badge badge-chadmin">chadmin</span>とシステム管理者のみ。振る舞い定義（F-09）の変更は監査ログに記録（7章）。タブ切替はこの画面内で実際に動作します。<strong>「チャンネル管理者」タブは要件定義書4.2節のS-06設定項目には含まれないAI設定外の機能</strong>で、利用者管理（S-08）でロールを付与するのではなく、このチャンネルの編集権限を持つ本人が直接付け替える設計とした（基本設計書3.3節の設計判断＝chadminはT-03 channel_members.is_channel_adminで表現、と整合）。「参照ドキュメント範囲」タブ内の<strong>「指定範囲外の質問が来た場合の対応方針」</strong>、「スキル」タブ内の<strong>「スキルにない業務依頼の引き継ぎ先」</strong>も同様に画面モックアップのみに追加した設定（要件定義書・基本設計書は未反映）。「基本設定」タブ内の<strong class="diff-new">「AIモデル」選択欄</strong>（2026-09-17追加）はユーザーからの明示的な要望による追加設定で、要件定義書には対応する要求が無いが、基本設計書2.2節・8.1節には反映済み。<br>
+左のタブは「チャンネル設定」（チャンネル管理者）と「AI設定の項目」（基本設定・キャラクタ・振る舞い定義・参照ドキュメント範囲・業務と対応範囲・反応モード）の2グループに分けている。後者は<a href="../02_要件定義書.html#sec4">要件定義書4.2節</a>の項目に対応する画面ID<code>S-06</code>本来の対応機能（<code>F-08,F-09,F-10,F-11,F-12,F-15,F-16</code>）。編集可能なのは、そのチャンネルの<span class="badge badge-chadmin">chadmin</span>とシステム管理者のみ。振る舞い定義（F-09）の変更は監査ログに記録（7章）。タブ切替はこの画面内で実際に動作します。<strong>「チャンネル管理者」タブは要件定義書4.2節のS-06設定項目には含まれないAI設定外の機能</strong>で、利用者管理（S-08）でロールを付与するのではなく、このチャンネルの編集権限を持つ本人が直接付け替える設計とした（基本設計書3.3節の設計判断＝chadminはT-03 channel_members.is_channel_adminで表現、と整合）。「参照ドキュメント範囲」タブ内の<strong>「指定範囲外の質問が来た場合の対応方針」</strong>、「業務と対応範囲」タブ内の<strong>「引き継ぎ先」</strong>も同様に画面モックアップのみに追加した設定（要件定義書・基本設計書は未反映）。「基本設定」タブ内の<strong class="diff-new">「AIモデル」選択欄</strong>（2026-09-17追加）はユーザーからの明示的な要望による追加設定で、要件定義書には対応する要求が無いが、基本設計書2.2節・8.1節には反映済み。<br>
     <span style="color:#fbbf24;">1.8版で追加:</span> 「チャンネル管理者」タブに「公開範囲」トグルを追加し、公開／非公開（<code>F-34</code>）をチャンネル管理者が切り替えられるようにした。こちらは要件定義書・基本設計書にも反映済み。<br>
     <span style="color:#fbbf24;">1.9版で追加:</span> 「チャンネル設定」グループに「定期投稿」タブを新設し、日時・頻度（1回のみ／毎日／毎週／毎月）を指定してこのチャンネルに自動投稿する機能（<code>F-36</code>）を追加した。投稿ごとに送り主の表示名・アイコンを設定でき、実際のメッセージには<span class="badge badge-bot">BOT</span>バッジを付けてチャンネルAIや人間の発言と区別する（BOTはAIへの質問応答を行わない）。有効／一時停止の切り替えと編集・削除が行える。こちらも要件定義書・基本設計書に反映済み。<br>
     <span style="color:#fbbf24;">1.12版で追加:</span> 「キャラクタ」タブのAIアイコン、「定期投稿」タブの送り主アイコンを、画像アップロードで設定できるようにした（<code>F-37</code>）。個人のプロフィール画像（ヘッダーのユーザーメニューから）にも同じ仕組みを使う。こちらも要件定義書・基本設計書に反映済み。<br>
@@ -706,7 +711,8 @@
     <span style="color:#fbbf24;">1.14版で削除:</span> F-36の宛先を個人（複数可）にも対応していたが（1.11版）、チャンネル運用への注力を優先し対象外に戻した。ヘッダーの「🔁 リマインダー」・補足05「リマインダー」を削除し、この「定期投稿」タブはチャンネル宛てのみを扱う。<br>
     <span style="color:#fbbf24;">1.15版で改称:</span> 画面名を「チャンネルAI設定」から「チャンネル設定」に変更した。チャンネル管理者・定期投稿・自動応答トリガーとAI設定以外の項目が増え、旧名称が実態と合わなくなったため。画面ID・ファイル名は変更していない。要件定義書・基本設計書にも反映済み。<br>
     <span style="color:#fbbf24;">1.16版で改名:</span> モックアップのファイル名も<code>S-06_チャンネルAI設定.html</code>から<code>S-06_チャンネル設定.html</code>に変更した。参照している全ファイル（一覧・S-03・補足03・補足06）のリンクを更新済み。<br>
-    <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル管理者」タブにチャンネル名・説明文の編集欄と、チャンネルを完全に削除する操作（危険な操作。削除対象のチャンネル名を再入力して初めて「削除する」ボタンが有効になる）を追加した。要件定義書F-02・権限マトリクスに反映済み（チャンネル名・説明文の編集は今回新規、削除自体は基本設計書に以前から記載されていたが未実装だった）。
+    <span style="color:#fbbf24;">1.19版で追加:</span> 「チャンネル管理者」タブにチャンネル名・説明文の編集欄と、チャンネルを完全に削除する操作（危険な操作。削除対象のチャンネル名を再入力して初めて「削除する」ボタンが有効になる）を追加した。要件定義書F-02・権限マトリクスに反映済み（チャンネル名・説明文の編集は今回新規、削除自体は基本設計書に以前から記載されていたが未実装だった）。<br>
+    <span style="color:#fbbf24;" class="diff-new">1.20版で統合:</span> <span class="diff-new">「スキル」タブと「自動対応範囲」タブを、画面上だけ「業務と対応範囲」タブ1つにまとめた（2026-09-29、ユーザーからの要望）。上から「① 人に回す依頼」（旧・自動対応範囲、F-16）・「② AIが対応する業務の手順」（旧・スキル、F-12）・「③ 引き継ぎ先」（F-17）の順に並べる。DB・API・機能は別々のまま。実行前確認（F-25）が未実装で「自動対応可」と同じ動きしかしない「確認のうえ対応」は選択肢から外し、「自動対応可」は「AIが対応」に言い換えた。基本設計書4.8節に反映済み。</span>
   </div>
 
 <script>

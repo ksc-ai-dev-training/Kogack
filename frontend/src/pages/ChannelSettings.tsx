@@ -24,8 +24,9 @@ import type {
 const ICON_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_ICON_BYTES = 5 * 1024 * 1024
 
-// S-06 チャンネル設定。このスライスは10タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
-// 参照ドキュメント範囲・スキル・反応モード・自動対応範囲・定期投稿・自動応答トリガー）を実装。
+// S-06 チャンネル設定。9タブ（チャンネル管理者・基本設定・キャラクタ・振る舞い定義・
+// 参照ドキュメント範囲・業務と対応範囲・反応モード・定期投稿・自動応答トリガー）を実装。
+// 「業務と対応範囲」は旧「スキル」「自動対応範囲」の2タブを2026-09-29に画面上だけ統合したもの。
 // タブ切替はLayout.tsxと共有する?tab=クエリパラメータで行う。
 export default function ChannelSettings() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -72,14 +73,11 @@ export default function ChannelSettings() {
         {tab === 'docscope' && channelId && settings && channel && (
           <DocScopeTab channelId={channelId} settings={settings} mutate={mutateAi} isPublic={channel.is_public} />
         )}
-        {tab === 'skills' && channelId && settings && (
-          <SkillsTab channelId={channelId} settings={settings} mutate={mutateAi} />
+        {(tab === 'skills' || tab === 'auto') && channelId && settings && (
+          <TasksTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
         {tab === 'reaction' && channelId && settings && (
           <ReactionTab channelId={channelId} settings={settings} mutate={mutateAi} />
-        )}
-        {tab === 'auto' && channelId && settings && (
-          <AutoResponseTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
         {tab === 'admin' && channelId && <AdminTab channelId={channelId} />}
         {tab === 'recurring' && channelId && <RecurringPostsTab channelId={channelId} />}
@@ -1206,18 +1204,64 @@ function MentionReminderSection({
 }
 
 const AUTO_RESPONSE_LEVELS: { value: AutoResponseRule['response_level']; label: string }[] = [
-  { value: 'auto', label: '自動対応可' },
+  { value: 'auto', label: 'AIが対応' },
   { value: 'confirm', label: '確認のうえ対応' },
   { value: 'human', label: '人が対応' },
 ]
 
-// 自動対応範囲タブ（A-31、F-16）。「人が対応」区分の判定方法は設計書が規定していない（グレー）ため、
+// 「確認のうえ対応」は実行前確認（F-25）が未実装で「AIが対応」と同じ動きしかしないため、選択肢には
+// 出さない（2026-09-29、ユーザーとの合意）。既にこの区分になっている行だけは、データを失わないよう
+// その行に限って表示を残す。F-25を実装したらこの絞り込みを外す
+const visibleLevels = (current: AutoResponseRule['response_level']) =>
+  AUTO_RESPONSE_LEVELS.filter((lv) => lv.value !== 'confirm' || current === 'confirm')
+
+// 「業務と対応範囲」タブ（2026-09-29、ユーザーからの要望で旧「スキル」タブと旧「自動対応範囲」タブを
+// 画面上だけ1つにまとめた。DB（T-11/T-12）・API（A-28〜A-31・A-45）は別々のまま）。どちらも
+// 「この種類の依頼が来たらAIはどうするか」を決める設定で、引き継ぎ先も両方から使われるため、
+// ①人に回す依頼 ②AIが対応する業務の手順 ③引き継ぎ先 の順に1画面で見渡せるようにする。
+// 旧URL（?tab=skills・?tab=auto）はどちらもこのタブを開く
+function TasksTab({
+  channelId,
+  settings,
+  mutate,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+}) {
+  return (
+    <div className="max-w-[700px]">
+      <p className="mb-6 text-[12.5px] leading-relaxed text-ink-muted">
+        依頼の種類ごとにAIが対応するか人に回すかを決め（①）、AIが対応する業務の進め方を登録します（②）。AIが対応しない依頼は、③の引き継ぎ先へ相談するようAIが案内します。
+      </p>
+      <SectionHeading no="①" title="人に回す依頼" />
+      <AutoResponseSection channelId={channelId} settings={settings} mutate={mutate} />
+      <div className="mt-10" />
+      <SectionHeading no="②" title="AIが対応する業務の手順（スキル）" />
+      <SkillsSection channelId={channelId} settings={settings} mutate={mutate} />
+      <div className="mt-10" />
+      <SectionHeading no="③" title="引き継ぎ先" />
+      <HandoffSection channelId={channelId} settings={settings} mutate={mutate} />
+    </div>
+  )
+}
+
+function SectionHeading({ no, title }: { no: string; title: string }) {
+  return (
+    <div className="mb-2.5 border-b border-line pb-1.5 text-[14px] font-bold text-ink">
+      {no} {title}
+    </div>
+  )
+}
+
+// ①人に回す依頼＝旧「自動対応範囲」タブ（A-31、F-16。TasksTabの一部）。
+// 「人が対応」区分の判定方法は設計書が規定していない（グレー）ため、
 // ユーザーに確認のうえ、区分一覧をシステムプロンプトに含めてAI自身に判断・引き継ぎさせる方式を
 // 採用した（追加の分類LLM呼び出しはしない。services/ai_agent.py _build_auto_response_sectionを参照）。
 // request_category（依頼内容）はチャンネル管理者が自由に追加・削除できる（画面モックアップの6例は
 // 固定候補ではなく記入例）。DocScopeTabと同じ「ローカルで編集→まとめて保存」方式（1回のPUTで
 // 洗い替え）とし、行の追加・削除・区分変更のたびに個別リクエストを発生させない
-function AutoResponseTab({
+function AutoResponseSection({
   channelId,
   settings,
   mutate,
@@ -1289,7 +1333,7 @@ function AutoResponseTab({
       })
       setBaseline(JSON.stringify(rules))
       await mutate()
-      toast('自動対応範囲を保存しました')
+      toast('人に回す依頼を保存しました')
     } catch (e) {
       toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
     } finally {
@@ -1304,19 +1348,19 @@ function AutoResponseTab({
   }
 
   return (
-    <div className="max-w-[700px]">
-      <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
-        依頼内容ごとに、AIが自動で対応してよい範囲を区分します（F-16）。
+    <div>
+      <p className="mb-4 text-[12.5px] leading-relaxed text-ink-muted">
+        依頼の種類を登録し、「人が対応」を選んだものはAIが自分で答えず、引き継ぎ先（③）へ相談するよう案内します（F-16）。②に手順を登録した業務でも、ここで「人が対応」にすると人に回します。
       </p>
 
       {rules.length === 0 ? (
-        <p className="mb-5 text-[12px] text-ink-subtle">依頼内容の区分はまだ登録されていません。</p>
+        <p className="mb-5 text-[12px] text-ink-subtle">依頼の種類はまだ登録されていません。</p>
       ) : (
         <div className="mb-5 overflow-hidden rounded-[10px] border border-line">
           <table className="w-full text-left text-[12.5px]">
             <thead className="bg-surface-subtle text-[11px] text-ink-subtle">
               <tr>
-                <th className="px-3.5 py-2 font-bold">依頼内容</th>
+                <th className="px-3.5 py-2 font-bold">依頼の種類</th>
                 <th className="px-3.5 py-2 font-bold">対応区分</th>
                 <th className="px-3.5 py-2" />
               </tr>
@@ -1345,7 +1389,7 @@ function AutoResponseTab({
                     </td>
                     <td className="px-3.5 py-2.5">
                       <div className="flex gap-1.5">
-                        {AUTO_RESPONSE_LEVELS.map((lv) => (
+                        {visibleLevels(r.response_level).map((lv) => (
                           <button
                             key={lv.value}
                             type="button"
@@ -1427,7 +1471,7 @@ function AutoResponseTab({
       </div>
 
       <div className="mb-5 text-[11px] leading-relaxed text-ink-subtle">
-        「人が対応」に区分された依頼は、AIが同一チャンネル内で引き継ぎ先にメンションして案内します（F-17。DMは使いません）。「確認のうえ対応」は実行前確認の仕組み（座席予約等の書き込み操作）が未実装のため、現時点では「自動対応可」と同じ扱いです。
+        どの依頼がどの種類に当てはまるかはAI自身が文章から判断するため、判断を誤ることがあります。絶対に答えさせたくない話題は「振る舞い定義」にも書いておくと確実です。
       </div>
 
       <button
@@ -1480,11 +1524,10 @@ function SkillFormFields({
   )
 }
 
-// スキルタブ（A-28〜A-30・A-45、F-12・F-17）。定期投稿・トリガーと同じ「新規作成パネル＋編集
-// モーダル」の構成。引き継ぎ先（fallback_handoff_user_id）はスキルと同じS-06タブに同居させる
-// （基本設計書「スキルにない業務依頼の引き継ぎ先も設定する」の記載どおり）。値は参加者から選ぶ
-// セレクトのみのシンプルな項目のため、GeneralTabのトグルと同じく選択時に即保存する
-function SkillsTab({
+// ②AIが対応する業務の手順＝旧「スキル」タブ（A-28〜A-30、F-12。TasksTabの一部）。定期投稿・
+// トリガーと同じ「新規作成パネル＋編集モーダル」の構成。引き継ぎ先は①②の両方から使われるため
+// HandoffSection（③）へ分けた
+function SkillsSection({
   channelId,
   settings,
   mutate,
@@ -1495,12 +1538,10 @@ function SkillsTab({
 }) {
   const toast = useToast()
   const confirm = useConfirm()
-  const { members } = useChannelMembers(channelId)
   const [editingItem, setEditingItem] = useState<Skill | null>(null)
   const [title, setTitle] = useState('')
   const [instructions, setInstructions] = useState('')
   const [saving, setSaving] = useState(false)
-  const [handoffSaving, setHandoffSaving] = useState(false)
 
   const submit = async () => {
     if (!title.trim() || !instructions.trim()) {
@@ -1542,26 +1583,10 @@ function SkillsTab({
     }
   }
 
-  const changeHandoff = async (userId: string) => {
-    setHandoffSaving(true)
-    try {
-      await apiFetch(`/api/channels/${channelId}/ai-settings/handoff`, {
-        method: 'PUT',
-        body: JSON.stringify({ fallback_handoff_user_id: userId || null }),
-      })
-      await mutate()
-      toast('引き継ぎ先を更新しました')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '更新に失敗しました', 'error')
-    } finally {
-      setHandoffSaving(false)
-    }
-  }
-
   return (
-    <div className="max-w-[700px]">
-      <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
-        「依頼を受けたらこう進める」という具体的な手順をスキルとして登録します（F-12）。登録したスキルはAIの応答生成時にそのまま指示として渡されます。
+    <div>
+      <p className="mb-4 text-[12.5px] leading-relaxed text-ink-muted">
+        「依頼を受けたらこう進める」という具体的な手順を登録します（F-12）。スキルを1件でも登録すると、どのスキルにも当てはまらない業務依頼には、AIは「対応できません」と伝えて引き継ぎ先（③）を案内します。
       </p>
 
       <ul className="mb-6 space-y-2.5">
@@ -1590,7 +1615,7 @@ function SkillsTab({
         ))}
       </ul>
 
-      <div className="mb-8 rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
+      <div className="rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
         <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しいスキルを追加</div>
         <SkillFormFields
           title={title}
@@ -1608,27 +1633,6 @@ function SkillsTab({
         </button>
       </div>
 
-      <div>
-        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">スキルにない依頼の引き継ぎ先</label>
-        <p className="mb-2.5 text-[11.5px] leading-relaxed text-ink-subtle">
-          登録したどのスキルにも当てはまらない業務依頼を受けたとき、AIが案内する相談先です（F-17）。未指定の場合はこのチャンネルの管理者を案内します。指定した参加者が退出・無効化された場合は自動的に未指定へ戻ります。
-        </p>
-        <select
-          value={settings.fallback_handoff_user_id ?? ''}
-          onChange={(e) => changeHandoff(e.target.value)}
-          disabled={handoffSaving}
-          className="w-full max-w-[320px] rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        >
-          <option value="">未指定（このチャンネルの管理者）</option>
-          {members.filter((m) => m.is_active).map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-              {m.is_channel_admin ? '（chadmin）' : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {editingItem && (
         <SkillEditModal
           key={editingItem.id}
@@ -1638,6 +1642,61 @@ function SkillsTab({
           onSaved={mutate}
         />
       )}
+    </div>
+  )
+}
+
+// ③引き継ぎ先（A-45、F-17。TasksTabの一部）。①で「人が対応」にした依頼と、②のどのスキルにも
+// 当てはまらない業務依頼の両方で、AIが案内する相談先。参加者から選ぶセレクトのみのため、
+// GeneralTabのトグルと同じく選択時に即保存する
+function HandoffSection({
+  channelId,
+  settings,
+  mutate,
+}: {
+  channelId: string
+  settings: AiSettings
+  mutate: () => Promise<AiSettings | undefined>
+}) {
+  const toast = useToast()
+  const { members } = useChannelMembers(channelId)
+  const [handoffSaving, setHandoffSaving] = useState(false)
+
+  const changeHandoff = async (userId: string) => {
+    setHandoffSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/handoff`, {
+        method: 'PUT',
+        body: JSON.stringify({ fallback_handoff_user_id: userId || null }),
+      })
+      await mutate()
+      toast('引き継ぎ先を更新しました')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '更新に失敗しました', 'error')
+    } finally {
+      setHandoffSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      <p className="mb-2.5 text-[12.5px] leading-relaxed text-ink-muted">
+        ①で「人が対応」にした依頼と、②のどのスキルにも当てはまらない業務依頼を受けたときに、AIが案内する相談先です（F-17）。未指定の場合はこのチャンネルの管理者を案内します。指定した参加者が退出・無効化された場合は自動的に未指定へ戻ります。
+      </p>
+      <select
+        value={settings.fallback_handoff_user_id ?? ''}
+        onChange={(e) => changeHandoff(e.target.value)}
+        disabled={handoffSaving}
+        className="w-full max-w-[320px] rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+      >
+        <option value="">未指定（このチャンネルの管理者）</option>
+        {members.filter((m) => m.is_active).map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+            {m.is_channel_admin ? '（chadmin）' : ''}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }
