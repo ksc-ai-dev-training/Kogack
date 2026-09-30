@@ -95,9 +95,18 @@ from services import ai_client, app_help_search, channel_history_search, doc_sea
 JST = ZoneInfo("Asia/Tokyo")  # F-14要約の対象期間指定（今日/今週/今月等）をJSTの暦日で解釈する
 # （routers/search.pyのF-42日付モディファイアと同じ考え方・同じタイムゾーン）
 
+# 会話履歴から除外するAI発言（生成に失敗した応答・操作マニュアルの「見つかりませんでした」定型文）。
+# 2026-09-30、ユーザーからの報告「一般的な質問に急に答えてくれなくなった」: 一般知識の質問に
+# 一度定型文を返すと、それが直近の履歴に残り「この会話ではこう答える」という前例になって、
+# 以後の無関係な質問まで同じ定型文を返し続けた。情報を含まない失敗応答は文脈として渡さない
+_HISTORY_EXCLUDED_AI_SQL = (
+    "NOT (sender_type = 'ai' AND (body = '（回答を生成できませんでした）'"
+    " OR body LIKE '見つかりませんでした。操作マニュアル%'))"
+)
 MAX_HISTORY_MESSAGES = 20  # AI API手順書の目安「直近10往復まで」（human+aiであわせて概ね20件。bot発言混在のため厳密な往復数ではない）
 MAX_SUMMARY_CHANNEL_MESSAGES = 100  # F-14: チャンネル本体を要約する場合の対象件数上限（スレッド全体は上限なし）
 MAX_OUTPUT_TOKENS = 2000
+RETRY_MAX_OUTPUT_TOKENS = 6000  # 本文が空だった場合の1回限りの再試行でだけ使う上限（_run_chat_with_tools参照）
 # バグ修正（2026-09-17、ユーザー依頼の網羅的な実機検証で発覚）: 「このアプリでできることを
 # 一通り教えて」のような、自然に長い回答を要する質問で、reasoning系モデル（gpt-5-mini）の
 # 出力トークン数が1000ぎりぎり（実測1035〜1066）まで達し、本文が空（「回答を生成できません
@@ -315,7 +324,7 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   Discordなど他の一般的なチャットアプリではよくあるが、Kogackの検索結果には一度も
   出てこない仕組み）を、他のチャットアプリの典型例から類推して付け加えないこと。
   Kogackの実際の仕様は検索結果でしか分からず、あなたが一般に知っているチャット
-  アプリの仕組みとは異なる場合がある**。**search_app_manualを実行した結果、
+  アプリの仕組みとは異なる場合がある**。**Kogackの使い方についての質問でsearch_app_manualを実行した結果、
   「関連する内容が見つかりませんでした。」という結果しか得られなかった場合は、
   一般的なチャットアプリの典型的な操作（メッセージのホバー／右クリックメニュー・
   「…」アクションメニュー等）を憶測で組み立てて答えないこと。必ず次の1文だけで
@@ -332,6 +341,15 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   ください。」とだけ答えること（このAIが過去に実際に、無関係な検索結果しか得られない
   状況で、いかにも実在しそうな具体的なボタン名・絵文字を作文して案内してしまった
   ことがあるため、特に注意すること）**
+- **Kogackの使い方と関係の無い質問（一般常識・歴史・地理・語学・数学の問題・雑談など）には、
+  上記の「見つかりませんでした。操作マニュアルをお読みいただくか、管理者にお問い合わせ
+  ください。」という1文を絶対に使わないこと。** このシステムは最初に必ず何らかの検索を
+  行う仕組みのため、質問と無関係な検索（操作マニュアル・会話履歴等）が実行されて
+  「見つかりませんでした」という結果になることがあるが、その結果は無視し、あなたの
+  一般的な知識で質問に直接答えること（このAIが過去に実際に、歴史や英単語の質問に
+  操作マニュアルの定型文だけを返してしまったことがあるため、特に注意すること）。
+  ただし「# 社内ドキュメントの参照について」で参照ドキュメントの範囲外の回答が
+  禁止されている場合は、そちらの指示に従うこと
 - **Kogack（このチャットアプリ自体）の機能・使い方・操作手順について答えた返信は、上記の
   個別の事実（チャンネル作成・ログアウト・アンケート・書式など）に基づいて答えた場合も含め、
   必ず最後を「詳しくは操作マニュアルをご確認ください。」という1文で締めくくること。**
@@ -666,14 +684,21 @@ def _build_doc_scope_section(out_of_scope_policy: str) -> str:
             "場合に限り、あなたの返答は次の1文だけにすること: 「参照ドキュメントの範囲内に該当する"
             "情報が見つかりませんでした。」この1文の後に、それ以上の文章（一般知識による補足を含む）を"
             "一切続けないこと。\n"
+            "このチャンネルでは、Kogackの使い方以外の質問（一般常識・雑談を含む）には、必ずsearch_documents"
+            "で検索し、その結果だけに基づいて答えること（一般的な知識だけで答えないこと）。\n"
             "逆に、search_documentsの結果に実際の文書の内容（見つかりませんでしたという文言以外）が"
             "1件でも含まれていた場合は、上記の1文は使わず、その内容に基づいて通常どおり具体的に回答すること。"
         )
     else:
         lines.append(
-            "検索しても関連する内容が見つからなかった場合は、その旨を伝えたうえで、あなたの一般的な"
-            "知識で分かる範囲を補って回答してよい（ただし社内ドキュメントに基づく回答ではないことを"
-            "明示すること）。"
+            "検索しても関連する内容が見つからなかった場合は、質問の種類によって次のように答えること"
+            "（2026-09-30、ユーザーからの報告を受けて分岐させた。一般常識の質問のたびに毎回断り書きが"
+            "付くと煩わしいため）。\n"
+            "- 社内の規程・制度・業務についての質問: 社内ドキュメントに見つからなかった旨を伝えたうえで、"
+            "あなたの一般的な知識で分かる範囲を補って回答してよい（社内ドキュメントに基づく回答では"
+            "ないことを明示すること）。\n"
+            "- 社内と無関係な一般常識の質問（歴史・地理・語学・数学の問題・雑談など）: 検索したことや"
+            "社内ドキュメントについては一切触れず、最初の文から質問への答えを書くこと。"
         )
     return "\n".join(lines)
 
@@ -1305,6 +1330,7 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
                FROM messages
                WHERE (id = $1 OR thread_parent_id = $1)
                  AND deleted_at IS NULL AND generation_status IS NULL
+                 AND """ + _HISTORY_EXCLUDED_AI_SQL + """
                ORDER BY created_at DESC LIMIT $2""",
             thread_id, MAX_HISTORY_MESSAGES,
         )
@@ -1314,6 +1340,7 @@ async def _fetch_history_rows(channel_id: int, thread_id: int | None):
                FROM messages
                WHERE channel_id = $1 AND deleted_at IS NULL AND thread_parent_id IS NULL
                  AND generation_status IS NULL
+                 AND """ + _HISTORY_EXCLUDED_AI_SQL + """
                ORDER BY created_at DESC LIMIT $2""",
             channel_id, MAX_HISTORY_MESSAGES,
         )
@@ -1401,6 +1428,25 @@ async def _run_chat_with_tools(
                 total_completion_tokens += res.usage.completion_tokens
             message = res.choices[0].message
             tool_calls = message.tool_calls
+        if not tool_calls and not (message.content or "").strip():
+            # バグ修正（2026-09-30、ユーザーからの報告「数学の問題を聞いたら『回答を生成できません
+            # でした』になった」）: 途中式の長い計算問題等では、検索結果・長いシステムプロンプトと
+            # 合わせてMAX_OUTPUT_TOKENSに達し本文が空になることがある。空の場合に限り、上限を
+            # 引き上げ、ツール無し（テキストでの最終回答のみ）で1回だけやり直す（通常の質問の
+            # コストは変わらない）
+            print(
+                f"[ai_agent] empty reply, retrying with larger budget "
+                f"(channel_id={channel_id}, finish_reason={res.choices[0].finish_reason})"
+            )
+            res = await client.chat.completions.create(
+                model=model, messages=messages, max_completion_tokens=RETRY_MAX_OUTPUT_TOKENS,
+                **_completion_extra_kwargs(model),
+            )
+            if res.usage:
+                total_prompt_tokens += res.usage.prompt_tokens
+                total_completion_tokens += res.usage.completion_tokens
+            message = res.choices[0].message
+            tool_calls = None
         if not tool_calls:
             reply = (message.content or "").strip() or "（回答を生成できませんでした）"
             usage = {"prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens}
