@@ -982,8 +982,11 @@ const INLINE_CODE_REGEX = /`([^`\n]+)`/g
 //     DOM構造・domToPlainText等のオフセット計算に一切影響を与えずに行ボックスを1つ確保する。
 // (2) min-h-[38px]: (1)だけに頼らない保険として、padding（py-2=16px）・border（1px×2）・
 //     行間（text-[12.5px]×leading-[1.6]=20px）を素直に積み上げた高さを明示的な下限にする。
+// 長い行は横スクロールではなく枠の幅で折り返す（ユーザーからの要望、2026-09-30。従来は
+// overflow-x-auto whitespace-preで横スクロールだった）。wrap-anywhereはURL等の空白を含まない
+// 長い文字列も途中で折り返すため。
 const CODE_BLOCK_CLASSNAME =
-  "my-1 min-h-[38px] overflow-x-auto whitespace-pre rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text empty:before:content-['']"
+  "my-1 min-h-[38px] whitespace-pre-wrap wrap-anywhere rounded-md border border-line bg-surface-muted px-2.5 py-2 font-mono text-[12.5px] leading-[1.6] text-code-text empty:before:content-['']"
 
 // 'code'（インラインコード）は2026-09-25、コード・箇条書き・引用にも「入力している時点で送信後の
 // 表示を反映させたい（記号なしで）」という要望を受けてトグル書式の5番目の種類として追加した。
