@@ -664,6 +664,20 @@ SEARCH_APP_MANUAL_TOOL = {
     },
 }
 
+# 操作マニュアルに該当が無いときの定型文（FIXED_RULES参照）の検出用の一部分と、それが返ったときに
+# 質問の種類を見直させる指示（_run_chat_with_tools参照）
+APP_MANUAL_NOT_FOUND_MARKER = "操作マニュアルをお読みいただくか"
+APP_MANUAL_NOT_FOUND_RECHECK = (
+    "直前のあなたの回答案は、操作マニュアルに該当が無いときの定型文でした。この定型文は、"
+    "Kogack（このチャットアプリ）の機能・使い方・操作方法を尋ねられた場合にだけ使うものです。"
+    "利用者の最後の質問をもう一度読み、次のどちらかで最終的な回答を書き直してください。\n"
+    "- 質問がKogackの機能・使い方・操作方法についてのものなら、直前の定型文と同じ1文だけを返すこと。\n"
+    "- それ以外の質問（歴史・地理・語学・数学・一般常識・雑談など）なら、定型文や検索のことには"
+    "一切触れず、あなたの一般的な知識で質問に直接答えること。"
+    "ただし「# 社内ドキュメントの参照について」で参照ドキュメントの範囲外の回答が禁止されている"
+    "場合は、そちらの指示に従うこと。"
+)
+
 MAX_TOOL_ROUNDS = 3  # search_documents・search_channel_history・search_app_manualいずれも共通の上限（無限ループ・コスト際限無い増大の防止）
 
 
@@ -1446,6 +1460,29 @@ async def _run_chat_with_tools(
                 total_prompt_tokens += res.usage.prompt_tokens
                 total_completion_tokens += res.usage.completion_tokens
             message = res.choices[0].message
+            tool_calls = None
+        if not tool_calls and APP_MANUAL_NOT_FOUND_MARKER in (message.content or ""):
+            # バグ修正（2026-09-30、ユーザーからの報告「壇ノ浦の戦い・関ヶ原の戦いを聞いたら
+            # 『見つかりませんでした。操作マニュアルを…』と返ってきた」）: この定型文をKogackの
+            # 使い方の質問に限定する指示をFIXED_RULESへ加えても、本番では一般常識の質問で依然として
+            # 返ることがあった（1ラウンド目で必ず何かを検索させるため、search_app_manualが選ばれて
+            # 空振りすると定型文のルールに引きずられる）。定型文は文面から機械的に検出できるため、
+            # 検出した場合に限り、質問がKogackの使い方についてのものかをモデル自身に見直させて
+            # 1回だけやり直す（使い方の質問なら同じ定型文が返るだけで、従来の挙動は変わらない）
+            print(f"[ai_agent] app-manual not-found reply, re-checking question type (channel_id={channel_id})")
+            messages.append({"role": "assistant", "content": message.content})
+            messages.append({"role": "system", "content": APP_MANUAL_NOT_FOUND_RECHECK})
+            res = await client.chat.completions.create(
+                model=model, messages=messages, max_completion_tokens=RETRY_MAX_OUTPUT_TOKENS,
+                **_completion_extra_kwargs(model),
+            )
+            if res.usage:
+                total_prompt_tokens += res.usage.prompt_tokens
+                total_completion_tokens += res.usage.completion_tokens
+            # 見直しても使い方の質問と判断された場合は、元の定型文をそのまま使う（見直し後の文面には
+            # 「ご質問はKogackの使い方に関するものと判断します。」のような前置きが付くことがあった）
+            if APP_MANUAL_NOT_FOUND_MARKER not in (res.choices[0].message.content or ""):
+                message = res.choices[0].message
             tool_calls = None
         if not tool_calls:
             reply = (message.content or "").strip() or "（回答を生成できませんでした）"
