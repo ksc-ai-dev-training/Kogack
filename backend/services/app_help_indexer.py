@@ -21,7 +21,7 @@ MANUAL_PATH = Path(__file__).resolve().parent.parent / "app_help" / "manual.md"
 # 変更した場合でも再索引が走るようにする（2026-09-17、チャンク分割方法を見直した際に
 # 「内容のハッシュだけを見ていると、コード側のロジック変更が検知されず古いチャンクが
 # 残り続ける」という穴に気づいたため。分割ロジックを変えるたびにこの数値を上げること）。
-CHUNKER_VERSION = 2
+CHUNKER_VERSION = 3
 
 # doc_indexer.pyのCHUNK_SIZE/CHUNK_OVERLAPと同じ役割（1チャンクの上限と重複幅）だが、
 # _chunk_textの分割方法自体はdoc_indexer.pyの単純な文字数区切りとは異なる（下記_chunk_text
@@ -89,18 +89,25 @@ def _chunk_text(text: str) -> list[str]:
     にまとめたままだと、7つの異なるタブ名・複数のFAQ項目が1つのembeddingへ混ざり、個々の
     項目についての狭い質問（例:「参照ドキュメント範囲タブとは」）の検索精度が同様に落ちるため。
     見出しのみのブロック（`## N. タイトル`単体）はそれ自体をチャンクにはせず、以後のブロックの
-    文脈（`current_heading`）として各チャンク本文の先頭に付与する。"""
+    文脈（`current_heading`）として各チャンク本文の先頭に付与する。
+    最初の章見出し（`## `）より前の前書き（manual.md自体の用途を開発者向けに説明した段落）は
+    チャンクにしない（2026-09-30、送信内容の確認で発覚。「このファイルは…」という説明文が
+    操作手順の質問の検索結果に混ざり、回答に無関係なトークンを毎回消費していた）。"""
     text = text.strip()
     if not text:
         return []
     chunks: list[str] = []
     current_heading = ""
+    in_body = False
     for raw_block in re.split(r"\n\s*\n", text):
         block = raw_block.strip()
         if not block:
             continue
         if _HEADING_BLOCK_RE.match(block):
             current_heading = block.lstrip("#").strip()
+            in_body = in_body or block.startswith("## ")
+            continue
+        if not in_body:
             continue
         intro, bullets = _split_bullets(block)
         if len(bullets) >= 2:
