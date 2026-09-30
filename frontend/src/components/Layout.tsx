@@ -38,7 +38,7 @@ const navItemClass = (isActive: boolean) =>
   `flex items-center gap-2 rounded-[7px] px-2 py-1.5 text-[13px] ${
     isActive
       ? 'bg-accent-50 font-bold text-accent-700 shadow-[inset_3px_0_0_var(--color-accent-600)]'
-      : 'text-ink hover:bg-surface-muted'
+      : 'text-ink hover:bg-sidebar-hover'
   }`
 
 // サイドバーの「チャンネル」「ダイレクトメッセージ」見出し。押すと一覧を開閉する（lib/sidebarSections.ts）
@@ -182,11 +182,11 @@ export default function Layout({ me, children }: { me: Me; children: React.React
     // 高さはdvh（スマホのアドレスバーの出入りに追従する）。vhのままだとスマホでは投稿欄が画面外に隠れる
     <div className="flex h-[calc(100dvh/var(--ui-zoom))] w-[calc(100vw/var(--ui-zoom))] bg-surface-muted">
       <aside
-        className={`flex w-[260px] flex-none flex-col border-r border-line bg-surface-subtle max-md:w-full max-md:border-r-0 ${
+        className={`flex w-[260px] flex-none flex-col border-r border-line bg-sidebar max-md:w-full max-md:border-r-0 ${
           mobileShowsSidebar ? '' : 'max-md:hidden'
         }`}
       >
-        <div className="flex h-14 flex-none items-center gap-2 border-b border-line bg-surface px-4">
+        <div className="flex h-14 flex-none items-center gap-2 border-b border-line bg-sidebar px-4">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent-600 to-accent-700 text-xs font-bold text-white">
             K
           </div>
@@ -198,7 +198,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             className={`ml-auto flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${
               scheduledItems.length > 0
                 ? 'border-accent-600 bg-accent-50 text-accent-700'
-                : 'border-transparent text-ink-subtle hover:bg-surface-muted'
+                : 'border-transparent text-ink-subtle hover:bg-sidebar-hover'
             }`}
           >
             🕐
@@ -461,7 +461,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                     type="button"
                     onClick={() => setShowStaleDms((v) => !v)}
                     title={`${DM_STALE_DAYS}日以上やり取りの無いDM（未読のあるDMは常に表示）`}
-                    className="w-full rounded-[7px] px-2 py-1 text-left text-xs text-ink-subtle hover:bg-surface-muted hover:text-ink-muted"
+                    className="w-full rounded-[7px] px-2 py-1 text-left text-xs text-ink-subtle hover:bg-sidebar-hover hover:text-ink-muted"
                   >
                     {showStaleDms ? '古いDMを隠す' : `ほか${hiddenDmCount}件を表示`}
                   </button>
@@ -485,7 +485,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                   className={`flex-1 border-l border-line py-0.5 text-[11px] first:border-l-0 ${
                     uiZoom === z
                       ? 'bg-accent-600 font-semibold text-white'
-                      : 'text-ink-muted hover:bg-surface-muted'
+                      : 'text-ink-muted hover:bg-sidebar-hover'
                   }`}
                 >
                   {UI_ZOOM_LABELS[z]}
@@ -497,7 +497,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
             to="/help"
             className={({ isActive }) =>
               `mb-1 flex items-center gap-1.5 rounded-[7px] px-2 py-1.5 text-xs font-medium ${
-                isActive ? 'bg-accent-50 text-accent-700' : 'text-ink-muted hover:bg-surface-muted'
+                isActive ? 'bg-accent-50 text-accent-700' : 'text-ink-muted hover:bg-sidebar-hover'
               }`
             }
           >
@@ -508,7 +508,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               to="/admin"
               className={({ isActive }) =>
                 `mb-2 flex items-center gap-1.5 rounded-[7px] px-2 py-1.5 text-xs font-medium ${
-                  isActive ? 'bg-accent-50 text-accent-700' : 'text-ink-muted hover:bg-surface-muted'
+                  isActive ? 'bg-accent-50 text-accent-700' : 'text-ink-muted hover:bg-sidebar-hover'
                 }`
               }
             >
@@ -520,7 +520,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               type="button"
               onClick={() => setProfileModalOpen(true)}
               title="プロフィールを編集"
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-[7px] py-0.5 text-left hover:bg-surface-muted"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-[7px] py-0.5 text-left hover:bg-sidebar-hover"
             >
               {me.picture_url ? (
                 <img
@@ -548,7 +548,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
               type="button"
               onClick={logout}
               title="ログアウト"
-              className="flex-none rounded px-2 py-1 text-xs text-ink-subtle hover:bg-surface-muted hover:text-ink-muted"
+              className="flex-none rounded px-2 py-1 text-xs text-ink-subtle hover:bg-sidebar-hover hover:text-ink-muted"
             >
               ログアウト
             </button>
