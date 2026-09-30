@@ -279,6 +279,9 @@ export interface Dm {
   members: DmMember[]
   is_self: boolean
   created_at: string
+  /** 最後にやり取りした日時（発言が無ければ開始日時）。A-16はこの新しい順に返す。サイドバーは
+   * 30日以上やり取りの無いDMを「ほかN件のDMを表示」の内側に隠す（2026-09-30） */
+  last_activity_at: string
   unread_count: number
   /** DM本体は常時通知対象のため対象外、スレッド返信限定（自分の発言への返信／スレッド内での
    * 個人宛てメンション）の件数（2026-09-14、Channelのunread_mention_countのDM版） */

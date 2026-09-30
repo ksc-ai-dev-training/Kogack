@@ -56,6 +56,9 @@ function SectionToggle({ label, collapsed, onToggle }: { label: string; collapse
 }
 
 // S-02 共通ヘッダー＋サイドバー（詳細設計書 画面設計11.3節 Layout、画面モックアップS-03等の.sidebar）。
+
+// サイドバーのDMを既定で隠すまでの、やり取りが無い日数（2026-09-30）
+const DM_STALE_DAYS = 30
 export default function Layout({ me, children }: { me: Me; children: React.ReactNode }) {
   const navigate = useNavigate()
   const { mutate: mutateMe } = useMe()
@@ -132,9 +135,21 @@ export default function Layout({ me, children }: { me: Me; children: React.React
           (c.notif_mode !== 'off' && ((c.unread_count ?? 0) > 0 || (c.unread_mention_count ?? 0) > 0)),
       )
     : joined
+  // DMは相手が増えやすいため、見出しを開いていても30日以上やり取りの無いDMは既定で隠し、一覧の末尾の
+  // 「ほかN件のDMを表示」で全件を出せるようにする（2026-09-30、ユーザーからの要望）。並びはA-16が
+  // 最後にやり取りした順で返す。未読があるDM・今開いているDMは期間に関係なく常に表示する
+  const [showStaleDms, setShowStaleDms] = useState(false)
+  const staleDmCutoff = Date.now() - DM_STALE_DAYS * 24 * 60 * 60 * 1000
+  const isStaleDm = (d: (typeof dms)[number]) => new Date(d.last_activity_at).getTime() < staleDmCutoff
   const visibleDms = collapsed.dms
     ? dms.filter((d) => d.id === currentDmId || (d.notif_mode !== 'off' && d.unread_count > 0))
-    : dms
+    : showStaleDms
+      ? dms
+      : dms.filter(
+          (d) => !isStaleDm(d) || d.id === currentDmId || d.unread_count > 0 || d.unread_mention_count > 0,
+        )
+  const staleDmCount = dms.filter(isStaleDm).length
+  const hiddenDmCount = collapsed.dms ? 0 : dms.length - visibleDms.length
 
   const guardNavigation = useUnsavedChangesGuard()
 
@@ -417,6 +432,18 @@ export default function Layout({ me, children }: { me: Me; children: React.React
                 )
               })}
               {dms.length === 0 && !collapsed.dms && <li className="px-2 py-1.5 text-xs text-ink-subtle">DMはまだありません</li>}
+              {!collapsed.dms && (hiddenDmCount > 0 || (showStaleDms && staleDmCount > 0)) && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setShowStaleDms((v) => !v)}
+                    title={`${DM_STALE_DAYS}日以上やり取りの無いDM（未読のあるDMは常に表示）`}
+                    className="w-full rounded-[7px] px-2 py-1 text-left text-xs text-ink-subtle hover:bg-surface-muted hover:text-ink-muted"
+                  >
+                    {showStaleDms ? '古いDMを隠す' : `ほか${hiddenDmCount}件を表示`}
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
         )}

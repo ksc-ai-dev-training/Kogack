@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/dms", tags=["dms"])
 
 async def _dm_out(
     pool, dm_id: int, created_at, self_user_id: int, unread_count: int = 0, unread_mention_count: int = 0,
-    notif_mode: str = "default",
+    notif_mode: str = "default", last_activity_at=None,
 ) -> dict:
     all_member_ids = {
         r["user_id"]
@@ -45,6 +45,9 @@ async def _dm_out(
         ],
         "is_self": is_self,
         "created_at": created_at.isoformat(),
+        # 最後にやり取りした日時（2026-09-30、ユーザーからの要望。サイドバーを最近やり取りした順に並べ、
+        # 30日以上やり取りの無いDMを隠すために使う）。発言が無いDMは開始日時
+        "last_activity_at": (last_activity_at or created_at).isoformat(),
         "unread_count": unread_count,
         # DM自体のメッセージは元々「自分宛て」として常時通知対象のため、本体タイムライン分の
         # 個別メンション集計は行わない（従来どおり）。ここではスレッド返信限定（2026-09-14、
@@ -69,6 +72,10 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
     pool = get_pool()
     rows = await pool.fetch(
         """SELECT d.id, d.created_at, dmm.notif_mode,
+               COALESCE(
+                 (SELECT max(msg.created_at) FROM messages msg WHERE msg.dm_id = d.id AND msg.deleted_at IS NULL),
+                 d.created_at
+               ) AS last_activity_at,
                (SELECT count(*) FROM messages msg
                 WHERE msg.dm_id = d.id AND msg.deleted_at IS NULL AND msg.thread_parent_id IS NULL
                   AND msg.sender_user_id IS DISTINCT FROM $1
@@ -93,14 +100,14 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
            FROM direct_messages d
            JOIN direct_message_members dmm ON dmm.dm_id = d.id AND dmm.user_id = $1
            LEFT JOIN read_states rs ON rs.dm_id = d.id AND rs.user_id = $1
-           ORDER BY d.created_at DESC""",
+           ORDER BY last_activity_at DESC, d.id DESC""",
         user.id,
     )
     return {
         "items": [
             await _dm_out(
                 pool, r["id"], r["created_at"], user.id, r["unread_count"], r["unread_mention_count"],
-                r["notif_mode"],
+                r["notif_mode"], r["last_activity_at"],
             )
             for r in rows
         ]

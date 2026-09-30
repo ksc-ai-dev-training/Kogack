@@ -37,6 +37,7 @@
       <tr class="diff-new"><td>1.6</td><td>2026-09-29</td><td>S-06の「スキル」「自動対応範囲」タブを画面上だけ「業務と対応範囲」タブ1つにまとめた（基本設計書v1.45 4.8節）。あわせて「反応モード」タブにメンションの催促の設定欄（A-77）を追記した。</td></tr>
       <tr class="diff-new"><td>1.7</td><td>2026-09-29</td><td>S-06「業務と対応範囲」タブを、スキル・自動対応範囲の再設計（要件定義書v1.27 F-16）に合わせて改訂した。①AIに任せる業務（スキルごとに「そのまま対応／確認してから対応」を選ぶ）②人に任せる依頼（区分の選択は無く一覧のみ）③引き継ぎ先。</td></tr>
       <tr class="diff-new"><td>1.8</td><td>2026-09-29</td><td>S-06のタブ名を「業務と対応範囲」から「スキルと対応範囲設定」に改めた（ユーザーからの要望）。</td></tr>
+      <tr class="diff-new"><td>1.9</td><td>2026-09-30</td><td>サイドバーのDMを最近やり取りした順に並べ、30日以上やり取りの無いDMを既定で隠すようにした（ユーザーからの要望。DMはチャンネルより相手が増えやすいため）。Layoutの説明に追記した。</td></tr>
     </tbody>
   </table>
 
@@ -223,7 +224,7 @@
     <tbody>
       <tr><td>App<br>Root / —</td><td>なし</td><td>なし<br>→ <code>useMe</code>（A-04）</td><td>ログイン状態でRoutesを切り替える。認証済みで権限外パスへアクセスした場合のリダイレクト判定を行う（総論5.9節。ガード用にA-06/A-23/A-36を呼ぶ）</td></tr>
       <tr><td>Login<br>Page / S-01</td><td>なし</td><td>なし<br>→ <code>useMe().mutate</code>、A-01</td><td>URLの<code>?error=</code>を総論7.2節のメッセージに変換して表示。「Googleでログイン」でA-01へ遷移</td></tr>
-      <tr><td>Layout<br>Shared / S-02〜S-08</td><td>me: Me, children</td><td>なし<br>→ <code>useChannels</code>（A-05）, <code>useDms</code>（A-16）, <code>useScheduledMessages</code>（A-51）, A-03（ログアウト）</td><td>ヘッダー（検索欄・予約中バッジ・ユーザーメニュー）とサイドバー（参加中チャンネル・DM一覧、＋ボタン）。adminには管理コンソールへの導線を表示。起動時の初期表示チャンネルは<code>localStorage</code>の最終チャンネルIDを参照（11.5節）</td></tr>
+      <tr><td>Layout<br>Shared / S-02〜S-08</td><td>me: Me, children</td><td>なし<br>→ <code>useChannels</code>（A-05）, <code>useDms</code>（A-16）, <code>useScheduledMessages</code>（A-51）, A-03（ログアウト）</td><td>ヘッダー（検索欄・予約中バッジ・ユーザーメニュー）とサイドバー（参加中チャンネル・DM一覧、＋ボタン）。<span class="diff-new">DM一覧は最後にやり取りした順（A-16の並び）で、30日以上やり取りの無いDMは既定で隠し、末尾の「ほかN件を表示」／「古いDMを隠す」で切り替える（未読・メンションのあるDMと今開いているDMは期間に関係なく常に表示。2026-09-30）。</span>adminには管理コンソールへの導線を表示。起動時の初期表示チャンネルは<code>localStorage</code>の最終チャンネルIDを参照（11.5節）</td></tr>
       <tr><td>ChannelView<br>Page / S-03</td><td>なし（<code>useParams().channelId</code>）</td><td>なし<br>→ <code>useChannel</code>（A-06）, <code>useChannelMembers</code>（A-46）</td><td>ヘッダー（チャンネル名・参加人数・要約ボタン・chadmin/adminのみチャンネル設定ボタン）とMessageList/Composerの配置。遷移時に<code>localStorage</code>へ最終チャンネルIDを保存</td></tr>
       <tr><td>MessageList / MessageItem<br>Local / S-03・S-04</td><td>messages: Message[], members: Member[]</td><td>openProfileCardId<br>→ なし</td><td>発言の時系列表示。<code>generation_status</code>が<code>"generating"</code>の行はプレースホルダ表示（AIサポート10.3節）。表示名が完全一致する参加者が複数いる場合はmembersを突き合わせてメールアドレスを併記（F-39）。アイコン/表示名クリックでProfileCardを開く（F-40）</td></tr>
       <tr><td>ProfileCard<br>Local / S-03</td><td>userId, anchorRef, onClose</td><td>なし<br>→ <code>useUserProfile(userId)</code>（A-67）<span class="diff-new">, <code>useDms()</code>（A-16）</span></td><td>ui/Popoverの上に構築。アイコン・表示名・メールアドレス・ロールを表示（F-40。所属チャンネル等は表示しない、基本設計書5.21節「設計判断」）。<span class="diff-new">userIdが自分自身以外のとき「DMを送る」ボタンを表示し、押下時にuseDms()のキャッシュから一対一DMを検索、無ければA-17（DM開始）を呼んでから<code>/dms/{id}</code>へ遷移する</span></td></tr>

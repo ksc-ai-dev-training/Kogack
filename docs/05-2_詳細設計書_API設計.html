@@ -72,6 +72,7 @@
       <tr class="diff-new"><td>1.41</td><td>2026-09-29</td><td>メンションの催促（ユーザーからの明示的な要望）のため、新規API A-77（催促の有効/無効・待ち時間の更新）を追加し、A-23のレスポンスに<code>mention_reminder_enabled</code>・<code>mention_reminder_hours</code>を追加した（DB設計v1.17 T-08・T-30）。要件定義書上のF-xxに対応付けられた変更ではないため、要件定義書・基本設計書の改訂は無い。</td></tr>
       <tr class="diff-new"><td>1.42</td><td>2026-09-29</td><td>A-28/A-29にスキルの対応区分<code>response_level</code>（auto=そのまま対応/confirm=確認してから対応）を追加し、A-31を「人に任せる依頼」（response_level='human'のみ）を扱うAPIにした（要件定義書v1.27 F-16、DB設計v1.18）。</td></tr>
       <tr class="diff-new"><td>1.43</td><td>2026-09-29</td><td>参照範囲外の質問への対応（out_of_scope_policy、F-11）の既定を「厳格に制限」から「一般回答を許可」に変更し、既存チャンネルも一括で切り替えた（ユーザーからの要望）。A-23のレスポンス例とA-27の省略時の値を更新した。</td></tr>
+      <tr class="diff-new"><td>1.44</td><td>2026-09-30</td><td>サイドバーのDMを最近やり取りした順に並べ、30日以上やり取りの無いDMを既定で隠すようにした（ユーザーからの要望。DMはチャンネルより相手が増えやすいため）。A-16のレスポンスに<code>last_activity_at</code>を追加し、並び順を最後にやり取りした日時の新しい順に変えた。</td></tr>
     </tbody>
   </table>
 
@@ -256,11 +257,11 @@ POST /api/channels/42/members
   <pre><code>// response 200
 { "items": [
     { "id": "9", "members": [ { "id": "15", "name": "田中 智子", "picture_url": null } ],
-      "is_self": false, "created_at": "...", "unread_count": 2 },
+      "is_self": false, "created_at": "...", <span class="diff-new">"last_activity_at": "...", </span>"unread_count": 2 },
     { "id": "12", "members": [ { "id": "7", "name": "石井 直樹", "picture_url": null } ],
-      "is_self": true, "created_at": "...", "unread_count": 0 }
+      "is_self": true, "created_at": "...", <span class="diff-new">"last_activity_at": "...", </span>"unread_count": 0 }
   ] }</code></pre>
-  <p class="muted"><code>members</code>は自分以外の参加者（アイコン・氏名解決済み）。<span class="diff-new">ただし<code>is_self</code>（自分専用DM、F-05）が<code>true</code>のときだけ例外で、自分以外の相手が存在しないため自分自身を<code>members</code>に含める（1件）。</span><code>unread_count</code>はA-05の<code>joined</code>と同じ考え方（T-22 read_states、基本設計書6.2節「設計判断」）。</p>
+  <p class="muted"><code>members</code>は自分以外の参加者（アイコン・氏名解決済み）。<span class="diff-new">ただし<code>is_self</code>（自分専用DM、F-05）が<code>true</code>のときだけ例外で、自分以外の相手が存在しないため自分自身を<code>members</code>に含める（1件）。</span><code>unread_count</code>はA-05の<code>joined</code>と同じ考え方（T-22 read_states、基本設計書6.2節「設計判断」）。<span class="diff-new"><code>last_activity_at</code>（2026-09-30追加）はそのDMの最後の発言日時（削除済みを除く。発言が無ければ<code>created_at</code>）で、一覧はこの新しい順に返す（従来は<code>created_at</code>＝DMを開始した日時の新しい順）。サイドバーはこれを使い、30日以上やり取りの無いDMを既定で隠す（画面設計を参照）。</span></p>
 
   <p><strong>A-70 <span class="badge badge-post">POST</span> /api/dms/{id}/read（既読化）</strong></p>
   <pre><code>POST /api/dms/9/read
