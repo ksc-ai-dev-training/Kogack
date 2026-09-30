@@ -1538,13 +1538,19 @@ export function PollCard({
   closing: boolean
 }) {
   const closed = poll.closed_at !== null
+  // 割合の分母: 単一選択は票数の合計（＝投票した人数）、複数回答は投票した人数（各選択肢を
+  // 選んだ人が投票者の何%か。票数の合計を分母にすると選ぶ数の多い人ほど比重が増えてしまう）
+  const base = poll.allow_multiple ? poll.voter_count : poll.total_votes
   return (
     <div className="mt-0.5 max-w-[420px] rounded-lg border border-line bg-surface p-3">
       <div className="text-[13.5px] font-semibold text-ink">📊 {question}</div>
+      {poll.allow_multiple && (
+        <div className="mt-0.5 text-[11px] text-ink-subtle">複数回答可（もう一度押すと取り消せます）</div>
+      )}
       <div className="mt-2 flex flex-col gap-1.5">
         {poll.options.map((opt) => {
-          const pct = poll.total_votes > 0 ? Math.round((opt.vote_count / poll.total_votes) * 100) : 0
-          const mine = poll.my_option_id === opt.id
+          const pct = base > 0 ? Math.round((opt.vote_count / base) * 100) : 0
+          const mine = poll.my_option_ids.includes(opt.id)
           return (
             <button
               key={opt.id}
@@ -1571,7 +1577,10 @@ export function PollCard({
         })}
       </div>
       <div className="mt-2 flex items-center justify-between text-[11px] text-ink-subtle">
-        <span>{closed ? '締め切り済み' : `計${poll.total_votes}票`}</span>
+        <span>
+          {poll.allow_multiple ? `${poll.voter_count}人が投票` : `計${poll.total_votes}票`}
+          {closed ? '・締め切り済み' : ''}
+        </span>
         {isClosable && !closed && (
           <button
             type="button"

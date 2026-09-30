@@ -181,8 +181,8 @@ export interface MessageReaction {
 
 /** T-29 polls/poll_options（A-75と同名の投票トグルではなく専用のvote/close API）。
  * ユーザーからの明示的な要望「チャットアプリに新しくアンケート機能を付けてほしい」、
- * 2026-09-18。単一選択のみ・投票者は他の参加者に見える・参加者なら誰でも作成可、という
- * 仕様。質問文自体はMessage.bodyにそのまま入っている（pollは投票用の構造化データのみ持つ）。 */
+ * 2026-09-18。単一選択（2026-09-30から作成時に複数回答も選べる）・投票者は他の参加者に見える・
+ * 参加者なら誰でも作成可、という仕様。質問文自体はMessage.bodyにそのまま入っている（pollは投票用の構造化データのみ持つ）。 */
 export interface PollOption {
   id: string
   label: string
@@ -197,9 +197,14 @@ export interface ChoicePoll {
   created_by: string | null
   /** nullなら投票受付中。締め切られるとvote APIは400になる */
   closed_at: string | null
+  /** 複数回答を許可したアンケートか（2026-09-30追加。falseなら1人1票の単一選択） */
+  allow_multiple: boolean
+  /** 票数の合計（複数回答では1人が複数票を入れるため、投票した人数とは一致しない） */
   total_votes: number
-  /** 自分が投票済みの選択肢id（未投票ならnull） */
-  my_option_id: string | null
+  /** 投票した人数 */
+  voter_count: number
+  /** 自分が投票済みの選択肢id（単一選択では0〜1件） */
+  my_option_ids: string[]
   options: PollOption[]
 }
 

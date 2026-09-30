@@ -26,6 +26,8 @@ class PollOptionInput(BaseModel):
 class PollInput(BaseModel):
     question: str = Field(min_length=1, max_length=4000)  # 通常のメッセージ本文と同じ上限
     options: list[PollOptionInput] = Field(min_length=MIN_OPTIONS, max_length=MAX_OPTIONS)
+    # 複数回答を許可するか（2026-09-30追加。既定は従来どおり単一選択）
+    allow_multiple: bool = False
 
 
 class ScheduleInput(BaseModel):
@@ -61,8 +63,8 @@ async def create_poll_message(
         channel_id, dm_id, sender_user_id, poll.question,
     )
     poll_row = await conn.fetchrow(
-        "INSERT INTO polls (message_id, created_by) VALUES ($1, $2) RETURNING *",
-        message_row["id"], sender_user_id,
+        "INSERT INTO polls (message_id, created_by, allow_multiple) VALUES ($1, $2, $3) RETURNING *",
+        message_row["id"], sender_user_id, poll.allow_multiple,
     )
     for i, opt in enumerate(poll.options):
         await conn.execute(
@@ -205,23 +207,28 @@ async def fetch_polls_grouped(pool, message_ids: list[int], current_user_id: int
     )
 
     voters_by_option: dict[int, list[str]] = {}
-    my_option_by_poll: dict[int, int] = {}
+    my_options_by_poll: dict[int, list[int]] = {}
+    voter_ids_by_poll: dict[int, set[int]] = {}
     for v in vote_rows:
         voters_by_option.setdefault(v["option_id"], []).append(v["user_name"])
+        voter_ids_by_poll.setdefault(v["poll_id"], set()).add(v["user_id"])
         if v["user_id"] == current_user_id:
-            my_option_by_poll[v["poll_id"]] = v["option_id"]
+            my_options_by_poll.setdefault(v["poll_id"], []).append(v["option_id"])
 
     for p in poll_rows:
         opts = options_by_poll.get(p["id"], [])
         total_votes = sum(len(voters_by_option.get(o["id"], [])) for o in opts)
-        my_option_id = my_option_by_poll.get(p["id"])
         result[p["message_id"]] = {
             "id": str(p["id"]),
             "kind": "choice",
             "created_by": str(p["created_by"]) if p["created_by"] is not None else None,
             "closed_at": p["closed_at"].isoformat() if p["closed_at"] else None,
+            "allow_multiple": p["allow_multiple"],
+            # 票数の合計。複数回答では1人が複数票を入れるため、投票した人数（voter_count）とは一致しない
             "total_votes": total_votes,
-            "my_option_id": str(my_option_id) if my_option_id is not None else None,
+            "voter_count": len(voter_ids_by_poll.get(p["id"], ())),
+            # 自分が投票した選択肢（単一選択では0〜1件、複数回答では0件以上）
+            "my_option_ids": [str(i) for i in my_options_by_poll.get(p["id"], [])],
             "options": [
                 {
                     "id": str(o["id"]),

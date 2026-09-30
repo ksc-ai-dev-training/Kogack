@@ -876,9 +876,8 @@ ALTER TABLE custom_emoji ENABLE ROW LEVEL SECURITY;
 -- 連動削除される（新たな削除ロジックの実装が不要）。質問文はpolls側に重複して持たず、常に
 -- messages.bodyを唯一の情報源にする（アンケートも通常の発言と同じくmessages行を1件持ち、
 -- その本文＝質問文になる。横断検索・メンション等の既存機能もこの発言に対して自然に機能する）。
--- 単一選択のみのためpoll_votesはPRIMARY KEY (poll_id, user_id)で「1人1票」をDBレベルで保証し、
--- 投票のやり直しはON CONFLICT DO UPDATEで既存の票を新しい選択肢へ上書きするだけで実現する
--- （削除→再挿入の2ステップより単純）。V1のスコープはチャンネル・DM本体の投稿のみ（スレッド
+-- 当初は単一選択のみのためpoll_votesはPRIMARY KEY (poll_id, user_id)で「1人1票」をDBレベルで
+-- 保証していた（2026-09-30の複数回答対応で(option_id, user_id)へ変更、下記参照）。V1のスコープはチャンネル・DM本体の投稿のみ（スレッド
 -- 返信からの新規作成は対象外。F-41メンション等がまず本体のみ実装し、後日ユーザーの要望で
 -- スレッドにも拡張したのと同じ順序を踏襲する判断）。
 CREATE TABLE IF NOT EXISTS polls (
@@ -904,10 +903,29 @@ CREATE TABLE IF NOT EXISTS poll_votes (
     option_id   BIGINT NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
     user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     voted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (poll_id, user_id)
+    PRIMARY KEY (option_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_poll_votes_option_id ON poll_votes (option_id);
 ALTER TABLE poll_votes ENABLE ROW LEVEL SECURITY;
+
+-- 複数回答（ユーザーからの明示的な要望「アンケート機能で、複数回答を許可するかしないか選べるように
+-- してほしい」、2026-09-30）。作成時にallow_multipleを選び、既定は従来どおり単一選択（false）。
+-- 1人が複数の選択肢に投票できるよう、poll_votesの主キーを「1人1票」の(poll_id, user_id)から
+-- 「選択肢ごとに1人1票」の(option_id, user_id)へ変えた。単一選択の「1人1票」はDBではなくAPI
+-- （routers/polls.vote が同じアンケートの自分の票を消してから入れる）で保証する。主キーの張り替えは、
+-- 旧形式の主キーが残っているDBでだけ1回働く（以後の起動では条件に合わず何もしない）。
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS allow_multiple BOOLEAN NOT NULL DEFAULT false;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'poll_votes_pkey' AND pg_get_constraintdef(oid) = 'PRIMARY KEY (poll_id, user_id)'
+    ) THEN
+        ALTER TABLE poll_votes DROP CONSTRAINT poll_votes_pkey;
+        ALTER TABLE poll_votes ADD CONSTRAINT poll_votes_pkey PRIMARY KEY (option_id, user_id);
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_poll_votes_poll_user ON poll_votes (poll_id, user_id);
 
 -- 日程調整（ユーザーからの明示的な要望「作成者が日にちや時間をいくつか提示し、回答者が○△×で
 -- 回答して都合がいい人が最も多い日程を決める機能」、2026-09-30）。着手前にAskUserQuestionで4点

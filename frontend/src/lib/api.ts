@@ -139,11 +139,11 @@ export async function createCustomEmoji(name: string, imageUrl: string): Promise
 // 「新規発言として投稿する」操作のため）ので、basePathを受け取る形にした（useMessages.tsの
 // basePath方式と同じ考え方）。投票・締め切りはpoll_idを直接指定する独立エンドポイント。
 export async function createPoll(
-  basePath: string, question: string, options: string[],
+  basePath: string, question: string, options: string[], allowMultiple: boolean,
 ): Promise<import('../types').Message> {
   return apiFetch(`${basePath}/polls`, {
     method: 'POST',
-    body: JSON.stringify({ question, options: options.map((label) => ({ label })) }),
+    body: JSON.stringify({ question, options: options.map((label) => ({ label })), allow_multiple: allowMultiple }),
   })
 }
 

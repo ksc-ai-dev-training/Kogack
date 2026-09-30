@@ -233,7 +233,7 @@ export default function Composer({
   /** アンケート作成（ユーザーからの明示的な要望「アンケート機能を付けてほしい」、2026-09-18）。
    * 指定された場合のみ投稿欄に📊ボタンを表示する。V1スコープはチャンネル・DM本体の投稿のみ
    * （ThreadPanel.tsxはこのpropを渡さず、スレッド返信からの作成は対象外のまま）。 */
-  onCreatePoll?: (question: string, options: string[]) => Promise<void>
+  onCreatePoll?: (question: string, options: string[], allowMultiple: boolean) => Promise<void>
   /** 日程調整の作成（ユーザーからの明示的な要望、2026-09-30）。onCreatePollと同じく指定された
    * 場合のみ📅ボタンを表示し、スレッドの返信欄には渡さない（「送信日時を指定」の送信予約とは別機能） */
   onCreateSchedulePoll?: (title: string, dates: string[]) => Promise<void>
@@ -1786,8 +1786,8 @@ export default function Composer({
       {showPollModal && onCreatePoll && (
         <CreatePollModal
           onClose={() => setShowPollModal(false)}
-          onCreate={async (question, options) => {
-            await onCreatePoll(question, options)
+          onCreate={async (question, options, allowMultiple) => {
+            await onCreatePoll(question, options, allowMultiple)
           }}
         />
       )}

@@ -53,8 +53,9 @@ class VoteRequest(BaseModel):
 
 @router.post("/{poll_id}/vote")
 async def vote(poll_id: int, body: VoteRequest, user: CurrentUser = Depends(require_auth)):
-    """投票する（単一選択のみのため、既に投票済みの場合は新しい選択肢へ上書きする＝投票の
-    やり直し）。投票できるのはそのアンケートが投稿されたチャンネル・DMの参加者のみ、かつ
+    """投票する。単一選択のアンケートでは、既に投票済みの場合は新しい選択肢へ上書きする（＝投票の
+    やり直し）。複数回答を許可したアンケート（allow_multiple、2026-09-30追加）では、押した選択肢の
+    投票・取り消しを切り替える（絵文字リアクションと同じトグル）。投票できるのはそのアンケートが投稿されたチャンネル・DMの参加者のみ、かつ
     アンケートが締め切られていない場合のみ。message_reactions.toggle_reactionと同じく、
     同じトランザクションでmessages.updated_atも更新し、他の参加者の差分ポーリングで
     この発言（投票結果）の変化が拾われるようにする。更新後のpoll payload（reactions.
@@ -79,11 +80,29 @@ async def vote(poll_id: int, body: VoteRequest, user: CurrentUser = Depends(requ
     if not option_exists:
         raise HTTPException(422, detail="不正な選択肢です")
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute(
-            """INSERT INTO poll_votes (poll_id, option_id, user_id) VALUES ($1, $2, $3)
-               ON CONFLICT (poll_id, user_id) DO UPDATE SET option_id = $2, voted_at = now()""",
-            poll_id, option_id, user.id,
-        )
+        # 同じアンケートへの投票を1件ずつ順に処理する。単一選択の「1人1票」はDBの主キーではなく
+        # 下の「自分の票を消してから入れる」で保証しているため、連打等で2つの投票が同時に走ると
+        # 2票入ってしまうのを防ぐ
+        await conn.execute("SELECT 1 FROM polls WHERE id = $1 FOR UPDATE", poll_id)
+        if poll_row["allow_multiple"]:
+            removed = await conn.fetchval(
+                "DELETE FROM poll_votes WHERE option_id = $1 AND user_id = $2 RETURNING 1", option_id, user.id,
+            )
+            if not removed:
+                await conn.execute(
+                    "INSERT INTO poll_votes (poll_id, option_id, user_id) VALUES ($1, $2, $3)",
+                    poll_id, option_id, user.id,
+                )
+        else:
+            await conn.execute(
+                "DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2 AND option_id <> $3",
+                poll_id, user.id, option_id,
+            )
+            await conn.execute(
+                """INSERT INTO poll_votes (poll_id, option_id, user_id) VALUES ($1, $2, $3)
+                   ON CONFLICT (option_id, user_id) DO NOTHING""",
+                poll_id, option_id, user.id,
+            )
         await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", poll_row["message_id"])
         result = await polls.fetch_polls_grouped(conn, [poll_row["message_id"]], user.id)
     return result[poll_row["message_id"]]

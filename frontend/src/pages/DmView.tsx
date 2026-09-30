@@ -220,9 +220,9 @@ export default function DmView() {
               })
               await mutateMessages()
             }}
-            onCreatePoll={async (question, options) => {
+            onCreatePoll={async (question, options, allowMultiple) => {
               if (!dmId) return
-              await createPoll(`/api/dms/${dmId}`, question, options)
+              await createPoll(`/api/dms/${dmId}`, question, options, allowMultiple)
               await mutateMessages()
             }}
             onCreateSchedulePoll={async (title, dates) => {

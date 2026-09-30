@@ -377,9 +377,9 @@ export default function ChannelView() {
               })
               await mutateMessages()
             }}
-            onCreatePoll={async (question, options) => {
+            onCreatePoll={async (question, options, allowMultiple) => {
               if (!channelId) return
-              await createPoll(`/api/channels/${channelId}`, question, options)
+              await createPoll(`/api/channels/${channelId}`, question, options, allowMultiple)
               await mutateMessages()
             }}
             onCreateSchedulePoll={async (title, dates) => {

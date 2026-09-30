@@ -6,7 +6,8 @@ import { useToast } from './Toast'
 
 // アンケート機能（ユーザーからの明示的な要望「チャットアプリに新しくアンケート機能を付けて
 // ほしい」、2026-09-18）。着手前にAskUserQuestionで4点確認し、(1)作成方法=投稿欄のボタンから、
-// (2)投票方式=単一選択のみ（選択肢を複数選べるトグルは無い）、(3)投票の可視性=誰が何に投票
+// (2)投票方式=単一選択のみ（2026-09-30、ユーザーからの要望で作成時に「複数回答を許可する」を
+// 選べるようにした。既定は従来どおり単一選択）、(3)投票の可視性=誰が何に投票
 // したか見える（既存の絵文字リアクションと同じ考え方）、(4)作成権限=参加者なら誰でも、という
 // 仕様で合意した。AddCustomEmojiModal.tsxと同じ構成（createPortal・useOverlayClose）。
 const MIN_OPTIONS = 2
@@ -17,12 +18,13 @@ export function CreatePollModal({
   onCreate,
 }: {
   onClose: () => void
-  onCreate: (question: string, options: string[]) => Promise<void>
+  onCreate: (question: string, options: string[], allowMultiple: boolean) => Promise<void>
 }) {
   const overlayClose = useOverlayClose(onClose)
   const toast = useToast()
   const [question, setQuestion] = useState('')
   const [options, setOptions] = useState<string[]>(['', ''])
+  const [allowMultiple, setAllowMultiple] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const updateOption = (i: number, value: string) => {
@@ -50,7 +52,7 @@ export function CreatePollModal({
     }
     setSaving(true)
     try {
-      await onCreate(trimmedQuestion, trimmedOptions)
+      await onCreate(trimmedQuestion, trimmedOptions, allowMultiple)
       onClose()
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'アンケートの作成に失敗しました', 'error')
@@ -105,10 +107,21 @@ export function CreatePollModal({
           type="button"
           onClick={addOption}
           disabled={options.length >= MAX_OPTIONS}
-          className="mb-4 rounded-md border border-line-strong px-2.5 py-1 text-[12px] font-semibold text-ink-muted hover:bg-surface-subtle disabled:opacity-30"
+          className="mb-3 rounded-md border border-line-strong px-2.5 py-1 text-[12px] font-semibold text-ink-muted hover:bg-surface-subtle disabled:opacity-30"
         >
           ＋ 選択肢を追加
         </button>
+
+        <label className="mb-4 flex cursor-pointer items-center gap-2 text-[12.5px] text-ink">
+          <input
+            type="checkbox"
+            checked={allowMultiple}
+            onChange={(e) => setAllowMultiple(e.target.checked)}
+            className="h-4 w-4 accent-accent-600"
+          />
+          複数回答を許可する
+          <span className="text-[11px] text-ink-subtle">（作成後は変更できません）</span>
+        </label>
 
         <div className="flex justify-end gap-2">
           <button
