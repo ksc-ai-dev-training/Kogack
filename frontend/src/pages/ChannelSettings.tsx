@@ -1262,8 +1262,10 @@ function SectionHeading({ no, title }: { no: string; title: string }) {
 // ユーザーに確認のうえ、区分一覧をシステムプロンプトに含めてAI自身に判断・引き継ぎさせる方式を
 // 採用した（追加の分類LLM呼び出しはしない。services/ai_agent.py _build_auto_response_sectionを参照）。
 // request_category（依頼内容）はチャンネル管理者が自由に追加・削除できる（画面モックアップの6例は
-// 固定候補ではなく記入例）。DocScopeTabと同じ「ローカルで編集→まとめて保存」方式（1回のPUTで
-// 洗い替え）とし、行の追加・削除・区分変更のたびに個別リクエストを発生させない
+// 固定候補ではなく記入例）。APIは1回のPUTで一覧全体を洗い替える方式のままだが、画面は
+// 「＋ 追加」「削除」「編集の確定」を押した瞬間にそのPUTを送る即保存にしている（2026-09-30、
+// ユーザーからの要望。①スキル・③引き継ぎ先が即保存なのに②だけ「保存」ボタンを押すまで反映されず、
+// 同じタブ内で保存のされ方がばらばらで分かりにくかったため揃えた）
 function AutoResponseSection({
   channelId,
   settings,
@@ -1274,31 +1276,51 @@ function AutoResponseSection({
   mutate: () => Promise<AiSettings | undefined>
 }) {
   const toast = useToast()
-  const [rules, setRules] = useState<AutoResponseRule[]>(settings.auto_response_rules)
+  const rules = settings.auto_response_rules
   const [newCategory, setNewCategory] = useState('')
   const [saving, setSaving] = useState(false)
   const [editingCategory, setEditingCategory] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState('')
-  // 未保存の変更ガード（2026-09-11）。追加パネルの入力途中（newCategory）は対象外とし、
-  // 実際に保存対象となるrules配列の変更のみを見る。useRefではなくuseStateにしている理由は
-  // ChannelInfoForm.baselineのコメントを参照
-  const [baseline, setBaseline] = useState(JSON.stringify(settings.auto_response_rules))
-  useReportDirty(JSON.stringify(rules) !== baseline)
 
-  const removeRule = (category: string) => {
-    setRules((prev) => prev.filter((r) => r.request_category !== category))
-    if (editingCategory === category) setEditingCategory(null)
+  // 変更後の一覧全体をPUTして保存する。成功したらtrue（呼び出し側で入力欄を閉じる・空にする）
+  const persist = async (next: AutoResponseRule[], message: string) => {
+    setSaving(true)
+    try {
+      await apiFetch(`/api/channels/${channelId}/ai-settings/auto-response`, {
+        method: 'PUT',
+        body: JSON.stringify({ rules: next }),
+      })
+      await mutate()
+      toast(message)
+      return true
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const addRule = () => {
+  const removeRule = async (category: string) => {
+    const ok = await persist(
+      rules.filter((r) => r.request_category !== category),
+      '人に任せる依頼を削除しました',
+    )
+    if (ok && editingCategory === category) setEditingCategory(null)
+  }
+
+  const addRule = async () => {
     const trimmed = newCategory.trim()
-    if (!trimmed) return
+    if (!trimmed || saving) return
     if (rules.some((r) => r.request_category === trimmed)) {
       toast('同じ依頼内容が既に登録されています', 'error')
       return
     }
-    setRules((prev) => [...prev, { request_category: trimmed, response_level: 'human' }])
-    setNewCategory('')
+    const ok = await persist(
+      [...rules, { request_category: trimmed, response_level: 'human' }],
+      '人に任せる依頼を追加しました',
+    )
+    if (ok) setNewCategory('')
   }
 
   const startEdit = (category: string) => {
@@ -1306,38 +1328,26 @@ function AutoResponseSection({
     setEditingValue(category)
   }
 
-  const confirmEdit = () => {
-    if (editingCategory === null) return
+  const confirmEdit = async () => {
+    if (editingCategory === null || saving) return
     const trimmed = editingValue.trim()
     if (!trimmed) {
       toast('依頼内容を入力してください', 'error')
       return
     }
-    if (trimmed !== editingCategory && rules.some((r) => r.request_category === trimmed)) {
+    if (trimmed === editingCategory) {
+      setEditingCategory(null)
+      return
+    }
+    if (rules.some((r) => r.request_category === trimmed)) {
       toast('同じ依頼内容が既に登録されています', 'error')
       return
     }
-    setRules((prev) =>
-      prev.map((r) => (r.request_category === editingCategory ? { ...r, request_category: trimmed } : r)),
+    const ok = await persist(
+      rules.map((r) => (r.request_category === editingCategory ? { ...r, request_category: trimmed } : r)),
+      '人に任せる依頼を更新しました',
     )
-    setEditingCategory(null)
-  }
-
-  const save = async () => {
-    setSaving(true)
-    try {
-      await apiFetch(`/api/channels/${channelId}/ai-settings/auto-response`, {
-        method: 'PUT',
-        body: JSON.stringify({ rules }),
-      })
-      setBaseline(JSON.stringify(rules))
-      await mutate()
-      toast('人に任せる依頼を保存しました')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
-    } finally {
-      setSaving(false)
-    }
+    if (ok) setEditingCategory(null)
   }
 
   return (
@@ -1384,8 +1394,9 @@ function AutoResponseSection({
                         <div className="flex justify-end gap-2.5">
                           <button
                             type="button"
+                            disabled={saving}
                             onClick={confirmEdit}
-                            className="text-[11px] font-semibold text-accent-700 hover:underline"
+                            className="text-[11px] font-semibold text-accent-700 hover:underline disabled:opacity-40"
                           >
                             確定
                           </button>
@@ -1408,8 +1419,9 @@ function AutoResponseSection({
                           </button>
                           <button
                             type="button"
+                            disabled={saving}
                             onClick={() => removeRule(r.request_category)}
-                            className="text-[11px] font-semibold text-danger-text hover:underline"
+                            className="text-[11px] font-semibold text-danger-text hover:underline disabled:opacity-40"
                           >
                             削除
                           </button>
@@ -1437,25 +1449,17 @@ function AutoResponseSection({
         />
         <button
           type="button"
+          disabled={saving}
           onClick={addRule}
-          className="flex-none rounded-lg border border-line-strong px-3.5 py-2 text-[12.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
+          className="flex-none rounded-lg border border-line-strong px-3.5 py-2 text-[12.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700 disabled:opacity-40"
         >
           ＋ 追加
         </button>
       </div>
 
-      <div className="mb-5 text-[11px] leading-relaxed text-ink-subtle">
+      <div className="text-[11px] leading-relaxed text-ink-subtle">
         どの依頼がどの種類に当てはまるかはAI自身が文章から判断するため、判断を誤ることがあります。絶対に答えさせたくない話題は「振る舞い定義」にも書いておくと確実です。
       </div>
-
-      <button
-        type="button"
-        disabled={saving}
-        onClick={save}
-        className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
-      >
-        保存
-      </button>
     </div>
   )
 }
@@ -1535,6 +1539,16 @@ function SkillsSection({
   const [instructions, setInstructions] = useState('')
   const [responseLevel, setResponseLevel] = useState<Skill['response_level']>('auto')
   const [saving, setSaving] = useState(false)
+  // 新規作成パネルは普段は閉じておき「＋ スキルを追加」で開く（2026-09-30、ユーザーからの要望。
+  // 常に開いた空の記入欄が一覧の下に並び、②③が画面の下へ押しやられて分かりにくかったため）
+  const [adding, setAdding] = useState(false)
+
+  const closeAddPanel = () => {
+    setAdding(false)
+    setTitle('')
+    setInstructions('')
+    setResponseLevel('auto')
+  }
 
   const submit = async () => {
     if (!title.trim() || !instructions.trim()) {
@@ -1549,9 +1563,7 @@ function SkillsSection({
       })
       toast('スキルを追加しました')
       await mutate()
-      setTitle('')
-      setInstructions('')
-      setResponseLevel('auto')
+      closeAddPanel()
     } catch (e) {
       toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
     } finally {
@@ -1618,25 +1630,45 @@ function SkillsSection({
         ))}
       </ul>
 
-      <div className="rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
-        <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ 新しいスキルを追加</div>
-        <SkillFormFields
-          title={title}
-          onTitleChange={setTitle}
-          instructions={instructions}
-          onInstructionsChange={setInstructions}
-          responseLevel={responseLevel}
-          onResponseLevelChange={setResponseLevel}
-        />
+      {adding ? (
+        <div className="rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
+          <div className="mb-3.5 text-[12.5px] font-bold text-ink">新しいスキル</div>
+          <SkillFormFields
+            title={title}
+            onTitleChange={setTitle}
+            instructions={instructions}
+            onInstructionsChange={setInstructions}
+            responseLevel={responseLevel}
+            onResponseLevelChange={setResponseLevel}
+          />
+          <div className="mt-3.5 flex gap-2">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={submit}
+              className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+            >
+              追加
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={closeAddPanel}
+              className="rounded-lg border border-line-strong px-4 py-2 text-[13px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700 disabled:opacity-40"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      ) : (
         <button
           type="button"
-          disabled={saving}
-          onClick={submit}
-          className="mt-3.5 rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+          onClick={() => setAdding(true)}
+          className="rounded-lg border border-line-strong px-3.5 py-2 text-[12.5px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700"
         >
           ＋ スキルを追加
         </button>
-      </div>
+      )}
 
       {editingItem && (
         <SkillEditModal
