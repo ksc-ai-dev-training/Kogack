@@ -2740,6 +2740,53 @@ function buildFormattedNode(content: Node, formats: ToggleFormatKind[]): Node {
   return result
 }
 
+/** 書式ボタンを押した時点（まだ何も入力していない保留状態、Composer.tsxのpendingFormats）で、
+ * その書式の実要素をカーソル位置へ先に作り、その内側へカーソルを入れる（ユーザーからの要望
+ * 「太字ボタンを押してからひらがなを入力すると、変換が確定するまでは太字にならない。前に太字の
+ * 文字がある場合は変換中から太字になるのに」）。入力が始まる前から要素の内側にカーソルがあれば、
+ * 変換中の（未確定の）文字も最初から要素の内側に作られる（前に太字の文字がある場合と同じ状態）。
+ *
+ * 要素を作るのはボタンを押した瞬間に限る。変換開始直前のkeydown（keyCode 229）で作ると、実機の
+ * IMEが既に変換を始めているところへカーソルを動かすことになり、1文字目が消える（一度その方式で
+ * 本番に出して不具合になり取り消した）。
+ * 空の要素の内側にはカーソルを置けないため、CARET_MARKERを1文字入れておく（入力された時点で
+ * removeCaretMarkerFromDomが取り除く。何も入力せずにカーソルを動かした場合はComposer.tsxが
+ * removeFormatShellで要素ごと消す）。作った最も外側の要素を返す。選択範囲がある・エディタ外の
+ * 場合は何もせずnull。 */
+export function insertFormatShellAtCaret(root: HTMLElement, formats: ToggleFormatKind[]): HTMLElement | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || formats.length === 0) return null
+  const range = sel.getRangeAt(0)
+  if (!range.collapsed || !root.contains(range.startContainer)) return null
+  const marker = document.createTextNode(CARET_MARKER)
+  const shell = buildFormattedNode(marker, formats) as HTMLElement
+  range.insertNode(shell)
+  const caret = document.createRange()
+  caret.setStart(marker, marker.length)
+  caret.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(caret)
+  return shell
+}
+
+/** insertFormatShellAtCaretで作った要素がまだ空（CARET_MARKERだけ）なら取り除き、カーソルが
+ * その内側にあった場合は要素があった位置へ戻す。何か入力済みなら何もせずfalseを返す。 */
+export function removeFormatShell(shell: HTMLElement): boolean {
+  if (!shell.parentNode) return true
+  if (stripCaretMarker(shell.textContent ?? '') !== '' || shell.querySelector('img')) return false
+  const sel = window.getSelection()
+  const caretInside = !!sel && sel.rangeCount > 0 && shell.contains(sel.getRangeAt(0).startContainer)
+  const pos = document.createRange()
+  pos.setStartBefore(shell)
+  pos.collapse(true)
+  shell.remove()
+  if (caretInside && sel) {
+    sel.removeAllRanges()
+    sel.addRange(pos)
+  }
+  return true
+}
+
 /** [start,end)を指定した書式の並び（外側→内側の順、Composer.tsx側のpendingFormats/
  * activeFormats配列と同じ規約）でネストした実DOM要素として直接ラップする。マーカー文字は
  * 一切経由しない。Composer.tsxのmaterializePendingFormats（ボタンで保留していた書式を、実際に

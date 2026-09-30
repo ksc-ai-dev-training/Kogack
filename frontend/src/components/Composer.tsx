@@ -36,6 +36,8 @@ import {
   getCodeBlockElementAtSelection,
   getBlockFormatKindAtSelection,
   getFormatsAtCaret,
+  insertFormatShellAtCaret,
+  removeFormatShell,
   getInlineCodeElementAt,
   convertLinesToListItems,
   convertLinesToQuote,
@@ -322,6 +324,24 @@ export default function Composer({
   // 更新しない——合成の途中経過ごとに更新すると、合成が確定した時点で「合成開始前からの
   // 増加分」ではなく「合成の最後の1コマからの増加分」しか測れなくなるため。
   const prevPlainTextLengthRef = useRef(0)
+  // 書式ボタンを押した時点でカーソル位置へ先に作った、中身が空の書式要素（composerEditing.tsの
+  // insertFormatShellAtCaret参照）。日本語入力の変換中の文字も最初からその書式で表示するため。
+  // 何か入力されたらその要素がそのまま本物の書式になり（materializePendingFormats）、何も入力せずに
+  // カーソルを動かしたら消す（ユーザーからの以前の報告「記法のボタンを押すと一文字分見えない
+  // 何かが入力される」を再発させないため）。
+  const formatShellRef = useRef<HTMLElement | null>(null)
+  // 空の書式要素を消す（何か入力済みなら残して手放すだけ）
+  const discardFormatShell = () => {
+    const shell = formatShellRef.current
+    formatShellRef.current = null
+    if (shell) removeFormatShell(shell)
+  }
+  // 保留中の書式を切り替えたときに、空の書式要素を作り直す
+  const armFormatShell = (formats: ToggleFormatKind[]) => {
+    discardFormatShell()
+    const root = editorRef.current
+    if (root && formats.length > 0) formatShellRef.current = insertFormatShellAtCaret(root, formats)
+  }
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
@@ -503,19 +523,31 @@ export default function Composer({
   // ラップし、pendingFormatsをそのままactiveFormatsへ引き継ぐ（既に開いているactiveFormatsが
   // ある場合はその内側に自然に入れ子になる——ラップはプレーンテキストのオフセットだけで
   // 行うため、ネストの深さに関わらずそのまま機能する）。呼び出し元はこの直後に必ず
-  // afterMutateを呼ぶこと。
-  const materializePendingFormats = (root: HTMLDivElement) => {
-    if (pendingFormats.length === 0) return
+  // afterMutateを呼ぶこと。保留中の書式を実際に適用した場合はtrueを返す。
+  const materializePendingFormats = (root: HTMLDivElement): boolean => {
+    if (pendingFormats.length === 0) return false
+    // ボタンを押した時点で作った書式要素（formatShellRef）の内側に入力された場合は、その要素が
+    // そのまま本物の書式になる（ラップし直す必要が無い）
+    const shell = formatShellRef.current
+    if (shell) {
+      formatShellRef.current = null
+      if (root.contains(shell) && !removeFormatShell(shell)) {
+        setActiveFormats(getFormatsAtCaret(root, false))
+        setPendingFormats([])
+        return true
+      }
+    }
     const currentLength = domToPlainText(root).length
     const insertedCount = currentLength - prevPlainTextLengthRef.current
-    if (insertedCount <= 0) return
+    if (insertedCount <= 0) return false
     const cursor = getSelectionOffsets(root)?.start
-    if (cursor === undefined || cursor < insertedCount) return
+    if (cursor === undefined || cursor < insertedCount) return false
     const insertStart = cursor - insertedCount
     wrapRangeInFormats(root, insertStart, cursor, pendingFormats)
     setSelectionOffsets(root, cursor)
     setActiveFormats((prev) => [...prev, ...pendingFormats])
     setPendingFormats([])
+    return true
   }
 
   // 書式トグルボタンの押下状態（activeFormats）は、カーソルが動くたびに「カーソルの直前の文字の
@@ -536,6 +568,15 @@ export default function Composer({
       if (!range.collapsed) return
       // IMEで変換中はカーソルを動かさない・押下状態も変えない（変換が壊れるのを防ぐ）
       if (composingRef.current) return
+      // ボタンを押した時点で作った空の書式要素（formatShellRef）の内側にいる間は、押下状態を保留の
+      // まま変えない。何も入力せずにその外へカーソルを動かした（クリック等）なら、要素を消して保留を
+      // 取り消す（Slackと同じく、カーソルを動かすと書式はその位置の文字に従う）
+      const shell = formatShellRef.current
+      if (shell && root.contains(shell)) {
+        if (shell.contains(range.startContainer)) return
+        formatShellRef.current = null
+        if (removeFormatShell(shell)) setPendingFormats([])
+      }
       // Slackと同じく、カーソルの直前の文字が太字等ならそのボタンを押された状態にする（←キーで書式の
       // 途中へ戻った場合も含む）。書式の境界ではカーソルを直前の文字の側へ寄せ、ボタンの表示と実際に
       // 入力される文字の書式を一致させる（composerEditing.tsのgetFormatsAtCaret参照）。
@@ -606,9 +647,12 @@ export default function Composer({
     const root = editorRef.current
     if (!root) return
     removeCaretMarkerFromDom(root)
-    materializePendingFormats(root)
+    const applied = materializePendingFormats(root)
     runPostInputChecks(root)
     afterMutate()
+    // 変換をEsc等で取り消して何も確定しなかった場合、空の書式要素はCARET_MARKERごと消えている
+    // ので、保留中の書式の要素を作り直す（次の変換も変換中からその書式で表示されるように）
+    if (!applied && pendingFormats.length > 0) armFormatShell(pendingFormats)
   }
 
   const toggleSchedulePopover = () => {
@@ -756,6 +800,7 @@ export default function Composer({
     const start = offs?.start ?? total
     const end = offs?.end ?? start
     if (start !== end) {
+      discardFormatShell()
       const result = toggleFormatOnSelectionDom(root, start, end, kind)
       setSelectionOffsets(root, result.selectionStart, result.selectionEnd)
       setPendingFormats([])
@@ -769,23 +814,31 @@ export default function Composer({
       // コードは他のトグル書式と組み合わせ不可能（composerEditing.tsのToggleFormatKindコメント
       // 参照。MessageList.tsx側の重なり解決でコードが常に太字等より優先され、太字側が丸ごと
       // 棄却されてしまうため）。armする際は相手側を全て置き換える。
-      if (kind === 'code') {
-        setPendingFormats((prev) => (prev.includes('code') ? [] : ['code']))
-      } else if (pendingFormats.includes('code')) {
-        setPendingFormats([kind])
-      } else {
-        setPendingFormats((prev) => (prev.includes(kind) ? prev.filter((f) => f !== kind) : [...prev, kind]))
-      }
+      const nextPending =
+        kind === 'code'
+          ? pendingFormats.includes('code') ? [] : (['code'] as ToggleFormatKind[])
+          : pendingFormats.includes('code')
+            ? [kind]
+            : pendingFormats.includes(kind)
+              ? pendingFormats.filter((f) => f !== kind)
+              : [...pendingFormats, kind]
+      setPendingFormats(nextPending)
+      // 日本語入力の変換中の文字からその書式で表示されるよう、書式の要素を先に作っておく
+      // （formatShellRefのコメント参照）
+      armFormatShell(nextPending)
       setPickerQuery(null)
       return
     }
+    discardFormatShell()
     const result = toggleFormatAtCursorDom(root, start, activeFormats, kind)
     setActiveFormats(result.activeFormats)
-    if (result.newlyPending.length > 0) {
-      setPendingFormats((prev) => Array.from(new Set([...prev, ...result.newlyPending])))
-    }
+    const nextPending = Array.from(new Set([...pendingFormats, ...result.newlyPending]))
+    if (nextPending.length !== pendingFormats.length) setPendingFormats(nextPending)
     setPickerQuery(null)
     afterMutate()
+    // afterMutateのカーソル位置の復元（文字数ベース）より後に作る。先に作ると、見えない1文字しか
+    // 持たない要素の外へカーソルが戻されてしまうため
+    armFormatShell(nextPending)
   }
 
   // ユーザーからの明示的な要望「コード（一行）とコードブロックのボタンを分けてください」により、
@@ -1233,6 +1286,20 @@ export default function Composer({
     // ブラウザのネイティブなIME処理にそのまま委ねる（Planサブエージェントの設計精査で
     // 指摘された、この種の実装で最も起きやすい不具合クラスへの対処）。
     if ((e.nativeEvent as KeyboardEvent).isComposing) return
+
+    // 書式ボタンを押しただけで何も入力していない状態（空の書式要素、formatShellRef）で矢印キー・
+    // Backspace等を押したら、要素を消して保留を取り消してから既定の動作に任せる（見えない1文字の
+    // 分だけ矢印キーが空振りしたり、Backspaceで何も消えなかったりしないようにする）。Enterは保留を
+    // 維持したまま要素だけ消す（改行・送信の処理が空の要素を巻き込まないように）
+    if (formatShellRef.current) {
+      if (/^(Arrow(Left|Right|Up|Down)|Home|End|PageUp|PageDown|Backspace|Delete)$/.test(e.key)) {
+        const removed = formatShellRef.current && removeFormatShell(formatShellRef.current)
+        formatShellRef.current = null
+        if (removed) setPendingFormats([])
+      } else if (e.key === 'Enter') {
+        discardFormatShell()
+      }
+    }
 
     if (emojiOpen && e.key === 'Escape') {
       setEmojiOpen(false)
