@@ -16,6 +16,22 @@ function toDateInput(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+const WEEKDAYS = '日月火水木金土'
+
+/** 日付欄の横に出す曜日（ブラウザ標準の日付欄は曜日を表示しないため）。未入力ならnull */
+function weekdayIndex(value: string): number | null {
+  if (!value) return null
+  const d = new Date(`${value}T00:00:00`)
+  return Number.isNaN(d.getTime()) ? null : d.getDay()
+}
+
+/** 土日だけ色を変える（カレンダーの慣習どおり日曜=赤・土曜=青） */
+function weekdayColor(day: number | null): string {
+  if (day === 0) return 'text-danger-text'
+  if (day === 6) return 'text-accent-600'
+  return 'text-ink-muted'
+}
+
 /** 「＋ 候補を追加」で足す行の初期値。直前の行の翌日にする（連続した日を候補に並べることが
  * 多いため、毎回日付を選び直さずに済むように） */
 function nextDate(prev: string | undefined): string {
@@ -109,6 +125,9 @@ export function CreateSchedulePollModal({
                 aria-label={`候補 ${i + 1} の日付`}
                 className={`min-w-0 flex-1 ${inputCls}`}
               />
+              <span className={`w-7 flex-none text-center text-[13px] ${weekdayColor(weekdayIndex(d))}`}>
+                {weekdayIndex(d) !== null ? `(${WEEKDAYS[weekdayIndex(d)!]})` : ''}
+              </span>
               <button
                 type="button"
                 onClick={() => removeDate(i)}
