@@ -417,6 +417,27 @@ _SUMMARY_REQUEST_ENDING_RE = re.compile(
     r"です|んだけど|んですが|けど|か|ね|よ|な|ー|\s|[。．.！!？?～〜…、,)）])*$"
 )
 
+# バグ修正（2026-09-30、同日中のユーザーからの続報）: 上の「直後の結び」だけでは、「〜の給与規定を
+# 読んで、昇給の条件だけ抜粋し、その内容を要約して」のように「要約して」で文が終わる依頼を防げず、
+# 依然としてチャンネルの要約になっていた（要約したい対象は「その内容」＝規定の抜粋で、会話ではない）。
+# 直前にある要約の対象（「〜を要約して」の「〜を」、「〜の要約をお願い」の「〜の」）も見て、次の
+# すべてを満たす場合だけチャンネルの要約とする。満たさない依頼は通常のメンション応答に回る（会話履歴を
+# 参照できるため、会話の要約を頼まれても答えられる。関係の無い会話履歴の要約を返す誤りのほうが害が
+# 大きいため、判定は厳しめにしている）。
+#   (1) 対象が空か、会話・期間を指す語（_SUMMARY_TARGET_WORDS）を含む
+#   (2) 会話以外の資料等を指す語（_SUMMARY_NON_CONVERSATION_WORDS）を含まない
+#   (3) 対象が短い（_SUMMARY_TARGET_MAX_LEN以下。前に別の作業の指示が長く続く依頼を除く）
+_SUMMARY_TARGET_WORDS = (
+    "チャンネル", "スレッド", "会話", "やりとり", "やり取り", "話", "議論", "流れ", "発言", "投稿",
+    "メッセージ", "ここまで", "これまで", "いままで", "今まで", "最近", "直近", "今日", "本日", "昨日",
+    "今週", "先週", "今月", "先月", "期間", "日間", "週間", "か月", "ヶ月", "カ月", "件", "日分",
+)
+_SUMMARY_NON_CONVERSATION_WORDS = (
+    "資料", "ドキュメント", "文書", "書類", "規定", "規程", "規則", "ファイル", "PDF", "pdf", "記事",
+    "URL", "url", "ページ", "サイト", "添付", "メール", "論文", "書籍", "マニュアル", "読んで", "抜粋",
+)
+_SUMMARY_TARGET_MAX_LEN = 25
+
 
 def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
     """本文からメンション記法を取り除いたうえで、実際に要約を依頼する表現（_SUMMARIZE_REQUEST_PATTERNS）
@@ -427,14 +448,23 @@ def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
     一致した直後が「もらう方法」「もらうには」のように方法・手段を尋ねる続きになっている場合も
     除外していた。2026-09-30からは、一致した直後に続くのが依頼の結び（_SUMMARY_REQUEST_ENDING_RE）
     だけの場合に限る（「内容を要約して「〜」というPDFを作って」のように後ろに別の依頼が続くものは
-    チャンネルの要約ではない。上記コメント参照）"""
+    チャンネルの要約ではない。上記コメント参照）。さらに同日、直前にある要約の対象が会話・期間を
+    指している場合に限るようにした（「規定を読んで…その内容を要約して」を除くため。上記コメント参照）"""
     text = body.replace(f"@{persona_name}", "")
     for pattern in _SUMMARIZE_REQUEST_PATTERNS:
         start = 0
         while (idx := text.find(pattern, start)) != -1:
             start = idx + len(pattern)
-            if _SUMMARY_REQUEST_ENDING_RE.match(text[start:].strip()):
-                return True
+            if not _SUMMARY_REQUEST_ENDING_RE.match(text[start:].strip()):
+                continue
+            target = text[:idx].strip(" 　、,。")
+            if len(target) > _SUMMARY_TARGET_MAX_LEN:
+                continue
+            if any(w in target for w in _SUMMARY_NON_CONVERSATION_WORDS):
+                continue
+            if target and not any(w in target for w in _SUMMARY_TARGET_WORDS):
+                continue
+            return True
     return False
 
 
