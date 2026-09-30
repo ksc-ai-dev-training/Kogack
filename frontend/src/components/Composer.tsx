@@ -35,7 +35,7 @@ import {
   getBlockFormatAt,
   getCodeBlockElementAtSelection,
   getBlockFormatKindAtSelection,
-  getFormatsEndingAtCaret,
+  getFormatsAtCaret,
   getInlineCodeElementAt,
   convertLinesToListItems,
   convertLinesToQuote,
@@ -518,8 +518,8 @@ export default function Composer({
     setPendingFormats([])
   }
 
-  // 書式トグルボタンの押下状態（activeFormats）は、カーソルが動くたびに「カーソルの直前の文字が
-  // 太字等の最後の文字かどうか」から求め直す（getFormatsEndingAtCaret）。documentレベルの
+  // 書式トグルボタンの押下状態（activeFormats）は、カーソルが動くたびに「カーソルの直前の文字の
+  // 書式」から求め直す（getFormatsAtCaret）。documentレベルの
   // selectionchangeを監視し、選択範囲がこのエディタ内・かつ折りたたまれている（選択範囲が
   // 無くカーソルのみ）ときだけ判定する。関数型のsetState（prev）を使うことでactiveFormats
   // 自体をこの効果の依存配列に含める必要を無くしている（購読の再登録を避けるため）。
@@ -536,11 +536,10 @@ export default function Composer({
       if (!range.collapsed) return
       // IMEで変換中はカーソルを動かさない・押下状態も変えない（変換が壊れるのを防ぐ）
       if (composingRef.current) return
-      // 太字等の文字のすぐ後にカーソルがあればそのボタンを押された状態にし、カーソルを書式の内側の
-      // 末尾へ移す（ユーザーからの要望「太字の文字のすぐ後にカーソルがある場合には、太字ボタンが
-      // 選択されている状態にしてほしい」、composerEditing.tsのgetFormatsEndingAtCaret参照）。
-      // それ以外の位置ではボタンを戻す（以前の「書式の外へ出たら戻す」判定もこれに含まれる）。
-      const kinds = getFormatsEndingAtCaret(root, true)
+      // Slackと同じく、カーソルの直前の文字が太字等ならそのボタンを押された状態にする（←キーで書式の
+      // 途中へ戻った場合も含む）。書式の境界ではカーソルを直前の文字の側へ寄せ、ボタンの表示と実際に
+      // 入力される文字の書式を一致させる（composerEditing.tsのgetFormatsAtCaret参照）。
+      const kinds = getFormatsAtCaret(root, true)
       setActiveFormats((prev) => (prev.length === kinds.length && prev.every((k, i) => k === kinds[i]) ? prev : kinds))
     }
     document.addEventListener('selectionchange', onSelectionChange)

@@ -2559,14 +2559,22 @@ export function syncLiveFormatting(root: HTMLElement): ToggleFormatKind[] {
   return []
 }
 
-/** カーソル（選択なし）の直前の文字が太字等の実要素の最後の文字である場合（＝太字の文字の
- * すぐ後にカーソルがある場合）に、その文字を包む書式を外側→内側の順で返し、カーソルを最も内側の
- * 要素の中の末尾へ移す（続けて入力した文字も同じ書式になるように）。それ以外（書式の途中・書式の
- * 無い文字の後・行頭・書式を解除した直後の退出点の後）は空配列を返し、カーソルは動かさない。
- * Composer.tsxがselectionchangeのたびに呼び、戻り値をactiveFormats（ボタンの押下状態）にする
- * （ユーザーからの要望「太字の文字のすぐ後にカーソルがある場合には、太字ボタンが選択されている
- * 状態にしてほしい」）。moveCaret=falseならカーソルは動かさない（IMEで変換中の場合）。 */
-export function getFormatsEndingAtCaret(root: HTMLElement, moveCaret: boolean): ToggleFormatKind[] {
+/** カーソル（選択なし）の直前の文字を包む書式（太字等の実要素）を外側→内側の順で返す。
+ * Composer.tsxがselectionchangeのたびに呼び、戻り値をactiveFormats（ボタンの押下状態）にする。
+ *
+ * Slackと同じく「カーソルの直前の文字の書式＝次に入力される文字の書式」とし、ボタンの押下表示と
+ * 実際に入力される文字の書式を常に一致させる（ユーザーからの報告「←キーで太字・コードの途中へ
+ * 戻って入力しようとすると、入力はその書式のままなのにボタンの表示だけ解除される」。以前は太字の
+ * 最後の文字の直後にカーソルがある場合だけを押下扱いにしていたため、途中ではカーソルが<strong>の
+ * 内側にあるのにボタンが戻っていた）。
+ *
+ * moveCaret=trueのときは、ブラウザがカーソルを置いた要素と直前の文字の要素が食い違う境界で、
+ * カーソルを直前の文字の側へ寄せる:
+ *  - 太字の文字のすぐ後（要素の外）→ 要素の内側の末尾へ（続けて入力した文字も太字になる）
+ *  - 太字の先頭（要素の内側のoffset 0、直前は書式の無い文字）→ 手前の文字の末尾へ（太字にならない）
+ * 行頭（直前に文字が無い）では、カーソルがいる要素の書式をそのまま返す（Slackと同じく後続の
+ * 文字の書式を引き継ぐ）。IMEで変換中はmoveCaret=falseで呼ぶこと（呼び出し元で判定を省いている）。 */
+export function getFormatsAtCaret(root: HTMLElement, moveCaret: boolean): ToggleFormatKind[] {
   const sel = window.getSelection()
   if (!sel || sel.rangeCount === 0) return []
   const range = sel.getRangeAt(0)
@@ -2574,65 +2582,62 @@ export function getFormatsEndingAtCaret(root: HTMLElement, moveCaret: boolean): 
   const container = range.startContainer
   const offset = range.startOffset
 
-  // カーソル直前の文字を持つテキストノードを探す
-  let charNode: Text | null = null
-  if (container.nodeType === Node.TEXT_NODE && offset > 0) {
-    const t = container as Text
-    // 書式の途中（直前の文字の後ろにまだ同じノードの文字が続く）は対象外。ただし続くのが
-    // 退出点等のCARET_MARKERだけなら末尾とみなす
-    if (stripCaretMarker(t.data.slice(offset)) !== '') return []
-    charNode = t
-  } else {
-    let before: Node | null
-    if (container.nodeType === Node.TEXT_NODE) {
-      let n: Node = container
-      while (!n.previousSibling && n.parentNode && n.parentNode !== root) {
-        // 書式の要素の先頭にいる場合だけ外へ出て手前を見る（引用・箇条書き等のブロックの先頭＝行頭では見ない）
-        if (!(n.parentNode as HTMLElement).hasAttribute?.(TOGGLE_FORMAT_ELEMENT_ATTR)) return []
-        n = n.parentNode
+  // nodeを包む書式の実要素（外側→内側）
+  const chainOf = (node: Node): ToggleFormatKind[] => {
+    const kinds: ToggleFormatKind[] = []
+    let el: HTMLElement | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement)
+    while (el && el !== root) {
+      const kind = el.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)
+      if (kind) kinds.unshift(kind as ToggleFormatKind)
+      el = el.parentElement
+    }
+    return kinds
+  }
+
+  // 同じテキストノードの中に直前の文字がある（書式の途中・末尾とも）: カーソルはすでにその文字と
+  // 同じ要素の中にあるので、そのまま入力すれば同じ書式になる
+  if (container.nodeType === Node.TEXT_NODE && offset > 0) return chainOf(container)
+
+  // テキストノードの先頭・要素の子の境界: 直前の兄弟を探す。書式の要素の先頭にいる場合だけ外へ
+  // 出て手前を見る（引用・箇条書き等のブロックの先頭＝行頭では見ない）
+  let before: Node | null
+  if (container.nodeType === Node.TEXT_NODE) {
+    let n: Node = container
+    before = null
+    while (n !== root) {
+      if (n.previousSibling) {
+        before = n.previousSibling
+        break
       }
-      before = n.previousSibling
-    } else {
-      before = container.childNodes[offset - 1] ?? null
+      const parent = n.parentNode as HTMLElement | null
+      if (!parent || parent === root || !parent.hasAttribute?.(TOGGLE_FORMAT_ELEMENT_ATTR)) break
+      n = parent
     }
-    // 手前の書式の要素の中を末尾まで辿る
-    while (before?.nodeType === Node.ELEMENT_NODE && (before as HTMLElement).hasAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)) {
-      before = before.lastChild
-    }
-    if (before?.nodeType !== Node.TEXT_NODE) return []
-    charNode = before as Text
+  } else {
+    before = container.childNodes[offset - 1] ?? null
   }
-  const visible = stripCaretMarker(charNode.data)
-  // 直前が退出点のCARET_MARKERだけ（書式ボタンで解除した直後）なら対象外
-  if (visible === '' || (charNode === container && charNode.data[offset - 1] === CARET_MARKER)) return []
+  // 手前の書式の要素の中を末尾まで辿る
+  while (before?.nodeType === Node.ELEMENT_NODE && (before as HTMLElement).hasAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)) {
+    before = before.lastChild
+  }
+  // 空のテキストノードは読み飛ばす
+  while (before?.nodeType === Node.TEXT_NODE && (before as Text).length === 0) before = before.previousSibling
 
-  // 直前の文字を包む書式の要素（外側→内側）。最も内側の要素の最後の文字でなければ対象外
-  const kinds: ToggleFormatKind[] = []
-  let innermost: HTMLElement | null = null
-  let el: HTMLElement | null = charNode.parentElement
-  while (el && el !== root) {
-    const kind = el.getAttribute(TOGGLE_FORMAT_ELEMENT_ATTR)
-    if (kind) {
-      kinds.unshift(kind as ToggleFormatKind)
-      if (!innermost) innermost = el
-    }
-    el = el.parentElement
-  }
-  if (!innermost) return []
-  let n: Node = charNode
-  while (n !== innermost) {
-    let next = n.nextSibling
-    while (next && next.nodeType === Node.TEXT_NODE && stripCaretMarker((next as Text).data) === '') next = next.nextSibling
-    if (next) return []
-    n = n.parentNode as Node
-  }
+  const isLineBoundary =
+    !before ||
+    (before.nodeType === Node.ELEMENT_NODE && /^(BR|DIV|P|BLOCKQUOTE|UL|OL|LI|PRE)$/.test((before as HTMLElement).tagName))
+  if (isLineBoundary) return chainOf(container)
 
-  if (moveCaret && (range.startContainer !== charNode || range.startOffset !== charNode.length)) {
-    const caret = document.createRange()
-    caret.setStart(charNode, charNode.length)
-    caret.collapse(true)
-    sel.removeAllRanges()
-    sel.addRange(caret)
+  const kinds = chainOf(before as Node)
+  if (moveCaret && before!.nodeType === Node.TEXT_NODE) {
+    const t = before as Text
+    if (range.startContainer !== t || range.startOffset !== t.length) {
+      const caret = document.createRange()
+      caret.setStart(t, t.length)
+      caret.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(caret)
+    }
   }
   return kinds
 }
@@ -2877,6 +2882,19 @@ export function toggleFormatAtCursorDom(
       // （文字数は変化しないためSelectionは自然にその位置に残る）。
       target.remove()
       return { activeFormats: activeFormats.slice(0, -1), newlyPending: [] }
+    }
+    // 書式の途中（←キーで戻った位置等）で解除した場合は、カーソルの後ろの文字を同じ書式の別要素へ
+    // 切り出し、2つの要素の間を退出点にする（Slackと同じくカーソル位置から書式が切れる。以前は
+    // 要素の末尾の後ろへカーソルが飛んでいた）
+    const targetRange = computeElementOffset(root, target)
+    if (targetRange.end > cursor) {
+      const startPos = resolveOffset(root, cursor)
+      const range = document.createRange()
+      range.setStart(startPos.node, startPos.offset)
+      range.setEnd(target, target.childNodes.length)
+      const tail = target.cloneNode(false)
+      tail.appendChild(range.extractContents())
+      target.parentNode?.insertBefore(tail, target.nextSibling)
     }
     insertTextAfterNode(target, CARET_MARKER)
     return { activeFormats: activeFormats.slice(0, -1), newlyPending: [] }
