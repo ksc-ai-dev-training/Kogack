@@ -77,6 +77,7 @@
       <tr class="diff-new"><td>1.42</td><td>2026-09-29</td><td>A-28/A-29にスキルの対応区分<code>response_level</code>（auto=そのまま対応/confirm=確認してから対応）を追加し、A-31を「人に任せる依頼」（response_level='human'のみ）を扱うAPIにした（要件定義書v1.27 F-16、DB設計v1.18）。</td></tr>
       <tr class="diff-new"><td>1.43</td><td>2026-09-29</td><td>参照範囲外の質問への対応（out_of_scope_policy、F-11）の既定を「厳格に制限」から「一般回答を許可」に変更し、既存チャンネルも一括で切り替えた（ユーザーからの要望）。A-23のレスポンス例とA-27の省略時の値を更新した。</td></tr>
       <tr class="diff-new"><td>1.44</td><td>2026-09-30</td><td>サイドバーのDMを最近やり取りした順に並べ、30日以上やり取りの無いDMを既定で隠すようにした（ユーザーからの要望。DMはチャンネルより相手が増えやすいため）。A-16のレスポンスに<code>last_activity_at</code>を追加し、並び順を最後にやり取りした日時の新しい順に変えた。</td></tr>
+      <tr class="diff-new"><td>1.45</td><td>2026-09-30</td><td>A-42・A-43にon_limit_action（上限到達時の動作）を追加し、A-43のnotify_emailを任意（未使用）にした。しきい値・上限到達の通知と応答停止は実装済みになった（基本設計書8.6節）。</td></tr>
     </tbody>
   </table>
 
@@ -467,22 +468,22 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   "by_user": [ { "user_id": "7", "user_name": "田中 智子",
     "call_count": 42, "input_tokens": 70000, "output_tokens": 15000, "cost_yen": 400.0 } ],
   "limits": { "global": { "monthly_limit_yen": 20000, "notify_threshold_pct": 80,
-      "notify_email": "admin@kogasoftware.com", "used_pct": 24.1 },
+      "notify_email": null, "on_limit_action": "notify", "used_pct": 24.1 },
     "channels": [ { "channel_id": "42", "channel_name": "開発部", "monthly_limit_yen": 5000,
-      "notify_threshold_pct": 80, "notify_email": "dev-lead@kogasoftware.com", "used_pct": 24.0 } ] } }</code></pre>
+      "notify_threshold_pct": 80, "notify_email": null, "on_limit_action": "stop", "used_pct": 24.0 } ] } }</code></pre>
   <p class="muted diff-new"><code>month</code>省略時はJSTの当月。<code>by_user</code>は基本設計書8.6節「月次・チャンネル別・利用者別に集計して表示する」の記載に合わせて追加した（旧いレスポンス例はby_channelのみだった抜けをbackfill）。<code>limits.global</code>・<code>limits.channels[]</code>はいずれも設定が無ければ<code>global</code>はnull・<code>channels</code>は空配列。<code>used_pct</code>は<code>指定月のcost_yen ÷ monthly_limit_yen × 100</code>（小数第1位まで）。dm分の集計は現状発生しない（AIのDM応答が未実装のため）。</p>
 
   <p><strong>A-43 <span class="badge badge-put">PUT</span> /api/admin/usage/limits</strong></p>
   <pre><code>// scope='global'（channel_idは指定しない）
 { "scope": "global", "monthly_limit_yen": 20000, "notify_threshold_pct": 80,
-  "notify_email": "admin@kogasoftware.com" }
+  "on_limit_action": "notify" }
 // scope='channel'（channel_id必須）
 { "scope": "channel", "channel_id": "42", "monthly_limit_yen": 5000,
-  "notify_threshold_pct": 80, "notify_email": "dev-lead@kogasoftware.com" }
+  "notify_threshold_pct": 80, "on_limit_action": "stop" }
 // response 200
 { "scope": "global", "channel_id": null, "monthly_limit_yen": 20000,
-  "notify_threshold_pct": 80, "notify_email": "admin@kogasoftware.com" }</code></pre>
-  <p class="muted diff-new">T-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象にして洗い替える。scope='global'は常に1行、scope='channel'はchannel_idごとに1行のみ存在する（同じscope+channel_idへのPUTは新規行を増やさず上書き）。<code>scope</code>がglobal/channel以外、または<code>scope='channel'</code>なのに<code>channel_id</code>未指定・存在しないchannel_idの場合はそれぞれ422・404。<strong>しきい値（notify_threshold_pct）到達時の通知メール送信、および上限到達時にAIの応答を止めるかどうかの制御は、このAPIでは実装しない</strong>（要件定義書8.2節のとおり上限到達時の挙動は千田氏との別途協議事項のため、設定の保存とA-42のused_pct表示のみ行う）。</p>
+  "notify_threshold_pct": 80, "notify_email": null, "on_limit_action": "notify" }</code></pre>
+  <p class="muted diff-new">T-14の部分ユニークインデックス（05-1 DB設計3.11節）をON CONFLICTの対象にして洗い替える。scope='global'は常に1行、scope='channel'はchannel_idごとに1行のみ存在する（同じscope+channel_idへのPUTは新規行を増やさず上書き）。<code>scope</code>がglobal/channel以外、または<code>scope='channel'</code>なのに<code>channel_id</code>未指定・存在しないchannel_idの場合はそれぞれ422・404。<s><strong>しきい値（notify_threshold_pct）到達時の通知メール送信、および上限到達時にAIの応答を止めるかどうかの制御は、このAPIでは実装しない</strong>（要件定義書8.2節のとおり上限到達時の挙動は千田氏との別途協議事項のため、設定の保存とA-42のused_pct表示のみ行う）。</s><span class="diff-new"><code>on_limit_action</code>は<code>'notify'</code>（既定）/<code>'stop'</code>のいずれかで、それ以外は422。<code>notify_email</code>は旧クライアント互換のため受け付けるが使わない（省略可）。更新のたびにT-14の通知済みの月（threshold_notified_month・limit_notified_month）をNULLへ戻す。しきい値・上限到達の通知と応答停止は<code>services/usage_limits.py</code>が行う（基本設計書8.6節）。</span></p>
 
   <p class="diff-new"><strong>A-44 <span class="badge badge-get">GET</span> /api/admin/audit-logs</strong></p>
   <pre class="diff-new"><code>GET /api/admin/audit-logs?event_type=channel_ai_setting_change&actor_user_id=7&after=2026-08-01&before=2026-09-01

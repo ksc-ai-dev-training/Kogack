@@ -53,6 +53,7 @@
       <tr class="diff-new"><td>1.22</td><td>2026-09-30</td><td>アンケートの複数回答（ユーザーからの明示的な要望）に伴い、T-29 pollsに<code>allow_multiple</code>を追加し、poll_votesの主キーを(poll_id, user_id)から(option_id, user_id)へ変更した（3.21節）。単一選択の「1人1票」はAPIで保証する。</td></tr>
       <tr class="diff-new"><td>1.23</td><td>2026-09-30</td><td>メンションの催促を既定でオンにした（ユーザーからの明示的な要望）。T-08の<code>mention_reminder_enabled</code>の既定値をtrue、<code>mention_reminder_enabled_at</code>の既定値をnow()にし、既存チャンネルもT-31 app_migrationsで一括でtrueにした（切り替えた時刻より前のメンションは催促しない）。</td></tr>
       <tr class="diff-new"><td>1.24</td><td>2026-09-30</td><td>3.9節に、実装済みで未記載だったT-09 doc_foldersの<code>is_restricted</code>列と、新規T-24 doc_folder_viewers（限定公開の文書の閲覧者）を追記した（要件定義書v1.31 5.1節の代替方式、基本設計書8.2節）。</td></tr>
+      <tr class="diff-new"><td>1.25</td><td>2026-09-30</td><td>T-14 ai_usage_limitsにon_limit_action・threshold_notified_month・limit_notified_monthを追加し、notify_emailをNULL可にした（F-29の上限到達時の動作・通知。基本設計書8.6節）。</td></tr>
     </tbody>
   </table>
 
@@ -290,7 +291,10 @@
       <tr><td>T-14</td><td>channel_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→channels.id。scope='channel'時は必須（API側で検証）</td></tr>
       <tr><td>T-14</td><td>monthly_limit_yen</td><td>NUMERIC(10,2)</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
       <tr><td>T-14</td><td>notify_threshold_pct</td><td>INT</td><td>NOT NULL</td><td>80</td><td>-</td></tr>
-      <tr><td>T-14</td><td>notify_email</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>-</td></tr>
+      <tr><td>T-14</td><td>notify_email</td><td>TEXT</td><td><span class="diff-new">NULL可</span></td><td>-</td><td><span class="diff-new">入力欄は廃止（通知はシステム管理者の自分専用DMへ送る）。既存の値を残すため列は残す</span></td></tr>
+      <tr class="diff-new"><td>T-14</td><td>on_limit_action</td><td>TEXT</td><td>NOT NULL</td><td>'notify'</td><td>CHECK IN ('notify','stop')。上限額に達したときの動作（通知のみ／月末まで応答を停止）</td></tr>
+      <tr class="diff-new"><td>T-14</td><td>threshold_notified_month</td><td>TEXT</td><td>NULL可</td><td>-</td><td>しきい値到達を通知した月（'YYYY-MM'、JST）。同じ月に重ねて通知しないための記録。A-43で設定を変更するとNULLへ戻す</td></tr>
+      <tr class="diff-new"><td>T-14</td><td>limit_notified_month</td><td>TEXT</td><td>NULL可</td><td>-</td><td>上限到達を通知した月（同上）</td></tr>
       <tr><td>T-14</td><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
   </table>

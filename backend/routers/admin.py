@@ -506,6 +506,7 @@ def _limit_out(row, used_cost_yen: float) -> dict:
         "monthly_limit_yen": limit,
         "notify_threshold_pct": row["notify_threshold_pct"],
         "notify_email": row["notify_email"],
+        "on_limit_action": row["on_limit_action"],
         "used_pct": round(used_cost_yen / limit * 100, 1) if limit > 0 else 0.0,
     }
 
@@ -601,27 +602,34 @@ class UpdateUsageLimitRequest(BaseModel):
     channel_id: str | None = None
     monthly_limit_yen: float = Field(gt=0)
     notify_threshold_pct: int = Field(default=80, ge=1, le=100)
-    notify_email: str = Field(min_length=1, max_length=200)
+    # 上限に達したときの動作（services/usage_limits.py）。'notify'=通知のみ、'stop'=応答を停止
+    on_limit_action: str = "notify"
+    # 通知はシステム管理者の自分専用DMへ送るようになり入力欄を廃止した（2026-09-30）。旧クライアント
+    # 互換のため受け付けるだけで、使わない
+    notify_email: str | None = Field(default=None, max_length=200)
 
 
 @router.put("/usage/limits")
 async def update_usage_limit(body: UpdateUsageLimitRequest, user: CurrentUser = Depends(require_roles("admin"))):
-    """A-43: 上限設定・通知先の更新（F-29）。scope='global'は常に1行、scope='channel'は
+    """A-43: 上限設定の更新（F-29）。scope='global'は常に1行、scope='channel'は
     channel_idごとに1行を洗い替える（05-1 DB設計3.11節の部分ユニークインデックスをON CONFLICTの
-    対象にする）。80%到達時の通知メール送信・上限到達時の応答停止はこのスライスでは対象外
-    （要件定義書8.2節のとおり上限到達時の挙動は千田氏との別途協議事項のため、設定の保存と
-    使用率表示（A-42のused_pct）のみ行う）。"""
+    対象にする）。しきい値・上限到達の通知と、上限到達時の応答停止（on_limit_action='stop'）は
+    services/usage_limits.pyが行う（2026-09-30）。設定を変えたら通知済みの記録を消し、変更後の
+    上限額・しきい値で改めて判定する（上限額を引き上げた後に再び近づいたら、また通知されるように）。"""
     if body.scope not in ("global", "channel"):
         raise HTTPException(422, detail="scopeはglobal/channelのいずれかです")
+    if body.on_limit_action not in ("notify", "stop"):
+        raise HTTPException(422, detail="on_limit_actionはnotify/stopのいずれかです")
     pool = get_pool()
     if body.scope == "global":
         row = await pool.fetchrow(
-            """INSERT INTO ai_usage_limits (scope, monthly_limit_yen, notify_threshold_pct, notify_email)
+            """INSERT INTO ai_usage_limits (scope, monthly_limit_yen, notify_threshold_pct, on_limit_action)
                VALUES ('global', $1, $2, $3)
                ON CONFLICT (scope) WHERE scope = 'global'
-               DO UPDATE SET monthly_limit_yen = $1, notify_threshold_pct = $2, notify_email = $3, updated_at = now()
+               DO UPDATE SET monthly_limit_yen = $1, notify_threshold_pct = $2, on_limit_action = $3,
+                             threshold_notified_month = NULL, limit_notified_month = NULL, updated_at = now()
                RETURNING *""",
-            body.monthly_limit_yen, body.notify_threshold_pct, body.notify_email,
+            body.monthly_limit_yen, body.notify_threshold_pct, body.on_limit_action,
         )
     else:
         if body.channel_id is None or not body.channel_id.isdigit():
@@ -631,12 +639,13 @@ async def update_usage_limit(body: UpdateUsageLimitRequest, user: CurrentUser = 
         if not exists:
             raise HTTPException(404, detail="見つかりません")
         row = await pool.fetchrow(
-            """INSERT INTO ai_usage_limits (scope, channel_id, monthly_limit_yen, notify_threshold_pct, notify_email)
+            """INSERT INTO ai_usage_limits (scope, channel_id, monthly_limit_yen, notify_threshold_pct, on_limit_action)
                VALUES ('channel', $1, $2, $3, $4)
                ON CONFLICT (channel_id) WHERE scope = 'channel'
-               DO UPDATE SET monthly_limit_yen = $2, notify_threshold_pct = $3, notify_email = $4, updated_at = now()
+               DO UPDATE SET monthly_limit_yen = $2, notify_threshold_pct = $3, on_limit_action = $4,
+                             threshold_notified_month = NULL, limit_notified_month = NULL, updated_at = now()
                RETURNING *""",
-            channel_id, body.monthly_limit_yen, body.notify_threshold_pct, body.notify_email,
+            channel_id, body.monthly_limit_yen, body.notify_threshold_pct, body.on_limit_action,
         )
     return {
         "scope": row["scope"],
@@ -644,6 +653,7 @@ async def update_usage_limit(body: UpdateUsageLimitRequest, user: CurrentUser = 
         "monthly_limit_yen": float(row["monthly_limit_yen"]),
         "notify_threshold_pct": row["notify_threshold_pct"],
         "notify_email": row["notify_email"],
+        "on_limit_action": row["on_limit_action"],
     }
 
 

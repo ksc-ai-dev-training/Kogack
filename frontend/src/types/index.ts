@@ -533,12 +533,17 @@ export interface UsageByUser {
   cost_yen: number
 }
 
-/** T-14 ai_usage_limits。80%到達時の通知メール送信・応答停止は未実装（上限到達時の挙動は
- * 千田氏との別途協議事項のため、このスライスは設定の保存とused_pct表示のみ） */
+/** 上限額に達したときの動作。'notify'=通知のみ（既定）、'stop'=月末まで応答を停止
+ * （backend/services/usage_limits.py。どちらにするかは千田氏との協議事項のため設定で選べる） */
+export type UsageLimitAction = 'notify' | 'stop'
+
+/** T-14 ai_usage_limits。しきい値・上限への到達はシステム管理者の自分専用DMへシステム通知で届く */
 export interface UsageLimit {
   monthly_limit_yen: number
   notify_threshold_pct: number
-  notify_email: string
+  /** 入力欄は廃止済み（2026-09-30）。以前に保存された値が残っている場合だけ入る */
+  notify_email: string | null
+  on_limit_action: UsageLimitAction
   used_pct: number
 }
 

@@ -36,7 +36,7 @@ from datetime import timedelta
 import background
 from database import get_pool
 from mentions import MentionInput, insert_mention_blocks
-from services import ai_client, push_sender
+from services import ai_client, push_sender, usage_limits
 
 STALE_AFTER = timedelta(days=7)
 BATCH_LIMIT = 50  # 1回のループで催促する最大件数（大量に溜まっていても1回の処理を長引かせない）
@@ -209,6 +209,10 @@ async def _responded_by_ai(row) -> bool:
     )
     if not posts:
         return False
+    # コスト上限到達で停止中（services/usage_limits.py）は判定にAIを使わず、AIが使えない場合と同じく
+    # 催促する側に倒す（催促の発言自体はAIを呼ばないためコストは掛からない）
+    if await usage_limits.is_stopped(row["channel_id"]):
+        return False
     model = JUDGE_MODEL
     try:
         verdict, usage, messages = await judge_responded(
@@ -227,6 +231,10 @@ async def _responded_by_ai(row) -> bool:
             ai_client.estimate_cost_yen(model, usage["prompt_tokens"], usage["completion_tokens"]),
             row["message_id"], json.dumps(messages, ensure_ascii=False),
         )
+        try:
+            await usage_limits.check_and_notify(row["channel_id"])  # ai_agent.check_usage_limitsと同じ
+        except Exception:
+            traceback.print_exc()
     return verdict is True
 
 

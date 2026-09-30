@@ -13,7 +13,8 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import type {
-  AdminUser, DocFolder, DocPermissionConflict, Me, Role, UsageByChannel, UsageChannelLimit, UsageLimit, UsageStats,
+  AdminUser, DocFolder, DocPermissionConflict, Me, Role, UsageByChannel, UsageChannelLimit, UsageLimit, UsageLimitAction,
+  UsageStats,
 } from '../types'
 
 function formatDateTime(iso: string | null) {
@@ -1154,9 +1155,9 @@ function EditViewersModal({
 
 // A-42/A-43: AI利用状況・コストタブ本体（F-29）。基本設計書8.6節「T-13を月次・チャンネル別・
 // 利用者別に集計して表示する」のとおりチャンネル別・利用者別の内訳テーブルを表示する。全体
-// （scope='global'）・チャンネル別（scope='channel'）いずれも編集UIを持つ。80%到達時の
-// 通知メール送信・上限到達時の応答停止は未実装（上限到達時の挙動は要件定義書8.2節のとおり
-// 千田氏との別途協議事項のため、このスライスは設定の保存とused_pct表示のみ行う）
+// （scope='global'）・チャンネル別（scope='channel'）いずれも編集UIを持つ。しきい値・上限到達の
+// 通知と上限到達時の応答停止はバックエンド（services/usage_limits.py）が行い、ここでは上限額・
+// しきい値・上限到達時の動作（on_limit_action）を設定する（2026-09-30）
 function UsageTab() {
   const [month, setMonth] = useState(currentMonthStr)
   const { usage, mutate } = useUsageStats(month)
@@ -1278,20 +1279,26 @@ function UsageTabBody({ usage, mutate }: { usage: UsageStats; mutate: () => Prom
   )
 }
 
-// A-43の3項目（月次上限額・通知しきい値・通知先）の入力欄。GlobalLimitForm・
+const LIMIT_ACTION_LABELS: Record<UsageLimitAction, string> = {
+  notify: '通知のみ（応答は続ける）',
+  stop: '月末まで応答を停止',
+}
+
+// A-43の3項目（月次上限額・通知しきい値・上限に達したときの動作）の入力欄。GlobalLimitForm・
 // ChannelLimitAddPanel・ChannelLimitEditModalの3箇所で共有する表示専用コンポーネント
-// （ChannelSettings.tsxのRecurringPostFormFields等と同じ考え方）
+// （ChannelSettings.tsxのRecurringPostFormFields等と同じ考え方）。通知先メールアドレスの入力欄は、
+// 通知をシステム管理者の自分専用DMへ送る方式にしたため廃止した（2026-09-30、ユーザーの選択）
 function UsageLimitFormFields({
   monthlyLimitYen, onMonthlyLimitYenChange,
   notifyThresholdPct, onNotifyThresholdPctChange,
-  notifyEmail, onNotifyEmailChange,
+  onLimitAction, onOnLimitActionChange,
 }: {
   monthlyLimitYen: string
   onMonthlyLimitYenChange: (v: string) => void
   notifyThresholdPct: string
   onNotifyThresholdPctChange: (v: string) => void
-  notifyEmail: string
-  onNotifyEmailChange: (v: string) => void
+  onLimitAction: UsageLimitAction
+  onOnLimitActionChange: (v: UsageLimitAction) => void
 }) {
   return (
     <>
@@ -1318,14 +1325,22 @@ function UsageLimitFormFields({
         />
       </div>
       <div className="mb-3.5">
-        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">通知先メールアドレス</label>
-        <input
-          value={notifyEmail}
-          onChange={(e) => onNotifyEmailChange(e.target.value)}
-          placeholder="admin@kogasoftware.com"
-          maxLength={200}
-          className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-        />
+        <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">上限額に達したときの動作</label>
+        <select
+          value={onLimitAction}
+          onChange={(e) => onOnLimitActionChange(e.target.value as UsageLimitAction)}
+          className="w-full rounded-lg border border-line-strong px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+        >
+          {(Object.keys(LIMIT_ACTION_LABELS) as UsageLimitAction[]).map((a) => (
+            <option key={a} value={a}>
+              {LIMIT_ACTION_LABELS[a]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
+        しきい値・上限額に達すると、システム管理者全員の「自分（メモ）」DMへシステム通知が届きます（それぞれ月に1回）。
+        「月末まで応答を停止」にすると、上限額に達した時点からその月の終わりまで、AIは呼びかけに停止中である旨だけを返します。
       </div>
     </>
   )
@@ -1335,17 +1350,13 @@ function GlobalLimitForm({ limit, mutate }: { limit: UsageLimit | null; mutate: 
   const toast = useToast()
   const [limitYen, setLimitYen] = useState(limit ? String(limit.monthly_limit_yen) : '')
   const [thresholdPct, setThresholdPct] = useState(limit ? String(limit.notify_threshold_pct) : '80')
-  const [notifyEmail, setNotifyEmail] = useState(limit?.notify_email ?? '')
+  const [onLimitAction, setOnLimitAction] = useState<UsageLimitAction>(limit?.on_limit_action ?? 'notify')
   const [saving, setSaving] = useState(false)
 
   const save = async () => {
     const yen = Number(limitYen)
     if (!yen || yen <= 0) {
       toast('上限額は0より大きい数値で入力してください', 'error')
-      return
-    }
-    if (!notifyEmail.trim()) {
-      toast('通知先メールアドレスを入力してください', 'error')
       return
     }
     setSaving(true)
@@ -1356,7 +1367,7 @@ function GlobalLimitForm({ limit, mutate }: { limit: UsageLimit | null; mutate: 
           scope: 'global',
           monthly_limit_yen: yen,
           notify_threshold_pct: Number(thresholdPct) || 80,
-          notify_email: notifyEmail.trim(),
+          on_limit_action: onLimitAction,
         }),
       })
       await mutate()
@@ -1390,12 +1401,9 @@ function GlobalLimitForm({ limit, mutate }: { limit: UsageLimit | null; mutate: 
         onMonthlyLimitYenChange={setLimitYen}
         notifyThresholdPct={thresholdPct}
         onNotifyThresholdPctChange={setThresholdPct}
-        notifyEmail={notifyEmail}
-        onNotifyEmailChange={setNotifyEmail}
+        onLimitAction={onLimitAction}
+        onOnLimitActionChange={setOnLimitAction}
       />
-      <div className="mb-3.5 text-[11px] leading-relaxed text-ink-subtle">
-        しきい値到達時の通知メール送信・上限到達時の応答停止は未実装です（挙動は別途協議事項のため、現時点では使用率の表示のみ行います）。
-      </div>
       <button
         type="button"
         disabled={saving}
@@ -1438,7 +1446,7 @@ function ChannelLimitsSection({ usage, mutate }: { usage: UsageStats; mutate: ()
                 ) : (
                   '(削除済み)'
                 )}
-                : {formatYen(l.monthly_limit_yen)} 中 {l.used_pct}% 使用（通知先: {l.notify_email}）
+                : {formatYen(l.monthly_limit_yen)} 中 {l.used_pct}% 使用（上限到達時: {LIMIT_ACTION_LABELS[l.on_limit_action]}）
               </span>
               <button
                 type="button"
@@ -1472,7 +1480,7 @@ function ChannelLimitAddPanel({
   const [channelId, setChannelId] = useState('')
   const [limitYen, setLimitYen] = useState('')
   const [thresholdPct, setThresholdPct] = useState('80')
-  const [notifyEmail, setNotifyEmail] = useState('')
+  const [onLimitAction, setOnLimitAction] = useState<UsageLimitAction>('notify')
   const [saving, setSaving] = useState(false)
 
   const add = async () => {
@@ -1485,10 +1493,6 @@ function ChannelLimitAddPanel({
       toast('上限額は0より大きい数値で入力してください', 'error')
       return
     }
-    if (!notifyEmail.trim()) {
-      toast('通知先メールアドレスを入力してください', 'error')
-      return
-    }
     setSaving(true)
     try {
       await apiFetch('/api/admin/usage/limits', {
@@ -1498,7 +1502,7 @@ function ChannelLimitAddPanel({
           channel_id: channelId,
           monthly_limit_yen: yen,
           notify_threshold_pct: Number(thresholdPct) || 80,
-          notify_email: notifyEmail.trim(),
+          on_limit_action: onLimitAction,
         }),
       })
       await mutate()
@@ -1506,7 +1510,7 @@ function ChannelLimitAddPanel({
       setChannelId('')
       setLimitYen('')
       setThresholdPct('80')
-      setNotifyEmail('')
+      setOnLimitAction('notify')
     } catch (e) {
       toast(e instanceof Error ? e.message : '追加に失敗しました', 'error')
     } finally {
@@ -1543,8 +1547,8 @@ function ChannelLimitAddPanel({
             onMonthlyLimitYenChange={setLimitYen}
             notifyThresholdPct={thresholdPct}
             onNotifyThresholdPctChange={setThresholdPct}
-            notifyEmail={notifyEmail}
-            onNotifyEmailChange={setNotifyEmail}
+            onLimitAction={onLimitAction}
+            onOnLimitActionChange={setOnLimitAction}
           />
           <button
             type="button"
@@ -1573,17 +1577,13 @@ function ChannelLimitEditModal({
   const toast = useToast()
   const [limitYen, setLimitYen] = useState(String(limit.monthly_limit_yen))
   const [thresholdPct, setThresholdPct] = useState(String(limit.notify_threshold_pct))
-  const [notifyEmail, setNotifyEmail] = useState(limit.notify_email)
+  const [onLimitAction, setOnLimitAction] = useState<UsageLimitAction>(limit.on_limit_action)
   const [saving, setSaving] = useState(false)
 
   const save = async () => {
     const yen = Number(limitYen)
     if (!yen || yen <= 0) {
       toast('上限額は0より大きい数値で入力してください', 'error')
-      return
-    }
-    if (!notifyEmail.trim()) {
-      toast('通知先メールアドレスを入力してください', 'error')
       return
     }
     setSaving(true)
@@ -1595,7 +1595,7 @@ function ChannelLimitEditModal({
           channel_id: limit.channel_id,
           monthly_limit_yen: yen,
           notify_threshold_pct: Number(thresholdPct) || 80,
-          notify_email: notifyEmail.trim(),
+          on_limit_action: onLimitAction,
         }),
       })
       await mutate()
@@ -1626,8 +1626,8 @@ function ChannelLimitEditModal({
             onMonthlyLimitYenChange={setLimitYen}
             notifyThresholdPct={thresholdPct}
             onNotifyThresholdPctChange={setThresholdPct}
-            notifyEmail={notifyEmail}
-            onNotifyEmailChange={setNotifyEmail}
+            onLimitAction={onLimitAction}
+            onOnLimitActionChange={setOnLimitAction}
           />
         </div>
         <div className="px-[22px] pb-5 pt-4">

@@ -59,7 +59,9 @@
 #     _build_skills_sectionで実現する（書き込み系ツールができたらS-07の確認ダイアログへ置き換える）。
 #     実行前確認（F-25）自体は引き続き対象外。T-08.out_of_scope_policyは層2ドキュメントQ&A関連の
 #     ためこのスライスではプロンプトに反映されない（値は保存できるが未使用。ドキュメントQ&A実装時に使う）
-#   - AI利用コストの上限判定・通知（T-14、F-29後半）は対象外。T-13への記録のみ行う
+#   - AI利用コストの上限判定・通知（T-14、F-29後半）は当初対象外だったが、2026-09-30に
+#     services/usage_limits.pyで実装した（T-13記録後の通知判定＝check_usage_limits、停止中の判定は
+#     maybe_trigger・start_summaryの入口）
 #   - チャンネル本体の投稿（A-11）に加え、スレッド返信（A-14）内の@メンションにも対応する
 #     （2026-09-04、ユーザーからの明示的な要望で追加。当初のスライスでは対象外だったが、
 #     「次スライスでA-14にも同じ配線を追加する」という当初からの想定どおり実装した）
@@ -90,7 +92,7 @@ import background
 import mentions
 import polls
 from database import get_pool
-from services import ai_client, app_help_search, channel_history_search, doc_search, message_link_context
+from services import ai_client, app_help_search, channel_history_search, doc_search, message_link_context, usage_limits
 
 JST = ZoneInfo("Asia/Tokyo")  # F-14要約の対象期間指定（今日/今週/今月等）をJSTの暦日で解釈する
 # （routers/search.pyのF-42日付モディファイアと同じ考え方・同じタイムゾーン）
@@ -1268,6 +1270,28 @@ def _attach_manual_link(text: str, manual_hits: list[str]) -> str:
     return MANUAL_LINK_PHRASE_RE.sub(f"[操作マニュアル](/help{anchor})", text)
 
 
+async def check_usage_limits(channel_id: int | None) -> None:
+    """AI利用ログ（T-13）を記録した直後に呼ぶ、コスト上限のしきい値・上限到達の通知判定
+    （services/usage_limits.py）。通知に失敗してもAIの応答自体は完了させる（ログのみ）"""
+    try:
+        await usage_limits.check_and_notify(channel_id)
+    except Exception:
+        traceback.print_exc()
+
+
+async def _post_stopped_notice(channel_id: int, thread_id: int | None, settings: dict) -> None:
+    """コスト上限到達で停止中のときに、AIを呼び出さず固定文で返す（usage_limits.STOPPED_REPLY）。
+    利用者から見て「無視された」とならないよう、通常の応答と同じ場所（本体またはスレッド）へ投稿する"""
+    pool = get_pool()
+    await pool.execute(
+        """INSERT INTO messages (channel_id, thread_parent_id, sender_type, body, bot_display_name, bot_icon_url)
+           VALUES ($1, $2, 'ai', $3, $4, $5)""",
+        channel_id, thread_id, usage_limits.STOPPED_REPLY,
+        settings["persona_name"] or "Kogack AI", settings["persona_icon_url"],
+    )
+    await _touch_thread_parent(pool, thread_id)
+
+
 async def maybe_trigger(
     channel_id: int, body: str, requested_by: int, thread_id: int | None = None, force_mention: bool = False,
     mentions_others: bool = False,
@@ -1321,6 +1345,13 @@ async def maybe_trigger(
     else:
         requires_mention = force_mention or settings["reaction_mode"] != "proactive"
     if requires_mention and not detect_mention(body, persona_name):
+        return
+    # コスト上限到達で停止中（on_limit_action='stop'、services/usage_limits.py）。AIを呼ぶ前に止める。
+    # 明示的に呼びかけられた場合だけ停止中である旨を返し、proactive（F-15）でメンション無しに
+    # 反応しようとした場合は黙って何もしない（全発言に停止の案内が付くのを避ける）
+    if await usage_limits.is_stopped(channel_id):
+        if detect_mention(body, persona_name) or thread_id is not None:
+            await _post_stopped_notice(channel_id, thread_id, settings)
         return
     if _looks_like_summarize_request(body, persona_name):
         text = body.replace(f"@{persona_name}", "")
@@ -1663,6 +1694,7 @@ async def _generate_and_post(
                 usage["prompt_tokens"], usage["completion_tokens"], cost,
                 message_id, json.dumps(messages, ensure_ascii=False, default=str),
             )
+            await check_usage_limits(channel_id)
     except asyncio.CancelledError:
         # cancel_generation()が呼ばれた場合。中断後のメッセージ本文は呼び出し元（cancel_generation）が
         # 責任を持って書き込み済みのため、ここでは対応表からの削除（finally）以外は何もしない。
@@ -1780,6 +1812,8 @@ async def start_summary(
     settings = await _fetch_settings(channel_id)
     if settings is None or not settings["is_ai_enabled"]:
         raise SummaryUnavailable("このチャンネルのAIは無効になっています")
+    if await usage_limits.is_stopped(channel_id):
+        raise SummaryUnavailable("今月のAI利用コストが上限額に達したため、月末まで要約を停止しています")
     since_dt, until_dt = _range_bounds(since_date, until_date)
     range_label = _format_range_label(since_date, until_date)
     return await _launch_summary(channel_id, thread_id, settings, requested_by, since_dt, until_dt, range_label)
@@ -1869,6 +1903,7 @@ async def _generate_summary_and_post(
                 res.usage.prompt_tokens, res.usage.completion_tokens, cost,
                 message_id, json.dumps(messages, ensure_ascii=False, default=str),
             )
+            await check_usage_limits(channel_id)
     except asyncio.CancelledError:
         raise  # _generate_and_postと同じ理由（cancel_generationが本文の更新に責任を持つ）
     except Exception:

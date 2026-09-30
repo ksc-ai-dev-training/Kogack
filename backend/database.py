@@ -379,6 +379,20 @@ CREATE TABLE IF NOT EXISTS ai_usage_limits (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_usage_limits_global ON ai_usage_limits (scope) WHERE scope = 'global';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_usage_limits_channel ON ai_usage_limits (channel_id) WHERE scope = 'channel';
 ALTER TABLE ai_usage_limits ENABLE ROW LEVEL SECURITY;
+-- 上限到達時の動作と到達通知（F-29後半、2026-09-30、ユーザーと合意）。上限到達時に応答を止めるか
+-- 通知だけにするかは要件定義書8.2節のとおり千田氏との協議事項のため、どちらも実装したうえで管理者が
+-- 設定で選べるようにし、既定は通知のみ（協議前に利用者のAIが突然止まる事態を避ける）。通知はメールでは
+-- なくシステム管理者の自分専用DMへのシステム通知で行う（ユーザーの選択。メール送信基盤が無いため）。
+-- threshold_notified_month/limit_notified_monthは同じ月に同じ通知を重ねて送らないための記録
+-- （'YYYY-MM'、JST。A-43で設定を変更したらNULLへ戻し、変更後の値で改めて判定する）。
+-- notify_emailは入力欄を廃止したためNULLを許す（既存行の値はそのまま残る）
+ALTER TABLE ai_usage_limits ADD COLUMN IF NOT EXISTS on_limit_action TEXT NOT NULL DEFAULT 'notify';
+ALTER TABLE ai_usage_limits DROP CONSTRAINT IF EXISTS ai_usage_limits_on_limit_action_check;
+ALTER TABLE ai_usage_limits ADD CONSTRAINT ai_usage_limits_on_limit_action_check
+    CHECK (on_limit_action IN ('notify', 'stop'));
+ALTER TABLE ai_usage_limits ADD COLUMN IF NOT EXISTS threshold_notified_month TEXT;
+ALTER TABLE ai_usage_limits ADD COLUMN IF NOT EXISTS limit_notified_month TEXT;
+ALTER TABLE ai_usage_limits ALTER COLUMN notify_email DROP NOT NULL;
 
 -- T-19 recurring_posts（定期投稿、F-36。05-1_詳細設計書_DB設計.html 3.14節）。
 -- services/scheduled_dispatcher.pyが30秒間隔でnext_run_at<=now() AND is_active=trueの行を検出し、
