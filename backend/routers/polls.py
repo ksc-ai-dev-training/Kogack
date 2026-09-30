@@ -191,7 +191,7 @@ async def decide_schedule(poll_id: int, body: DecideScheduleRequest, user: Curre
     締め切り（以後は回答不可）、元発言のスレッドへ確定のお知らせを確定した本人の発言として投稿する
     （利用者の合意した仕様「スレッドにも確定のお知らせを自動で投稿する」。システム通知（F-43）は
     返信できないため使わず、参加者がそのまま「了解です」等と返せる通常の返信にする）。確定の
-    取り消し・変更は対象外（アンケートの締め切りと同じく一方向の操作として単純化）"""
+    取り消しはundecide_schedule（間違えて決定したとき用、2026-09-30追加）で行う"""
     pool = get_pool()
     poll_row = await _require_schedule(pool, poll_id, user.id)
     if poll_row["created_by"] != user.id and user.role != "admin":
@@ -217,6 +217,34 @@ async def decide_schedule(poll_id: int, body: DecideScheduleRequest, user: Curre
                VALUES ($1, $2, $3, 'human', $4, $5)""",
             poll_row["channel_id"], poll_row["dm_id"], poll_row["message_id"], user.id,
             f"📅 「{title}」の日程を {label} に決定しました。",
+        )
+        await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", poll_row["message_id"])
+        result = await polls.fetch_polls_grouped(conn, [poll_row["message_id"]], user.id)
+    return result[poll_row["message_id"]]
+
+
+@router.post("/{poll_id}/undecide")
+async def undecide_schedule(poll_id: int, user: CurrentUser = Depends(require_auth)):
+    """日程の決定を取り消す（ユーザーからの明示的な要望「間違えて日程を決定してしまったとき用に
+    キャンセルボタンを作れますか」、2026-09-30）。決定と同じく作成者本人またはシステム管理者のみ。
+    decided_option_idとclosed_atを空に戻して回答の受け付けを再開し、スレッドへ取り消しのお知らせを
+    取り消した本人の発言として投稿する。先に投稿された決定のお知らせは消さない（既に読んだ人が
+    いても、取り消しのお知らせが続けて並ぶことで経緯が分かるようにするため）"""
+    pool = get_pool()
+    poll_row = await _require_schedule(pool, poll_id, user.id)
+    if poll_row["created_by"] != user.id and user.role != "admin":
+        raise HTTPException(403, detail="この日程調整の決定を取り消す権限がありません")
+    if poll_row["decided_option_id"] is None:
+        raise HTTPException(400, detail="まだ日程が決定されていません")
+    label = await pool.fetchval("SELECT label FROM poll_options WHERE id = $1", poll_row["decided_option_id"])
+    title = await pool.fetchval("SELECT body FROM messages WHERE id = $1", poll_row["message_id"])
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("UPDATE polls SET closed_at = NULL, decided_option_id = NULL WHERE id = $1", poll_id)
+        await conn.execute(
+            """INSERT INTO messages (channel_id, dm_id, thread_parent_id, sender_type, sender_user_id, body)
+               VALUES ($1, $2, $3, 'human', $4, $5)""",
+            poll_row["channel_id"], poll_row["dm_id"], poll_row["message_id"], user.id,
+            f"📅 「{title}」の日程の決定（{label}）を取り消しました。回答の受け付けを再開します。",
         )
         await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", poll_row["message_id"])
         result = await polls.fetch_polls_grouped(conn, [poll_row["message_id"]], user.id)

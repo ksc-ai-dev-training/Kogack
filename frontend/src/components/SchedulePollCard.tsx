@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { decideSchedulePoll, respondSchedulePoll } from '../lib/api'
+import { decideSchedulePoll, respondSchedulePoll, undecideSchedulePoll } from '../lib/api'
 import type { ScheduleAnswer, SchedulePoll } from '../types'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useToast } from './Toast'
@@ -69,7 +69,7 @@ export function SchedulePollCard({
   const decide = async (optionId: string, label: string) => {
     const ok = await confirm({
       title: '日程を決定',
-      message: `「${label}」に決定しますか？\n決定すると回答の受け付けを終了し、スレッドに決定のお知らせを投稿します。決定は取り消せません。`,
+      message: `「${label}」に決定しますか？\n決定すると回答の受け付けを終了し、スレッドに決定のお知らせを投稿します（間違えた場合は「決定を取り消す」で元に戻せます）。`,
       confirmLabel: '決定する',
     })
     if (!ok) return
@@ -83,14 +83,47 @@ export function SchedulePollCard({
     }
   }
 
+  // 決定の取り消し（間違えて決定したとき用、ユーザーからの要望、2026-09-30）。決定と同じく
+  // 作成者本人・システム管理者のみ。取り消すと未決定に戻って回答の受け付けを再開し、スレッドに
+  // 取り消しのお知らせが投稿される
+  const undecide = async (label: string) => {
+    const ok = await confirm({
+      title: '決定を取り消す',
+      message: `「${label}」への決定を取り消しますか？\n未決定の状態に戻って回答の受け付けを再開し、スレッドに取り消しのお知らせを投稿します。`,
+      confirmLabel: '取り消す',
+      danger: true,
+    })
+    if (!ok) return
+    setDeciding(true)
+    try {
+      onUpdated?.(await undecideSchedulePoll(poll.id))
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '決定の取り消しに失敗しました', 'error')
+    } finally {
+      setDeciding(false)
+    }
+  }
+
   const decidedLabel = poll.options.find((o) => o.id === poll.decided_option_id)?.label
 
   return (
     <div className="mt-0.5 max-w-[640px] rounded-lg border border-line bg-surface p-3">
       <div className="text-[13.5px] font-semibold text-ink">📅 {title}</div>
       {decidedLabel && (
-        <div className="mt-1.5 inline-block rounded-md bg-ok-bg px-2 py-0.5 text-[12px] font-semibold text-ok-text">
-          {decidedLabel} に決定しました
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <span className="rounded-md bg-ok-bg px-2 py-0.5 text-[12px] font-semibold text-ok-text">
+            {decidedLabel} に決定しました
+          </span>
+          {canDecide && (
+            <button
+              type="button"
+              disabled={deciding}
+              onClick={() => undecide(decidedLabel)}
+              className="rounded border border-line-strong px-1.5 py-0.5 text-[11px] font-semibold text-ink-muted hover:border-danger-border hover:text-danger-text disabled:opacity-50"
+            >
+              {deciding ? '取り消し中…' : '決定を取り消す'}
+            </button>
+          )}
         </div>
       )}
 

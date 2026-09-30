@@ -456,7 +456,7 @@
       <tr><td>answer</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('yes','maybe','no')。画面上は○△×</td></tr>
     </tbody>
   </table>
-  <p class="muted diff-new">1人が候補ごとに1つずつ回答するため、1人1票のpoll_votesは使わない。回答（<code>PUT /api/polls/{id}/schedule-response</code>）は全候補ぶんの○△×とコメントを1回で送り、全候補に回答が無ければ422にする。回答のやり直しはON CONFLICT DO UPDATEで上書きする。確定（<code>POST /api/polls/{id}/decide</code>）は作成者本人またはシステム管理者のみで、decided_option_idとclosed_atを入れ、元発言のスレッドへ確定した本人の発言として「📅「タイトル」の日程を 〇〇 に決定しました。」を投稿する。確定後は回答できない（確定の取り消しは無い）。最も都合の良い候補（○が最多、同数なら△が多いもの）は保存せず、取得のたびに計算する（<code>polls.best_schedule_option_ids</code>）。回答・確定では他のアンケートと同じくmessages.updated_atを進め、差分ポーリングで他の参加者の画面へ反映させる。</p>
+  <p class="muted diff-new">1人が候補ごとに1つずつ回答するため、1人1票のpoll_votesは使わない。回答（<code>PUT /api/polls/{id}/schedule-response</code>）は全候補ぶんの○△×とコメントを1回で送り、全候補に回答が無ければ422にする。回答のやり直しはON CONFLICT DO UPDATEで上書きする。確定（<code>POST /api/polls/{id}/decide</code>）は作成者本人またはシステム管理者のみで、decided_option_idとclosed_atを入れ、元発言のスレッドへ確定した本人の発言として「📅「タイトル」の日程を 〇〇 に決定しました。」を投稿する。確定後は回答できない。確定の取り消し（<code>POST /api/polls/{id}/undecide</code>、2026-09-30追加。確定と同じ権限）はdecided_option_idとclosed_atを空に戻して回答の受け付けを再開し、スレッドへ取り消しのお知らせを投稿する（先の確定のお知らせは消さない）。最も都合の良い候補（○が最多、同数なら△が多いもの）は保存せず、取得のたびに計算する（<code>polls.best_schedule_option_ids</code>）。回答・確定では他のアンケートと同じくmessages.updated_atを進め、差分ポーリングで他の参加者の画面へ反映させる。</p>
 
   <footer class="doc-footer">
     <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 DB設計</span>

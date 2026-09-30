@@ -178,6 +178,11 @@ export async function respondSchedulePoll(
   })
 }
 
+/** 日程の決定を取り消し、回答の受け付けを再開する（間違えて決定したとき用、2026-09-30追加） */
+export async function undecideSchedulePoll(pollId: string): Promise<import('../types').SchedulePoll> {
+  return apiFetch(`/api/polls/${pollId}/undecide`, { method: 'POST' })
+}
+
 export async function decideSchedulePoll(pollId: string, optionId: string): Promise<import('../types').SchedulePoll> {
   return apiFetch(`/api/polls/${pollId}/decide`, {
     method: 'POST',
