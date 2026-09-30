@@ -1290,7 +1290,9 @@ export default function Composer({
     // 書式ボタンを押しただけで何も入力していない状態（空の書式要素、formatShellRef）で矢印キー・
     // Backspace等を押したら、要素を消して保留を取り消してから既定の動作に任せる（見えない1文字の
     // 分だけ矢印キーが空振りしたり、Backspaceで何も消えなかったりしないようにする）。Enterは保留を
-    // 維持したまま要素だけ消す（改行・送信の処理が空の要素を巻き込まないように）
+    // 維持したまま要素だけ消し、改行したら新しい行に作り直す（改行・送信の処理が空の要素を
+    // 巻き込まないように）
+    const hadFormatShell = !!formatShellRef.current
     if (formatShellRef.current) {
       if (/^(Arrow(Left|Right|Up|Down)|Home|End|PageUp|PageDown|Backspace|Delete)$/.test(e.key)) {
         const removed = formatShellRef.current && removeFormatShell(formatShellRef.current)
@@ -1619,6 +1621,9 @@ export default function Composer({
           ensureTrailingNewlineCaretMarker(root)
           setSelectionOffsets(root, cursor + 1)
           afterMutate()
+          // 新しい行の最初の文字を日本語入力したときも、変換中からコード表示にする
+          // （formatShellRefのコメント参照）
+          if (cursor >= codeRange.end) armFormatShell(['code'])
           return
         }
       }
@@ -1634,6 +1639,8 @@ export default function Composer({
         setSelectionOffsets(root, pos)
       }
       afterMutate()
+      // 書式ボタンを押しただけの状態で改行した場合は、新しい行に書式の要素を作り直す
+      if (hadFormatShell && pendingFormats.length > 0) armFormatShell(pendingFormats)
     }
   }
 
