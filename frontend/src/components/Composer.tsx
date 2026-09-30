@@ -36,6 +36,7 @@ import {
   getCodeBlockElementAtSelection,
   getBlockFormatKindAtSelection,
   getFormatsAtCaret,
+  exitCodeBlockDownward,
   insertFormatShellAtCaret,
   removeFormatShell,
   getInlineCodeElementAt,
@@ -1486,6 +1487,15 @@ export default function Composer({
       if (e.repeat) return
       send()
       return
+    }
+    // コードブロックの末尾で↓を押したら、コードブロックの下に普通の行を作ってそこへ移る（Slackと同じ。
+    // composerEditing.tsのexitCodeBlockDownward参照）
+    if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && editorRef.current) {
+      if (exitCodeBlockDownward(editorRef.current)) {
+        e.preventDefault()
+        afterMutate()
+        return
+      }
     }
     // 書式のショートカット（Slackと同じ Ctrl+B/I/U、取り消し線は Ctrl+Shift+X）。contentEditable
     // ではブラウザ標準のCtrl+B等が<b>/<i>/<u>を挿入し、入力中は太字等に見えるのに送信時には

@@ -1429,6 +1429,35 @@ export function insertCaretLineAfterBlock(blockEl: HTMLElement): void {
   }
 }
 
+/** コードブロックの末尾（最終行の末尾）にカーソルがあり、コードブロックの後ろに行が無いときに↓キーを
+ * 押した場合、コードブロックの直後に普通の空行を作ってそこへカーソルを移す（Slackと同じ動き。
+ * ユーザーからの要望「コードブロックの一番下の行で↓を押すと行末に移るのはそのままに、もう一度↓を
+ * 押すとコードブロックの下に普通の行が出てくるようにしてほしい」）。最終行の途中で押した1回目の↓は
+ * ブラウザ標準どおり行末へ移るだけ（この関数は何もしない）。処理した場合はtrueを返す
+ * （呼び出し元はキーの既定動作を止めてafterMutateを呼ぶこと）。 */
+export function exitCodeBlockDownward(root: HTMLElement): boolean {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.getRangeAt(0).collapsed) return false
+  const pre = getCodeBlockElementAtSelection(root)
+  if (!pre) return false
+  const offs = getSelectionOffsets(root)
+  if (!offs || offs.start !== computeElementOffset(root, pre).end) return false
+  // コードブロックの後ろに本文がある場合はブラウザ標準の↓（次の行へ移る）に任せる
+  const next = pre.nextSibling
+  if (next && next.nodeType === Node.TEXT_NODE && isMarkerOnlyText(next)) {
+    // 以前に作った空行（CARET_MARKERだけの行）が既にあれば、新しく作らずそこへ移る
+    const range = document.createRange()
+    range.setStart(next, (next as Text).length)
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    return true
+  }
+  if (next && !(next.nodeType === Node.ELEMENT_NODE && (next as Element).tagName === 'BR' && !next.nextSibling)) return false
+  insertCaretLineAfterBlock(pre)
+  return true
+}
+
 /** カーソルが引用（<blockquote data-block-format="quote">）内のある行の先頭にあるときにDelete
  * キーを押した場合の処理（Composer.tsxのhandleKeyDownから使う）。ユーザーからの報告「引用タグ
  * 内の行の先頭でDeleteキーを押すと、その行が消えて一個上の行に戻ってしまう」への対処: 行の
