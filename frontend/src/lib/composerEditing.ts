@@ -105,6 +105,33 @@ function createMentionSpan(displayText: string): HTMLSpanElement {
   return span
 }
 
+// 表示文字を指定したリンク（`[表示文字](URL)`）。投稿欄の中でも送信後（MessageList.tsxのrenderLink）と
+// 同じく表示文字だけを下線付きの文字色で見せる（ユーザーからの要望「リンクを確定した後の投稿欄の
+// 表示を、送信後と同じ感じにしてほしい」。以前は`[Google Translate](https://...)`という記法の
+// ままだった）。URLはこの属性に持ち、domToMarkdownが送信・下書き保存の直前に記法へ戻す。
+// 表示文字はdomToPlainTextにそのまま含まれるが、要素はcontentEditable=falseの1単位として扱う
+// （メンションや絵文字と同じくBackspaceでまとめて消える）。編集可能にすると、リンクの直後で入力した
+// 文字をChromeがリンクの表示文字の末尾へ吸収してしまうため（実機Playwrightで確認）。resolveOffsetも
+// 隠しマーカーspanと同じく内部を指さない原子ノードとして扱う。
+// href属性は付けない（クリックしても遷移しないように）。URLはtitleで見せる。
+const LINK_ATTR = 'data-link-url'
+const LINK_CLASSNAME = 'text-accent-700 underline'
+const RAW_LINK_REGEX = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|\/help(?:#[\w-]*)?)\)/g
+
+function createLinkElement(content: Node, url: string): HTMLElement {
+  const a = document.createElement('a')
+  a.setAttribute(LINK_ATTR, url)
+  a.title = url
+  a.className = LINK_CLASSNAME
+  a.contentEditable = 'false'
+  a.appendChild(content)
+  return a
+}
+
+function isLinkElement(node: Node | null): node is HTMLElement {
+  return !!node && node.nodeType === Node.ELEMENT_NODE && (node as Element).hasAttribute(LINK_ATTR)
+}
+
 // バグ修正（ユーザーからの報告「Enterを押して11行目以降になると、改行するとカーソルがいる行が
 // 画面に見えなくなる」を調査中に発見）: 本文の末尾がテキストノード内の孤立した"\n"で終わる
 // （＝Enterキーで新しい行を作った直後、まだ何も入力していない状態）とき、そのすぐ後ろに何の
@@ -318,6 +345,8 @@ export function domToMarkdown(root: Node): string {
       const { prefix, suffix } = TOGGLE_FORMAT_MARKERS[kind]
       return prefix + inner + suffix
     }
+    const linkUrl = (node as Element).getAttribute(LINK_ATTR)
+    if (linkUrl) return stripCaretMarker(inner) ? `[${inner}](${linkUrl})` : ''
     // 引用（data-block-format="quote"）はマーカー文字を一切持たない実DOM構造のため、
     // 送信直前にここで各行へ「> 」を復元する（wrapQuoteRangeのコメント参照）。
     const blockKind = (node as Element).getAttribute(BLOCK_FORMAT_ATTR)
@@ -469,7 +498,7 @@ function resolveOffset(root: Node, targetOffset: number): DomPosition {
     // 位置になっていた。isEmojiNodeと同じ「remaining<len なら手前の境界へクランプ、
     // それ以外（ちょうど末尾も含む）は消費してnullを返し次のノードへ進む」規則にすることで、
     // マーカーの内部に位置が落ちることを無くした。
-    if (isMarkerNode(node)) {
+    if (isMarkerNode(node) || isLinkElement(node)) {
       const len = textLength(node)
       const parent = node.parentNode as Node
       const idx = indexOfChild(node)
@@ -1148,11 +1177,13 @@ interface LiveMatch {
   end: number
   /** 開き・閉じ記号の文字数。省略時はTOGGLE_FORMAT_MARKERS[kind]の長さ（「*太字*」「~取り消し線~」だけ1）。 */
   markerLength?: number
+  /** リンク（kind='link'）の開き・閉じ記号（`[`と`](URL)`）とURL */
+  link?: { prefix: string; suffix: string; url: string }
   priority: number
   // 'codeblock'（```` ``` ````、複数行）はToggleFormatKindに含めない別カテゴリ（本ファイル前方の
   // ToggleFormatKindコメント参照）。collectRawMarkdownMatchesの重なり判定にのみ使い、返り値からは
   // 除外する（コードブロック自体の構造化は別途consumeCodeBlockMatchが担当）。
-  kind: 'codeblock' | ToggleFormatKind
+  kind: 'codeblock' | 'link' | ToggleFormatKind
 }
 
 /** RAW_CODE_BLOCK_REGEXで完成している（開始・終了の```が揃っている）ペアに加え、終了側の```が
@@ -1207,6 +1238,12 @@ function collectRawMarkdownMatches(text: string): LiveMatch[] {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 0, kind: 'code' })
   }
+  // リンクはコードの次、太字等より先（MessageList.tsxと同じ優先順。表示文字の中の**等は解釈しない）
+  for (const m of text.matchAll(RAW_LINK_REGEX)) {
+    const start = m.index ?? 0
+    const link = { prefix: '[', suffix: `](${m[2]})`, url: m[2] }
+    candidates.push({ start, end: start + m[0].length, priority: 0.5, kind: 'link', link })
+  }
   for (const m of text.matchAll(RAW_BOLD_REGEX)) {
     const start = m.index ?? 0
     candidates.push({ start, end: start + m[0].length, priority: 1, kind: 'bold' })
@@ -1239,6 +1276,22 @@ function collectRawMarkdownMatches(text: string): LiveMatch[] {
   }
   accepted.sort((a, b) => a.start - b.start)
   return accepted.filter((m) => m.kind !== 'codeblock')
+}
+
+/** 本文（root）の生Markdownマッチのうち、既にコード・コードブロック・リンクの要素になっている範囲の
+ * 内側にかかるものを除いて返す。これらの中の記号は送信後の表示（MessageList.tsx）でも解釈されない
+ * ため。プレーンテキストだけで判定すると、一度コード等の要素になった後の更新で、中の`**a**`や
+ * `[a](URL)`が改めて太字・リンクへ変換されてしまう。 */
+function collectRawMarkdownMatchesInDom(root: HTMLElement): LiveMatch[] {
+  const matches = collectRawMarkdownMatches(domToPlainText(root))
+  if (matches.length === 0) return matches
+  const protectedRanges = Array.from(
+    root.querySelectorAll(`[${TOGGLE_FORMAT_ELEMENT_ATTR}="code"], [${BLOCK_FORMAT_ATTR}="codeblock"], [${LINK_ATTR}]`),
+  ).map((el) => computeElementOffset(root, el))
+  // 要素の内側にかかるもの（要素を丸ごと含むものは除く。例: リンクを`で囲んでコードにする場合）
+  return matches.filter(
+    (m) => !protectedRanges.some((r) => m.start < r.end && r.start < m.end && !(m.start <= r.start && r.end <= m.end)),
+  )
 }
 
 /** fragmentの先頭または末尾からcount文字を切り出し、隠しマーカー用のspanへ包んで返す。
@@ -2414,7 +2467,8 @@ export function insertBlankLineAfterBrLine(line: { br: HTMLElement }): void {
  * ため、カーソル位置の保存・復元は不要（呼び出し元のsyncLiveFormattingが行う保存・復元の
  * 範囲外で安全に呼べる）。 */
 function removeEmptyToggleFormatWrappers(root: HTMLElement): void {
-  const wrappers = root.querySelectorAll(`[${TOGGLE_FORMAT_ELEMENT_ATTR}]`)
+  // 表示文字を全部消したリンクも同じく取り除く
+  const wrappers = root.querySelectorAll(`[${TOGGLE_FORMAT_ELEMENT_ATTR}], [${LINK_ATTR}]`)
   wrappers.forEach((el) => {
     if (textLength(el) === 0) el.remove()
   })
@@ -2489,7 +2543,7 @@ export function syncLiveFormatting(root: HTMLElement): ToggleFormatKind[] {
   // 場合は元の単純な数値オフセットの保存・復元で十分（引用・コードのwrapだけなら要素境界の
   // あいまいさの問題は実際には起きないため——このタイミングで新しく実要素が生まれるのは
   // consumeRawMarkdownSyntaxが変換したときだけ）。
-  const rawMatches = collectRawMarkdownMatches(domToPlainText(root))
+  const rawMatches = collectRawMarkdownMatchesInDom(root)
   const useMarkerBasedRestore = !!preserved && rawMatches.length > 0
   // カーソル（選択なし）がちょうど閉じ記号の直後にある＝今まさに閉じ記号を打ち終えたマッチ
   const closedAtCaret =
@@ -3074,6 +3128,7 @@ export function toggleFormatOnSelectionDom(
 
 /** 生Markdownマッチの開き・閉じ記号（「*太字*」だけは1文字ずつ、LiveMatch.markerLength参照）。 */
 function rawMatchMarkers(match: LiveMatch): { prefix: string; suffix: string } {
+  if (match.link) return match.link
   const markers = TOGGLE_FORMAT_MARKERS[match.kind as ToggleFormatKind]
   if (match.markerLength === undefined) return markers
   return { prefix: markers.prefix.slice(0, match.markerLength), suffix: markers.suffix.slice(0, match.markerLength) }
@@ -3104,8 +3159,18 @@ function consumeOneRawMatch(root: Node, match: LiveMatch): void {
   }
   // コードの中身はMessageList.tsx側でさらに解釈されない（太字等が入れ子になっていても記号のまま
   // 表示される）ため、ここでも再帰的なネスト検出をスキップし中身をそのまま実要素に入れる。
+  if (kind === 'link') {
+    range.insertNode(createLinkElement(fragment, match.link!.url))
+    return
+  }
   if (kind !== 'code') consumeRawMarkdownMatchesOnFragment(fragment)
-  range.insertNode(buildFormattedNode(fragment, [kind]))
+  // コードの中に既に太字・リンク等の要素があれば、記法の文字列へ戻す（送信後の表示でもコードの中は
+  // 記号のまま表示されるため、投稿欄でもそれに揃える）
+  const content: Node =
+    kind === 'code' && Array.from(fragment.childNodes).some((n) => n.nodeType === Node.ELEMENT_NODE)
+      ? document.createTextNode(domToMarkdown(fragment))
+      : fragment
+  range.insertNode(buildFormattedNode(content, [kind]))
 }
 
 /** fragment（既に1マッチぶんとして抽出済みの中身）の中に、さらに別の生Markdownが入れ子に
@@ -3216,8 +3281,7 @@ function restoreSelectionFromMarkers(root: HTMLElement, hasRange: boolean): bool
  * 直後」という境界を数値オフセットのround-tripだけで復元しようとして同じ問題を再発させて
  * いた）。この関数はDOM/テキストの変換だけに専念する。 */
 export function consumeRawMarkdownSyntax(root: HTMLElement): void {
-  const text = domToPlainText(root)
-  const matches = collectRawMarkdownMatches(text)
+  const matches = collectRawMarkdownMatchesInDom(root)
   if (matches.length === 0) return
 
   // 開始位置の降順で処理する（後の要素ほど前方。処理済みの要素より前方のオフセットは
