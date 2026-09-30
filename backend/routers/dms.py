@@ -114,6 +114,11 @@ async def list_dms(user: CurrentUser = Depends(require_auth)):
     }
 
 
+# グループDMの参加者数の上限（自分を含めて9人、Slackと同じ。ユーザーからの明示的な要望、2026-09-30。
+# 要件定義書F-05）。それより大人数のやり取りはチャンネル（非公開チャンネル含む）を使う想定
+MAX_DM_MEMBERS = 9
+
+
 class CreateDmRequest(BaseModel):
     member_user_ids: list[str] = Field(min_length=1)
 
@@ -130,6 +135,10 @@ async def create_dm(body: CreateDmRequest, user: CurrentUser = Depends(require_a
     except ValueError:
         raise HTTPException(422, detail="不正なuser_idです")
     other_ids.discard(user.id)
+    if len(other_ids) + 1 > MAX_DM_MEMBERS:
+        raise HTTPException(
+            422, detail=f"DMの参加者は自分を含めて{MAX_DM_MEMBERS}人までです。大人数の場合はチャンネルを使ってください",
+        )
 
     valid_count = await pool.fetchval(
         "SELECT count(*) FROM users WHERE id = ANY($1::bigint[]) AND is_active", list(other_ids)
