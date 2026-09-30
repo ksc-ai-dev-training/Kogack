@@ -401,7 +401,21 @@ _SUMMARIZE_REQUEST_PATTERNS = ("要約して", "要約をお願い", "要約お�
 # （実際にこの言い回しへ実機で問い合わせたところ、要約が意図せず実行され、その生成過程の断片が
 # そのまま返信されてしまう不具合を確認した）。パターン一致した直後（最大12文字）に
 # 「(もらう|くれる|もらえる)?(には|方法)」という方法・手段を尋ねる続きが来る場合は除外する。
-_SUMMARY_METHOD_QUESTION_RE = re.compile(r"^(?:もらう|くれる|もらえる)?(?:には|方法)")
+#
+# バグ修正（2026-09-30、ユーザーからの報告）: 「〜の給与規定を読んで、昇給の条件だけ抜粋し、内容を
+# 要約して「〜」というタイトルのPDFファイルを作って」のように、「要約して」が別の作業の途中の工程
+# （ここでは規定の要約）として文中に現れるだけの依頼まで、チャンネルの要約として扱い、依頼と無関係な
+# 会話履歴の要約を返してしまっていた。「方法を尋ねる続き」を個別に除外する上記のやり方では、このような
+# 「後ろに別の依頼が続く」形を網羅できないため、判定を「一致した直後に続くのが依頼の結び（ください・
+# ほしい・お願いします・句読点等）だけであること」に改めた（_SUMMARY_REQUEST_ENDING_RE）。「要約して
+# もらう方法」「要約してもらうには」も結び以外の続きがあるためこの判定で除外される（上記の
+# _SUMMARY_METHOD_QUESTION_REは不要になったため撤去した）。後ろに別の指示が続く依頼（「要約して、
+# 要点を3つにまとめて」等）は通常のメンション応答に回る（会話履歴を参照できるため要約自体は可能）。
+_SUMMARY_REQUEST_ENDING_RE = re.compile(
+    r"^(?:ください|下さい|ほしい|欲しい|もらえる|もらえます|もらえない|もらいたい|くれる|くれます|くれない|"
+    r"いただける|いただけます|いただけない|頂ける|頂けます|ちょうだい|します|いたします|できる|できます|"
+    r"です|んだけど|んですが|けど|か|ね|よ|な|ー|\s|[。．.！!？?～〜…、,)）])*$"
+)
 
 
 def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
@@ -411,16 +425,16 @@ def _looks_like_summarize_request(body: str, persona_name: str) -> bool:
     比較的一意な「要約」という語に絞ったうえで、さらに依頼を表す活用（て形・お願い）のみに限定する
     （「要約するには」のような方法を尋ねる質問を誤って要約実行と扱わないため）。さらに、て形に
     一致した直後が「もらう方法」「もらうには」のように方法・手段を尋ねる続きになっている場合も
-    除外する（_SUMMARY_METHOD_QUESTION_RE、上記コメント参照）"""
+    除外していた。2026-09-30からは、一致した直後に続くのが依頼の結び（_SUMMARY_REQUEST_ENDING_RE）
+    だけの場合に限る（「内容を要約して「〜」というPDFを作って」のように後ろに別の依頼が続くものは
+    チャンネルの要約ではない。上記コメント参照）"""
     text = body.replace(f"@{persona_name}", "")
     for pattern in _SUMMARIZE_REQUEST_PATTERNS:
-        idx = text.find(pattern)
-        if idx == -1:
-            continue
-        tail = text[idx + len(pattern): idx + len(pattern) + 12]
-        if _SUMMARY_METHOD_QUESTION_RE.match(tail):
-            continue
-        return True
+        start = 0
+        while (idx := text.find(pattern, start)) != -1:
+            start = idx + len(pattern)
+            if _SUMMARY_REQUEST_ENDING_RE.match(text[start:].strip()):
+                return True
     return False
 
 
