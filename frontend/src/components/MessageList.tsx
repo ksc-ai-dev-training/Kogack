@@ -1460,10 +1460,12 @@ function ReactionTooltip({
     <span
       role="tooltip"
       style={style}
-      className="pointer-events-none z-50 flex w-max max-w-[220px] flex-col items-center gap-1 whitespace-normal break-words rounded-lg bg-ink px-2.5 py-1.5 text-center text-[13px] font-medium leading-snug text-white shadow-[0_8px_20px_rgba(16,24,40,0.25)]"
+      // 大きさは2026-09-30に約1.4倍へ拡大（ユーザーからの要望「リアクションスタンプの吹き出しを
+      // もっと大きくしてほしい」）。絵文字の枠44→64px・文字13→15px・最大幅220→300px
+      className="pointer-events-none z-50 flex w-max max-w-[300px] flex-col items-center gap-2 whitespace-normal break-words rounded-xl bg-ink px-4 py-3 text-center text-[15px] font-medium leading-snug text-white shadow-[0_8px_20px_rgba(16,24,40,0.25)]"
     >
-      <span className="flex h-11 w-11 items-center justify-center rounded-md bg-white">
-        {customUrl ? <img src={customUrl} alt={emoji} className="h-8 w-8 object-contain" /> : <span className="text-3xl leading-none">{emoji}</span>}
+      <span className="flex h-16 w-16 items-center justify-center rounded-lg bg-white">
+        {customUrl ? <img src={customUrl} alt={emoji} className="h-12 w-12 object-contain" /> : <span className="text-5xl leading-none">{emoji}</span>}
       </span>
       <span>{userNames.join('、')}</span>
     </span>,
