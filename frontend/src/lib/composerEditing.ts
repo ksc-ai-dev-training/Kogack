@@ -2740,31 +2740,6 @@ function buildFormattedNode(content: Node, formats: ToggleFormatKind[]): Node {
   return result
 }
 
-/** IME変換の開始直前に、保留中の書式（pendingFormats）の実要素をカーソル位置へ先に作り、その内側へ
- * カーソルを入れる（ユーザーからの要望「太字ボタンを押してからひらがなを入力すると、変換が確定する
- * までは太字にならない。確定していない状態でもその書式にしてほしい」）。変換中にDOMを書き換えると
- * IMEの変換が壊れるため、通常の保留書式は入力後にmaterializePendingFormatsでラップしているが、
- * それだと変換中の文字（点線付き）は要素の外に作られてしまう。変換開始前（keydownのkeyCode 229）に
- * 要素を先に用意しておけば、変換中の文字は最初から要素の内側に作られる。
- * 空の要素の内側にはカーソルを置けないため、CARET_MARKERを1文字入れておく（変換確定時に
- * handleCompositionEndのremoveCaretMarkerFromDomが取り除く）。作った最も外側の要素を返す。
- * 選択範囲がある・エディタ外の場合は何もせずnull。 */
-export function insertFormatShellAtCaret(root: HTMLElement, formats: ToggleFormatKind[]): HTMLElement | null {
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0 || formats.length === 0) return null
-  const range = sel.getRangeAt(0)
-  if (!range.collapsed || !root.contains(range.startContainer)) return null
-  const marker = document.createTextNode(CARET_MARKER)
-  const shell = buildFormattedNode(marker, formats) as HTMLElement
-  range.insertNode(shell)
-  const caret = document.createRange()
-  caret.setStart(marker, marker.length)
-  caret.collapse(true)
-  sel.removeAllRanges()
-  sel.addRange(caret)
-  return shell
-}
-
 /** [start,end)を指定した書式の並び（外側→内側の順、Composer.tsx側のpendingFormats/
  * activeFormats配列と同じ規約）でネストした実DOM要素として直接ラップする。マーカー文字は
  * 一切経由しない。Composer.tsxのmaterializePendingFormats（ボタンで保留していた書式を、実際に
