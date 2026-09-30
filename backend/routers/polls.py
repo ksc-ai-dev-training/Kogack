@@ -5,8 +5,10 @@
 # ルーターは投票・締め切りという、poll_idを直接指定する操作のみを扱う（routers/attachments.pyの
 # A-22ダウンロードが/api/attachments/{id}というチャンネル/DMをまたぐ独立エンドポイントなのと
 # 同じ構成）。
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import polls
 from auth_helpers import CurrentUser, require_auth
@@ -63,6 +65,8 @@ async def vote(poll_id: int, body: VoteRequest, user: CurrentUser = Depends(requ
     if poll_row is None:
         raise HTTPException(404, detail="アンケートが見つかりません")
     await _require_poll_participant(pool, poll_row, user.id)
+    if poll_row["kind"] != "choice":
+        raise HTTPException(400, detail="日程調整には投票ではなく回答で答えてください")
     if poll_row["closed_at"] is not None:
         raise HTTPException(400, detail="このアンケートは締め切られています")
     try:
@@ -102,6 +106,99 @@ async def close_poll(poll_id: int, user: CurrentUser = Depends(require_auth)):
         raise HTTPException(400, detail="既に締め切られています")
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("UPDATE polls SET closed_at = now() WHERE id = $1", poll_id)
+        await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", poll_row["message_id"])
+        result = await polls.fetch_polls_grouped(conn, [poll_row["message_id"]], user.id)
+    return result[poll_row["message_id"]]
+
+
+# ---- 日程調整（polls.kind='schedule'、T-32、ユーザーからの明示的な要望、2026-09-30） ----
+
+
+class ScheduleResponseRequest(BaseModel):
+    # 候補id→'yes'/'maybe'/'no'。全候補ぶんを1回で送る（調整さん等と同じ「自分の行をまとめて
+    # 保存する」操作。候補ごとに1クリック1APIにすると、途中まで入れた状態が他の参加者に見えてしまう）
+    answers: dict[str, Literal["yes", "maybe", "no"]]
+    comment: str = Field(default="", max_length=200)
+
+
+async def _require_schedule(pool, poll_id: int, user_id: int):
+    poll_row = await _fetch_poll_with_scope(pool, poll_id)
+    if poll_row is None:
+        raise HTTPException(404, detail="日程調整が見つかりません")
+    await _require_poll_participant(pool, poll_row, user_id)
+    if poll_row["kind"] != "schedule":
+        raise HTTPException(400, detail="日程調整ではありません")
+    return poll_row
+
+
+@router.put("/{poll_id}/schedule-response")
+async def respond_schedule(poll_id: int, body: ScheduleResponseRequest, user: CurrentUser = Depends(require_auth)):
+    """日程調整に回答する（参加者なら誰でも。回答済みなら上書き＝回答のやり直し）。全候補に○△×の
+    いずれかが付いていることを要求する（未回答の候補が混ざると集計の「○が最多」の比較が回答漏れに
+    引きずられるため）。voteと同じくmessages.updated_atを進め、更新後のpayloadを返す"""
+    pool = get_pool()
+    poll_row = await _require_schedule(pool, poll_id, user.id)
+    if poll_row["closed_at"] is not None:
+        raise HTTPException(400, detail="この日程調整は締め切られています")
+    option_ids = {
+        str(r["id"]) for r in await pool.fetch("SELECT id FROM poll_options WHERE poll_id = $1", poll_id)
+    }
+    if set(body.answers) != option_ids:
+        raise HTTPException(422, detail="すべての候補日程に○△×のいずれかを選んでください")
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            """INSERT INTO poll_schedule_respondents (poll_id, user_id, comment) VALUES ($1, $2, $3)
+               ON CONFLICT (poll_id, user_id) DO UPDATE SET comment = $3""",
+            poll_id, user.id, body.comment.strip(),
+        )
+        for option_id, answer in body.answers.items():
+            await conn.execute(
+                """INSERT INTO poll_schedule_answers (poll_id, option_id, user_id, answer) VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (option_id, user_id) DO UPDATE SET answer = $4""",
+                poll_id, int(option_id), user.id, answer,
+            )
+        await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", poll_row["message_id"])
+        result = await polls.fetch_polls_grouped(conn, [poll_row["message_id"]], user.id)
+    return result[poll_row["message_id"]]
+
+
+class DecideScheduleRequest(BaseModel):
+    option_id: str
+
+
+@router.post("/{poll_id}/decide")
+async def decide_schedule(poll_id: int, body: DecideScheduleRequest, user: CurrentUser = Depends(require_auth)):
+    """日程を確定する（作成者本人またはシステム管理者のみ。close_pollと同じ権限）。確定すると同時に
+    締め切り（以後は回答不可）、元発言のスレッドへ確定のお知らせを確定した本人の発言として投稿する
+    （利用者の合意した仕様「スレッドにも確定のお知らせを自動で投稿する」。システム通知（F-43）は
+    返信できないため使わず、参加者がそのまま「了解です」等と返せる通常の返信にする）。確定の
+    取り消し・変更は対象外（アンケートの締め切りと同じく一方向の操作として単純化）"""
+    pool = get_pool()
+    poll_row = await _require_schedule(pool, poll_id, user.id)
+    if poll_row["created_by"] != user.id and user.role != "admin":
+        raise HTTPException(403, detail="この日程調整を確定する権限がありません")
+    if poll_row["closed_at"] is not None:
+        raise HTTPException(400, detail="既に確定・締め切り済みです")
+    try:
+        option_id = int(body.option_id)
+    except ValueError:
+        raise HTTPException(422, detail="不正な候補日程です") from None
+    label = await pool.fetchval(
+        "SELECT label FROM poll_options WHERE id = $1 AND poll_id = $2", option_id, poll_id,
+    )
+    if label is None:
+        raise HTTPException(422, detail="不正な候補日程です")
+    title = await pool.fetchval("SELECT body FROM messages WHERE id = $1", poll_row["message_id"])
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "UPDATE polls SET closed_at = now(), decided_option_id = $2 WHERE id = $1", poll_id, option_id,
+        )
+        await conn.execute(
+            """INSERT INTO messages (channel_id, dm_id, thread_parent_id, sender_type, sender_user_id, body)
+               VALUES ($1, $2, $3, 'human', $4, $5)""",
+            poll_row["channel_id"], poll_row["dm_id"], poll_row["message_id"], user.id,
+            f"📅 「{title}」の日程を {label} に決定しました。",
+        )
         await conn.execute("UPDATE messages SET updated_at = now() WHERE id = $1", poll_row["message_id"])
         result = await polls.fetch_polls_grouped(conn, [poll_row["message_id"]], user.id)
     return result[poll_row["message_id"]]

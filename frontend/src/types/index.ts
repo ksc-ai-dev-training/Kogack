@@ -191,8 +191,9 @@ export interface PollOption {
   voter_names: string[]
 }
 
-export interface Poll {
+export interface ChoicePoll {
   id: string
+  kind: 'choice'
   created_by: string | null
   /** nullなら投票受付中。締め切られるとvote APIは400になる */
   closed_at: string | null
@@ -201,6 +202,46 @@ export interface Poll {
   my_option_id: string | null
   options: PollOption[]
 }
+
+/** 日程調整（polls.kind='schedule'・T-32、ユーザーからの明示的な要望、2026-09-30）の回答 */
+export type ScheduleAnswer = 'yes' | 'maybe' | 'no'
+
+export interface ScheduleOption {
+  id: string
+  /** 表示用の「10/3(土)」（サーバーが組み立てて保存したもの） */
+  label: string
+  starts_on: string | null
+  yes_count: number
+  maybe_count: number
+  no_count: number
+}
+
+export interface ScheduleRespondent {
+  user_id: string
+  user_name: string
+  comment: string
+  /** 候補id→回答 */
+  answers: Record<string, ScheduleAnswer>
+}
+
+/** 日程調整。タイトルはMessage.bodyに入っている（アンケートの質問文と同じ扱い） */
+export interface SchedulePoll {
+  id: string
+  kind: 'schedule'
+  created_by: string | null
+  /** 確定・締め切りの時刻（nullなら回答受付中） */
+  closed_at: string | null
+  /** 確定した候補id（未確定ならnull） */
+  decided_option_id: string | null
+  /** 回答者数 */
+  total_votes: number
+  options: ScheduleOption[]
+  /** ○が最多（同数なら△が多い）候補。誰も○△を付けていなければ空 */
+  best_option_ids: string[]
+  respondents: ScheduleRespondent[]
+}
+
+export type Poll = ChoicePoll | SchedulePoll
 
 export interface Message {
   id: string

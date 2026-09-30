@@ -12,7 +12,7 @@ import message_diff
 from auth_helpers import CurrentUser, require_auth, require_dm_member
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
-from polls import PollInput, create_poll_message, fetch_polls_grouped
+from polls import PollInput, ScheduleInput, create_poll_message, create_schedule_message, fetch_polls_grouped
 from reactions import fetch_reactions_grouped
 from services import push_sender
 
@@ -416,6 +416,23 @@ async def create_poll(dm_id: int, body: PollInput, user: CurrentUser = Depends(r
         )
     background.spawn(
         push_sender.notify_dm_message(dm_id, user.id, user.name, body.question, [], f"/dms/{dm_id}")
+    )
+    return _message_out(
+        {**dict(message_row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
+        poll=poll_payload,
+    )
+
+
+@router.post("/{dm_id}/schedules", status_code=201)
+async def create_schedule(dm_id: int, body: ScheduleInput, user: CurrentUser = Depends(require_dm_member)):
+    """新規: 日程調整（channels.create_scheduleと同じ、ユーザーからの明示的な要望、2026-09-30）。"""
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        message_row, poll_payload = await create_schedule_message(
+            conn, channel_id=None, dm_id=dm_id, sender_user_id=user.id, schedule=body,
+        )
+    background.spawn(
+        push_sender.notify_dm_message(dm_id, user.id, user.name, f"📅 {body.title}", [], f"/dms/{dm_id}")
     )
     return _message_out(
         {**dict(message_row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},

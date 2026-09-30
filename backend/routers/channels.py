@@ -19,7 +19,7 @@ from auth_helpers import (
 )
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
-from polls import PollInput, create_poll_message, fetch_polls_grouped
+from polls import PollInput, ScheduleInput, create_poll_message, create_schedule_message, fetch_polls_grouped
 from reactions import fetch_reactions_grouped
 from services import ai_agent, doc_permissions, push_sender, trigger_matcher
 
@@ -760,6 +760,29 @@ async def create_poll(
         )
     background.spawn(
         push_sender.notify_channel_message(channel_id, user.id, user.name, body.question, [], f"/channels/{channel_id}")
+    )
+    return _message_out(
+        {**dict(message_row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},
+        poll=poll_payload,
+    )
+
+
+@router.post("/{channel_id}/schedules", status_code=201)
+async def create_schedule(
+    channel_id: int, body: ScheduleInput, user: CurrentUser = Depends(require_channel_member),
+):
+    """新規: 日程調整（ユーザーからの明示的な要望「作成者が日にちや時間をいくつか提示し、回答者が
+    ○△×で回答して都合がいい人が最も多い日程を決める機能」、2026-09-30）。create_pollと同じく
+    タイトルをmessages.bodyへ保存した新規発言として投稿する（T-29 polls.kind='schedule'）。"""
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        message_row, poll_payload = await create_schedule_message(
+            conn, channel_id=channel_id, dm_id=None, sender_user_id=user.id, schedule=body,
+        )
+    background.spawn(
+        push_sender.notify_channel_message(
+            channel_id, user.id, user.name, f"📅 {body.title}", [], f"/channels/{channel_id}",
+        )
     )
     return _message_out(
         {**dict(message_row), "sender_name": user.name, "sender_picture_url": user.picture_url, "thread_reply_count": 0},

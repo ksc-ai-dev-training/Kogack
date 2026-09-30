@@ -6,6 +6,7 @@ import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import { CustomEmojiTile } from './CustomEmojiTile'
 import { CreatePollModal } from './CreatePollModal'
+import { CreateSchedulePollModal } from './CreateSchedulePollModal'
 import { useToast } from './Toast'
 import {
   domToPlainText,
@@ -200,6 +201,7 @@ export default function Composer({
   scheduleTarget,
   draftKey,
   onCreatePoll,
+  onCreateSchedulePoll,
   initialBody,
   initialMentions,
   onChange,
@@ -232,6 +234,9 @@ export default function Composer({
    * 指定された場合のみ投稿欄に📊ボタンを表示する。V1スコープはチャンネル・DM本体の投稿のみ
    * （ThreadPanel.tsxはこのpropを渡さず、スレッド返信からの作成は対象外のまま）。 */
   onCreatePoll?: (question: string, options: string[]) => Promise<void>
+  /** 日程調整の作成（ユーザーからの明示的な要望、2026-09-30）。onCreatePollと同じく指定された
+   * 場合のみ📅ボタンを表示し、スレッドの返信欄には渡さない（「送信日時を指定」の送信予約とは別機能） */
+  onCreateSchedulePoll?: (title: string, dates: string[]) => Promise<void>
   // 以下は通常の投稿欄以外（発言の編集・定期投稿/自動応答トリガーの本文欄）でこの投稿欄を
   // そのまま使うためのprops（ユーザーからの要望「定期投稿・自動応答トリガーの本文欄を、通常の
   // 投稿欄と同じにしてほしい」。以前はそれぞれが記号を直接挿入する素のtextareaだった）。
@@ -269,6 +274,7 @@ export default function Composer({
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [showAddEmojiModal, setShowAddEmojiModal] = useState(false)
   const [showPollModal, setShowPollModal] = useState(false)
+  const [showSchedulePollModal, setShowSchedulePollModal] = useState(false)
   const { customEmoji, isLoading: customEmojiLoading, mutate: mutateCustomEmoji } = useCustomEmoji()
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
@@ -1771,6 +1777,12 @@ export default function Composer({
           }}
         />
       )}
+      {showSchedulePollModal && onCreateSchedulePoll && (
+        <CreateSchedulePollModal
+          onClose={() => setShowSchedulePollModal(false)}
+          onCreate={onCreateSchedulePoll}
+        />
+      )}
       {showPollModal && onCreatePoll && (
         <CreatePollModal
           onClose={() => setShowPollModal(false)}
@@ -2116,6 +2128,22 @@ export default function Composer({
           >
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
               <path d="M5 15V9M10 15V5M15 15v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+        {onCreateSchedulePoll && (
+          <button
+            type="button"
+            title="日程調整を作成"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setShowSchedulePollModal(true)
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted"
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <rect x="3.5" y="4.5" width="13" height="12" rx="1.6" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M3.5 8.5h13M7 3v3M13 3v3M7.5 12.5l1.6 1.5 3.4-3.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
         )}

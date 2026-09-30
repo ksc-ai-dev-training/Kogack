@@ -5,7 +5,7 @@ import { useMessages } from '../hooks/useMessages'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
-import { apiFetch, createPoll } from '../lib/api'
+import { apiFetch, createPoll, createSchedulePoll } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
@@ -223,6 +223,11 @@ export default function DmView() {
             onCreatePoll={async (question, options) => {
               if (!dmId) return
               await createPoll(`/api/dms/${dmId}`, question, options)
+              await mutateMessages()
+            }}
+            onCreateSchedulePoll={async (title, dates) => {
+              if (!dmId) return
+              await createSchedulePoll(`/api/dms/${dmId}`, title, dates)
               await mutateMessages()
             }}
           />

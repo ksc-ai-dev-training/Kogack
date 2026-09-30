@@ -7,7 +7,7 @@ import { useStickToBottom } from '../hooks/useStickToBottom'
 import { saveLastChannelId } from '../lib/lastChannel'
 import { useUnreadDivider } from '../hooks/useUnreadDivider'
 import { useMe } from '../hooks/useMe'
-import { apiFetch, ApiError, createPoll } from '../lib/api'
+import { apiFetch, ApiError, createPoll, createSchedulePoll } from '../lib/api'
 import MessageList from '../components/MessageList'
 import Composer, { type MentionCandidate } from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
@@ -380,6 +380,11 @@ export default function ChannelView() {
             onCreatePoll={async (question, options) => {
               if (!channelId) return
               await createPoll(`/api/channels/${channelId}`, question, options)
+              await mutateMessages()
+            }}
+            onCreateSchedulePoll={async (title, dates) => {
+              if (!channelId) return
+              await createSchedulePoll(`/api/channels/${channelId}`, title, dates)
               await mutateMessages()
             }}
           />

@@ -245,6 +245,23 @@ FIXED_RULES = """# 全チャンネル共通ルール（固定・編集不可）
   または存在しない手順で案内しないこと。また会話履歴中のアンケート発言には、選択肢ごとの
   票数・投票者・締め切り状態が「[アンケート（…）]」として添えられているので、結果を尋ねられた
   場合はそれに基づいて答えること
+- **日程調整（会議等の候補日時を○△×で答えてもらい日程を決める機能）について尋ねられた場合は、
+  必ず次の事実のみに基づいて答えること**: Kogackには日程調整機能が既に存在する。作成は、
+  チャンネルまたはDMの投稿欄の左下にある、カレンダーのアイコンの「日程調整を作成」ボタン
+  （アンケートの棒グラフのアイコンの右隣。右端の時計のアイコンは送信予約で別の機能）を押す→
+  「タイトル」と「候補日」（日付のみ、1〜30件。時刻を選ぶ欄は無く、時刻を伝えたい場合は
+  タイトルに書く。「＋ 候補を追加」で直前の候補の翌日の行が増える）を入力→「作成する」、
+  という操作で、参加者なら誰でも作成
+  できる（スレッド内には作成できない）。回答は、日程調整の「回答する」を押して候補ごとに
+  ○・△・×を選び（全候補必須）、任意でひとことコメントを書いて「回答を保存」。決定前なら
+  「回答を修正する」で何度でも直せる。回答は一覧表で参加者全員に見え、○が最多（同数なら△が
+  多い）候補に★が付く。決定は、作成者本人とシステム管理者だけが、候補の行の「決定」を押して
+  行える（★以外の候補も選べる）。決定すると回答を締め切り、その日程調整のスレッドに決定の
+  お知らせが決定した人の名前で自動投稿される。決定の取り消し・決め直し、作成後のタイトル・
+  候補の編集、カレンダーへの自動登録の機能は無い。「日程調整機能はありません」「外部の調整
+  ツールを使ってください」のように案内しないこと。会話履歴中の日程調整の発言には、候補ごとの
+  ○△×の人数・回答者別の回答・決定状況が「[日程調整（…）]」として添えられているので、
+  状況を尋ねられた場合はそれに基づいて答えること
 - **メッセージの書式（太字・斜体・下線・取り消し線・コード・コードブロック・リンク・箇条書き・
   引用）の付け方・記法について尋ねられた場合は、必ず次の事実のみに基づいて答えること
   （search_app_manualを検索する必要すら無い、常に正しい事実として扱ってよい）**: Kogackの記法は
@@ -1028,7 +1045,28 @@ async def _fetch_poll_texts(rows) -> dict[int, str]:
     して」、2026-09-28）。投票者名は画面上でも参加者全員に見える情報のため、そのまま含める。"""
     grouped = await polls.fetch_polls_grouped(get_pool(), [r["id"] for r in rows], 0)
     texts: dict[int, str] = {}
+    answer_marks = {"yes": "○", "maybe": "△", "no": "×"}
     for message_id, poll in grouped.items():
+        if poll["kind"] == "schedule":
+            # 日程調整（2026-09-30）。候補ごとの○△×の人数と回答者別の内訳・コメント・確定状況
+            lines = ["[日程調整（投稿欄の📅ボタンで作成されたもの。候補ごとに○△×で回答）]"]
+            best = set(poll["best_option_ids"])
+            for opt in poll["options"]:
+                mark = "（現在最も都合の良い候補）" if opt["id"] in best else ""
+                lines.append(
+                    f"- {opt['label']}：○{opt['yes_count']}・△{opt['maybe_count']}・×{opt['no_count']}{mark}"
+                )
+            for r in poll["respondents"]:
+                marks = "・".join(
+                    f"{o['label']}{answer_marks.get(r['answers'].get(o['id']), '-')}" for o in poll["options"]
+                )
+                comment = f"（コメント: {r['comment']}）" if r["comment"] else ""
+                lines.append(f"  {r['user_name']}: {marks}{comment}")
+            decided = next((o["label"] for o in poll["options"] if o["id"] == poll["decided_option_id"]), None)
+            state = f"{decided}に決定済み" if decided else ("締め切り済み" if poll["closed_at"] else "回答受付中")
+            lines.append(f"回答者{poll['total_votes']}人・{state}")
+            texts[message_id] = "\n".join(lines)
+            continue
         lines = ["[アンケート（投稿欄の📊ボタンで作成されたもの。単一選択）]"]
         for opt in poll["options"]:
             voters = f"：{'、'.join(opt['voter_names'])}" if opt["voter_names"] else ""

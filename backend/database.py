@@ -909,6 +909,41 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 CREATE INDEX IF NOT EXISTS idx_poll_votes_option_id ON poll_votes (option_id);
 ALTER TABLE poll_votes ENABLE ROW LEVEL SECURITY;
 
+-- 日程調整（ユーザーからの明示的な要望「作成者が日にちや時間をいくつか提示し、回答者が○△×で
+-- 回答して都合がいい人が最も多い日程を決める機能」、2026-09-30）。着手前にAskUserQuestionで4点
+-- 確認し、(1)候補は日付を選ぶ（当初は任意の開始・終了時刻も選べたが、利用者の判断で同日中に
+-- 日付のみへ変更。時刻を伝えたい場合はタイトルに書く）、(2)回答は○△×の3段階、(3)作成者（または
+-- システム管理者）が「この日程に決定」で確定し、スレッドへ確定のお知らせを投稿、(4)回答者は
+-- ひとことコメントを書ける、という仕様で合意した。T-29 pollsの一種（kind='schedule'）として
+-- 実装し、発言一覧・スレッド・AIの会話履歴へ渡す配線（polls.fetch_polls_grouped）をそのまま
+-- 共有する。候補はpoll_optionsの行（labelには表示用の「10/3(土)」を保存し、並べ替え用に
+-- 日付を別列にも持つ）。1人が候補ごとに1つずつ回答するためpoll_votes
+-- （1人1票）は使わず、T-32 poll_schedule_answers（候補×回答者）とpoll_schedule_respondents
+-- （回答者ごとのコメント。回答済みかどうかの判定も兼ねる）を新設する。
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'choice'
+    CHECK (kind IN ('choice', 'schedule'));
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS decided_option_id BIGINT REFERENCES poll_options(id) ON DELETE SET NULL;
+ALTER TABLE poll_options ADD COLUMN IF NOT EXISTS starts_on DATE;
+
+CREATE TABLE IF NOT EXISTS poll_schedule_respondents (
+    poll_id       BIGINT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+    user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    comment       TEXT NOT NULL DEFAULT '',
+    responded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (poll_id, user_id)
+);
+ALTER TABLE poll_schedule_respondents ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS poll_schedule_answers (
+    poll_id    BIGINT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+    option_id  BIGINT NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    answer     TEXT NOT NULL CHECK (answer IN ('yes', 'maybe', 'no')),
+    PRIMARY KEY (option_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_schedule_answers_poll_id ON poll_schedule_answers (poll_id);
+ALTER TABLE poll_schedule_answers ENABLE ROW LEVEL SECURITY;
+
 -- メンションの催促（ユーザーからの明示的な要望「メンションを受けたのに一定時間たっても返信も
 -- リアクションもしていないユーザーに、AIが自動的に催促・リマインドする機能」、2026-09-29。
 -- 要件定義書上のF-xxに対応付けられていない新規機能）。チャンネルごとの設定はT-08へ列を足す

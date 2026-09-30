@@ -16,9 +16,10 @@ import { AddCustomEmojiModal } from './AddCustomEmojiModal'
 import { CustomEmojiTile } from './CustomEmojiTile'
 import type {
   AiRequestOut, AttachmentPayload, CitationPayload, CustomEmoji, MentionSourceMember, Message, MessageAttachment,
-  MessageReaction, Poll,
+  MessageReaction, ChoicePoll,
 } from '../types'
 import { votePoll, closePoll } from '../lib/api'
+import { SchedulePollCard } from './SchedulePollCard'
 
 // カスタム絵文字のショートコード（`:name:`）と、実際の画像URLへの解決（ユーザーからの明示的な
 // 要望「Slackみたいにリアクションスタンプを自分で作成できる機能」、2026-09-17）。リアクション
@@ -1528,7 +1529,7 @@ export function ReactionPills({
 export function PollCard({
   poll, question, isClosable, onVote, onClose, voting, closing,
 }: {
-  poll: Poll
+  poll: ChoicePoll
   question: string
   isClosable: boolean
   onVote: (optionId: string) => void
@@ -1984,6 +1985,14 @@ export default function MessageList({
                       ■ {cancelling === m.id ? '中断中…' : '中断'}
                     </button>
                   </div>
+                ) : m.poll?.kind === 'schedule' ? (
+                  <SchedulePollCard
+                    poll={m.poll}
+                    title={m.body}
+                    currentUserId={me?.id}
+                    canDecide={m.sender_user_id === me?.id || me?.role === 'admin'}
+                    onUpdated={(poll) => onPollUpdated?.(m.id, poll)}
+                  />
                 ) : m.poll ? (
                   <PollCard
                     poll={m.poll}

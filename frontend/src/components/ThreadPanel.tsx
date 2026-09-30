@@ -4,6 +4,7 @@ import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError, votePoll, closePoll } from '../lib/api'
+import { SchedulePollCard } from './SchedulePollCard'
 import MessageList, {
   Avatar, EmojiGridPopover, PollCard, ReactionPills, ReactionQuickButtons, formatTime, isEmojiOnlyBody,
   renderMessageBody,
@@ -321,7 +322,15 @@ export default function ThreadPanel({
                 </span>
                 <span className="text-[11px] text-ink-subtle">{formatTime(parentMessage.created_at)}</span>
               </div>
-              {parentMessage.poll ? (
+              {parentMessage.poll?.kind === 'schedule' ? (
+                <SchedulePollCard
+                  poll={parentMessage.poll}
+                  title={parentMessage.body}
+                  currentUserId={me?.id}
+                  canDecide={parentMessage.sender_user_id === me?.id || me?.role === 'admin'}
+                  onUpdated={() => mutateReplies()}
+                />
+              ) : parentMessage.poll ? (
                 <PollCard
                   poll={parentMessage.poll}
                   question={parentMessage.body}

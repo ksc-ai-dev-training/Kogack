@@ -49,6 +49,7 @@
       <tr class="diff-new"><td>1.18</td><td>2026-09-29</td><td>T-11 channel_skillsに<code>response_level</code>（auto/confirm）を追加し、T-12 channel_auto_response_rulesを「人に任せる依頼」（human）だけを持つテーブルにした（要件定義書v1.27 F-16、基本設計書v1.46）。既存行の移行方法を3.10節に追記した。</td></tr>
       <tr class="diff-new"><td>1.19</td><td>2026-09-29</td><td>参照範囲外の質問への対応（out_of_scope_policy、F-11）の既定を「厳格に制限」から「一般回答を許可」に変更し、既存チャンネルも一括で切り替えた（ユーザーからの要望）。T-08.out_of_scope_policyの既定値を更新し、一度きりのデータ移行の適用記録として新規T-31 app_migrationsを追加した（3.20節）。</td></tr>
       <tr class="diff-new"><td>1.20</td><td>2026-09-29</td><td>メンションの催促で、スレッドを使わずチャンネル本体で返事をした場合も反応とみなせるよう、送り主への@付き発言のルールとAIによる返事判定を追加した（ユーザーとの合意）。T-30に<code>outcome</code>列を追加し、3.19節に判定の仕様と精度評価の結果を追記した。</td></tr>
+      <tr class="diff-new"><td>1.21</td><td>2026-09-30</td><td>日程調整（ユーザーからの明示的な要望、要件定義書上のF-xxに対応付けられていない新規機能）に伴い、アンケート（T-29 polls/poll_options/poll_votes、2026-09-18実装）に<code>polls.kind</code>・<code>polls.decided_option_id</code>・<code>poll_options.starts_on</code>を追加し、新規T-32 poll_schedule_respondents・poll_schedule_answersを追加した（3.21節）。T-29自体は本書に未記載だったため、3.21節に日程調整に関わる範囲で合わせて記載した。</td></tr>
     </tbody>
   </table>
 
@@ -421,6 +422,38 @@
     </tbody>
   </table>
   <p class="muted diff-new">スキーマは起動のたびに丸ごと適用される（AUTO_MIGRATE）ため、「既存の値を一括で書き換える」UPDATEをそのまま書くと、その後に利用者が画面で選び直した値まで起動のたびに書き戻してしまう（T-08.ai_modelで実際に起きた不具合）。一度きりのデータ移行は、このテーブルへのINSERTが成功した起動（初回）だけ本体のUPDATEが働く形（<code>WITH first_run AS (INSERT ... ON CONFLICT DO NOTHING RETURNING name) UPDATE ... WHERE EXISTS (SELECT 1 FROM first_run)</code>）で書く。</p>
+
+  <h3 class="diff-new">3.21 T-32 poll_schedule_respondents / poll_schedule_answers（日程調整の回答）</h3>
+  <p class="diff-new">日程調整は、アンケート（T-29 polls。1件のアンケートにつきmessagesの行を1件持ち、その本文＝質問文・タイトル）の一種として<code>polls.kind='schedule'</code>で表す。候補日はT-29 poll_optionsの行で、表示用の文字列（例「10/3(土)」）をlabelに保存し、並べ替え用に日付を別の列にも持つ。候補は日付のみで時刻は持たない（時刻を伝えたい場合はタイトルに書く）。T-29へ追加した列は次のとおり。</p>
+  <table class="diff-new">
+    <thead><tr><th>テーブル.カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>polls.kind</td><td>TEXT</td><td>NOT NULL</td><td>'choice'</td><td>CHECK IN ('choice','schedule')。choice=通常のアンケート（単一選択）、schedule=日程調整</td></tr>
+      <tr><td>polls.decided_option_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→poll_options.id（ON DELETE SET NULL）。確定した候補。確定と同時にclosed_atも入る</td></tr>
+      <tr><td>poll_options.starts_on</td><td>DATE</td><td>NULL可</td><td>-</td><td>候補日（日程調整のみ）</td></tr>
+    </tbody>
+  </table>
+  <p class="diff-new"><strong>poll_schedule_respondents</strong>（回答者ごとのコメント。回答済みかどうかの判定も兼ねる）</p>
+  <table class="diff-new">
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>poll_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→polls.id（ON DELETE CASCADE）。PRIMARY KEY (poll_id, user_id)</td></tr>
+      <tr><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id（ON DELETE CASCADE）</td></tr>
+      <tr><td>comment</td><td>TEXT</td><td>NOT NULL</td><td>''</td><td>ひとことコメント（APIで200文字まで）</td></tr>
+      <tr><td>responded_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>最初に回答した時刻（一覧表の列の並び順）</td></tr>
+    </tbody>
+  </table>
+  <p class="diff-new"><strong>poll_schedule_answers</strong>（候補×回答者の○△×）</p>
+  <table class="diff-new">
+    <thead><tr><th>カラム</th><th>型</th><th>NULL</th><th>既定値</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td>poll_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→polls.id（ON DELETE CASCADE）。一括取得用のインデックスあり</td></tr>
+      <tr><td>option_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→poll_options.id（ON DELETE CASCADE）。PRIMARY KEY (option_id, user_id)</td></tr>
+      <tr><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id（ON DELETE CASCADE）</td></tr>
+      <tr><td>answer</td><td>TEXT</td><td>NOT NULL</td><td>-</td><td>CHECK IN ('yes','maybe','no')。画面上は○△×</td></tr>
+    </tbody>
+  </table>
+  <p class="muted diff-new">1人が候補ごとに1つずつ回答するため、1人1票のpoll_votesは使わない。回答（<code>PUT /api/polls/{id}/schedule-response</code>）は全候補ぶんの○△×とコメントを1回で送り、全候補に回答が無ければ422にする。回答のやり直しはON CONFLICT DO UPDATEで上書きする。確定（<code>POST /api/polls/{id}/decide</code>）は作成者本人またはシステム管理者のみで、decided_option_idとclosed_atを入れ、元発言のスレッドへ確定した本人の発言として「📅「タイトル」の日程を 〇〇 に決定しました。」を投稿する。確定後は回答できない（確定の取り消しは無い）。最も都合の良い候補（○が最多、同数なら△が多いもの）は保存せず、取得のたびに計算する（<code>polls.best_schedule_option_ids</code>）。回答・確定では他のアンケートと同じくmessages.updated_atを進め、差分ポーリングで他の参加者の画面へ反映させる。</p>
 
   <footer class="doc-footer">
     <span>AIネイティブチャットシステム（Kogack） / 詳細設計書 DB設計</span>

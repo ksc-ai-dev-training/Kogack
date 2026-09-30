@@ -157,3 +157,30 @@ export async function votePoll(pollId: string, optionId: string): Promise<import
 export async function closePoll(pollId: string): Promise<import('../types').Poll> {
   return apiFetch(`/api/polls/${pollId}/close`, { method: 'POST' })
 }
+
+// 日程調整（polls.kind='schedule'、2026-09-30）。作成はアンケートと同じくbasePath方式、
+// 回答・確定はpoll_idを直接指定する。候補は日付（YYYY-MM-DD）のみ
+export async function createSchedulePoll(
+  basePath: string, title: string, dates: string[],
+): Promise<import('../types').Message> {
+  return apiFetch(`${basePath}/schedules`, {
+    method: 'POST',
+    body: JSON.stringify({ title, dates }),
+  })
+}
+
+export async function respondSchedulePoll(
+  pollId: string, answers: Record<string, import('../types').ScheduleAnswer>, comment: string,
+): Promise<import('../types').SchedulePoll> {
+  return apiFetch(`/api/polls/${pollId}/schedule-response`, {
+    method: 'PUT',
+    body: JSON.stringify({ answers, comment }),
+  })
+}
+
+export async function decideSchedulePoll(pollId: string, optionId: string): Promise<import('../types').SchedulePoll> {
+  return apiFetch(`/api/polls/${pollId}/decide`, {
+    method: 'POST',
+    body: JSON.stringify({ option_id: optionId }),
+  })
+}
