@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useSearchParams } from 'react-router'
+import MobileBackLink from '../components/MobileBackLink'
 import { useAdminUsers } from '../hooks/useAdminUsers'
 import { useAuditLogs } from '../hooks/useAuditLogs'
 import { useDocFolders } from '../hooks/useDocFolders'
@@ -241,10 +242,13 @@ function UsersTab({ me }: { me: Me | null }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-none border-b border-line bg-surface px-7 py-4">
-        <Link to="/" className="text-xs text-accent-700 hover:underline">
+      <div className="flex-none border-b border-line bg-surface px-7 max-md:px-4 py-4">
+        <Link to="/" className="text-xs text-accent-700 hover:underline max-md:hidden">
           ← ワークスペースに戻る
         </Link>
+        <MobileBackLink to="/admin" className="text-xs text-accent-700 hover:underline">
+          ← 管理コンソール
+        </MobileBackLink>
         <div className="mt-1 flex items-baseline gap-1">
           <span className="text-[16px] font-bold text-ink">利用者管理</span>
         </div>
@@ -254,7 +258,7 @@ function UsersTab({ me }: { me: Me | null }) {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-7 py-5">
+      <div className="flex-1 overflow-y-auto px-7 max-md:px-4 py-5">
         <div className="mb-3.5 flex items-center gap-2.5">
           <div className="flex w-[260px] flex-none items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 py-1.5">
             <svg width="12" height="12" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="flex-none">
@@ -853,10 +857,13 @@ function DocFoldersTab() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-none border-b border-line bg-surface px-7 py-4">
-        <Link to="/" className="text-xs text-accent-700 hover:underline">
+      <div className="flex-none border-b border-line bg-surface px-7 max-md:px-4 py-4">
+        <Link to="/" className="text-xs text-accent-700 hover:underline max-md:hidden">
           ← ワークスペースに戻る
         </Link>
+        <MobileBackLink to="/admin" className="text-xs text-accent-700 hover:underline">
+          ← 管理コンソール
+        </MobileBackLink>
         <div className="mt-1 flex items-baseline gap-1">
           <span className="text-[16px] font-bold text-ink">ドキュメント参照範囲</span>
         </div>
@@ -865,7 +872,7 @@ function DocFoldersTab() {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-7 py-5">
+      <div className="flex-1 overflow-y-auto px-7 max-md:px-4 py-5">
         {folders.length === 0 ? (
           <p className="mb-6 max-w-[640px] text-[12px] text-ink-subtle">登録済みの候補はありません。</p>
         ) : (
@@ -1156,10 +1163,13 @@ function UsageTab() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-none border-b border-line bg-surface px-7 py-4">
-        <Link to="/" className="text-xs text-accent-700 hover:underline">
+      <div className="flex-none border-b border-line bg-surface px-7 max-md:px-4 py-4">
+        <Link to="/" className="text-xs text-accent-700 hover:underline max-md:hidden">
           ← ワークスペースに戻る
         </Link>
+        <MobileBackLink to="/admin" className="text-xs text-accent-700 hover:underline">
+          ← 管理コンソール
+        </MobileBackLink>
         <div className="mt-1 flex items-center gap-2.5">
           <span className="text-[16px] font-bold text-ink">AI利用状況・コスト</span>
           <input
@@ -1174,7 +1184,7 @@ function UsageTab() {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-7 py-5">
+      <div className="flex-1 overflow-y-auto px-7 max-md:px-4 py-5">
         {!usage ? <p className="text-sm text-ink-subtle">読み込み中...</p> : <UsageTabBody usage={usage} mutate={mutate} />}
       </div>
     </div>
@@ -1677,17 +1687,20 @@ function AuditLogTab() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-none border-b border-line bg-surface px-7 py-4">
-        <Link to="/" className="text-xs text-accent-700 hover:underline">
+      <div className="flex-none border-b border-line bg-surface px-7 max-md:px-4 py-4">
+        <Link to="/" className="text-xs text-accent-700 hover:underline max-md:hidden">
           ← ワークスペースに戻る
         </Link>
+        <MobileBackLink to="/admin" className="text-xs text-accent-700 hover:underline">
+          ← 管理コンソール
+        </MobileBackLink>
         <div className="mt-1 text-[16px] font-bold text-ink">監査ログ</div>
         <p className="mt-1.5 max-w-[640px] text-[12.5px] leading-relaxed text-ink-muted">
           ログイン・チャンネルAI設定の変更を記録します（要件定義書7章）。いつ・誰が・どの項目を変更したかのみを記録し、変更内容そのもの（差分）は保持しません。
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-7 py-5">
+      <div className="flex-1 overflow-y-auto px-7 max-md:px-4 py-5">
         <div className="mb-3.5 flex flex-wrap items-center gap-2">
           <select
             value={eventType}

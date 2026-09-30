@@ -38,6 +38,7 @@
       <tr class="diff-new"><td>1.7</td><td>2026-09-29</td><td>S-06「業務と対応範囲」タブを、スキル・自動対応範囲の再設計（要件定義書v1.27 F-16）に合わせて改訂した。①AIに任せる業務（スキルごとに「そのまま対応／確認してから対応」を選ぶ）②人に任せる依頼（区分の選択は無く一覧のみ）③引き継ぎ先。</td></tr>
       <tr class="diff-new"><td>1.8</td><td>2026-09-29</td><td>S-06のタブ名を「業務と対応範囲」から「スキルと対応範囲設定」に改めた（ユーザーからの要望）。</td></tr>
       <tr class="diff-new"><td>1.9</td><td>2026-09-30</td><td>サイドバーのDMを最近やり取りした順に並べ、30日以上やり取りの無いDMを既定で隠すようにした（ユーザーからの要望。DMはチャンネルより相手が増えやすいため）。Layoutの説明に追記した。</td></tr>
+      <tr class="diff-new"><td>1.10</td><td>2026-09-30</td><td>F-32 モバイル対応レイアウト（要件定義書v1.30・基本設計書5.24節）を実装した。11.1節に「画面幅による出し分け」の方針を追加した。</td></tr>
     </tbody>
   </table>
 
@@ -175,6 +176,7 @@
       <tr><td>更新の反映</td><td>保存系API（PUT/POST/DELETE）の後は、該当フックの<code>mutate()</code>で再取得する（楽観的更新はしない）。<code>ScheduledMessagesModal</code>（補足04）とヘッダーの予約中バッジは同じ<code>useScheduledMessages()</code>を参照するため、キャンセル成功時に<code>mutate()</code>すれば両方が更新される（子がキャッシュキーを個別に持たなくてよい）</td></tr>
       <tr><td>Propsの向き</td><td>データは親→子へPropsで渡し、子→親はコールバック（<code>onSaved</code> / <code>onClose</code> / <code>onSelect</code>）で通知する。孫以降へのバケツリレーが3段を超える場合のみContext化を検討する（現状は該当なし）</td></tr>
       <tr><td>権限による出し分け</td><td><code>useMe()</code>の<code>role</code>、<code>useChannelMembers()</code>から算出する<code>is_channel_admin</code>で判定する（総論5.1節）。判定箇所はルート（<code>App.tsx</code>、総論5.9節のリダイレクト判定）・メニュー（<code>Layout</code>、adminのみ管理コンソールへの導線を表示）・ボタン（<code>ChannelView</code>、chadmin/adminのみチャンネル設定ボタンを表示）の3箇所に限り、権限の正はサーバー側にある（REQ-N-02）</td></tr>
+      <tr class="diff-new"><td>画面幅による出し分け</td><td>F-32（基本設計書5.24節）。Tailwindの<code>md</code>ブレークポイント（768px）を境に、表示の出し分けは原則CSSの<code>max-md:</code>/<code>md:</code>だけで行い、コンポーネントは画面幅に関わらず同じものをマウントしたままにする（権限チェック等の<code>useEffect</code>を従来どおり動かすため）。サイドバーとメイン領域のどちらを出すかは<code>Layout</code>がURLから決める。JS側でしか分岐できない箇所（<code>/</code>の自動遷移の抑止、スレッド幅のインラインstyle）だけ<code>hooks/useIsMobile.ts</code>を使う。スマートフォンの「戻る」は<code>components/MobileBackLink.tsx</code>、発言のタップでアクションバーを出す状態は<code>hooks/useTapToShowActions.ts</code>（Tailwind 4の<code>hover:</code>/<code>group-hover:</code>は<code>@media (hover: hover)</code>内にしか出力されず、タッチ端末では発動しないため）</td></tr>
       <tr><td>スタイル</td><td>Tailwind CSSのユーティリティをJSXに直接書く。共通の見た目は<code>components/ui/shared.tsx</code>のクラス生成関数（<code>avatarClass</code> / <code>badgeClass</code>等）に集約し、CSS Modules・styled-componentsは使わない</td></tr>
     </tbody>
   </table>

@@ -41,7 +41,7 @@ export default function HeaderSearchBar({
   const navigate = useNavigate()
   const guardNavigation = useUnsavedChangesGuard()
 
-  const openSearch = async (e: React.FocusEvent<HTMLInputElement> | React.MouseEvent<HTMLInputElement>) => {
+  const openSearch = async (e: React.SyntheticEvent<HTMLElement>) => {
     e.currentTarget.blur()
     if (!(await guardNavigation())) return
     const params = new URLSearchParams()
@@ -56,7 +56,18 @@ export default function HeaderSearchBar({
   const placeholder = label ? (modifier === 'in' ? `#${label} を検索` : `${label} とのDMを検索`) : '検索'
 
   return (
-    <div className="relative ml-auto w-64 flex-none">
+    // スマホ表示（F-32）ではヘッダーの幅が足りないため、欄の代わりに🔍ボタンだけを出す（押した後の動作は同じ）
+    <>
+    <button
+      type="button"
+      onClick={openSearch}
+      title="横断検索"
+      aria-label="横断検索"
+      className="ml-auto flex h-[26px] w-[30px] flex-none items-center justify-center rounded-[7px] border border-line text-[12px] md:hidden"
+    >
+      🔍
+    </button>
+    <div className="relative ml-auto w-64 flex-none max-md:hidden">
       <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-ink-subtle">
         🔍
       </span>
@@ -70,5 +81,6 @@ export default function HeaderSearchBar({
         className="w-full cursor-pointer rounded-md border border-line-strong bg-surface-subtle py-1 pl-7 pr-2.5 text-[12px] text-ink-muted outline-none placeholder:text-ink-subtle hover:border-accent-600 focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
       />
     </div>
+    </>
   )
 }

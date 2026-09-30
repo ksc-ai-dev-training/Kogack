@@ -99,7 +99,9 @@ export default function SummarizeRangeButton({
   return (
     <div ref={wrapRef} className="relative flex flex-none items-stretch">
       <button type="button" disabled={summarizing} onClick={() => onSummarize()} title={mainButtonTitle} className={mainClass}>
-        📝 {summarizing ? '要約中...' : '要約'}
+        📝
+        {/* スマホ表示（F-32）の会話ヘッダーは幅が足りないため絵文字だけにする（スレッドは全画面なので文字も出す） */}
+        <span className={isThread ? '' : 'max-md:hidden'}> {summarizing ? '要約中...' : '要約'}</span>
       </button>
       <button
         type="button"

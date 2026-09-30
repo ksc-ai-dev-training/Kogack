@@ -11,6 +11,7 @@ import Composer from '../components/Composer'
 import ThreadPanel from '../components/ThreadPanel'
 import NotifModeButton from '../components/NotifModeButton'
 import HeaderSearchBar from '../components/HeaderSearchBar'
+import MobileBackLink from '../components/MobileBackLink'
 import type { AttachmentPayload, ChannelNotifMode, MentionPayload } from '../types'
 
 // S-03相当のDM会話＋S-04スレッド表示（ChannelViewのDM版）。ヘッダーはチャンネル名の代わりに相手の氏名を表示する。
@@ -156,8 +157,10 @@ export default function DmView() {
 
   return (
     <div className="flex h-full">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-[52px] flex-none items-center gap-2 border-b border-line px-5">
+      {/* スマホ表示（F-32）ではスレッドを開いている間は会話本体を隠す（ChannelView.tsxと同じ） */}
+      <div className={`flex min-w-0 flex-1 flex-col ${threadId ? 'max-md:hidden' : ''}`}>
+        <div className="flex h-[52px] flex-none items-center gap-2 border-b border-line px-5 max-md:gap-1.5 max-md:px-3">
+          <MobileBackLink to="/" label="DM一覧へ戻る" />
           {dm?.is_self && <span className="text-[15px]">📝</span>}
           <span className="min-w-0 flex-shrink truncate text-[15px] font-bold text-ink">{title}</span>
           <HeaderSearchBar modifier="with" id={searchWithMember?.id} label={searchWithMember?.name} />
@@ -203,7 +206,7 @@ export default function DmView() {
           />
         </div>
 
-        <div className="flex-none border-t border-line px-5 py-2.5">
+        <div className="flex-none border-t border-line px-5 py-2.5 max-md:px-3">
           <Composer
             // key={dmId}: ChannelView.tsxと同じ理由（Composerは会話の識別propを持たず、DM切替時に
             // 再マウントされないため入力途中の本文が残ってしまう不具合、2026-09-14）

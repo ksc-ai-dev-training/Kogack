@@ -9,6 +9,7 @@ import { useTriggerRules } from '../hooks/useTriggerRules'
 import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useReportDirty } from '../lib/unsavedChanges'
 import { GuardedLink } from '../components/GuardedLink'
+import MobileBackLink from '../components/MobileBackLink'
 import { useMe } from '../hooks/useMe'
 import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
@@ -53,14 +54,18 @@ export default function ChannelSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-none border-b border-line bg-surface px-7 py-3.5">
-        <GuardedLink to={`/channels/${channelId}`} className="text-xs text-accent-700 hover:underline">
+      <div className="flex-none border-b border-line bg-surface px-7 max-md:px-4 py-3.5">
+        <GuardedLink to={`/channels/${channelId}`} className="text-xs text-accent-700 hover:underline max-md:hidden">
           ← # {channel?.name ?? ''} に戻る
         </GuardedLink>
+        {/* スマホ表示（F-32）では設定項目の一覧（Layout.tsxのサイドバー側の画面）へ戻る */}
+        <MobileBackLink to={`/channels/${channelId}/settings`} className="text-xs text-accent-700 hover:underline">
+          ← チャンネル設定
+        </MobileBackLink>
         <div className="mt-1 text-[15px] font-bold text-ink">チャンネル設定</div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-7 py-5.5">
+      <div className="flex-1 overflow-y-auto px-7 max-md:px-4 py-5.5">
         {tab === 'general' && channelId && settings && (
           <GeneralTab channelId={channelId} channelName={channel?.name ?? ''} settings={settings} mutate={mutateAi} />
         )}

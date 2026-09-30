@@ -4,6 +4,7 @@ import { avatarColorFor } from '../lib/avatarColor'
 import { useMe } from '../hooks/useMe'
 import { useDraftKeys } from '../hooks/useDraftKeys'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
+import { useTapToShowActions } from '../hooks/useTapToShowActions'
 import { apiFetch, ApiError } from '../lib/api'
 import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
@@ -1664,6 +1665,8 @@ export default function MessageList({
   // スレッドは見てわかるような記述やマークを付けてほしい」）。サイドバーはチャンネル・DM分を
   // 表示するため対象外だが、スレッドはサイドバーに一覧が無いため「💬 N件の返信」導線の隣に表示する
   const draftKeys = useDraftKeys()
+  // タッチ端末ではホバーできないため、発言のタップでアクションバーを出す（hooks/useTapToShowActions.ts）
+  const { onRowClick, barVisibility } = useTapToShowActions()
   // F-40 プロフィールカード。開いている対象はメッセージid単位で持つ（表示するのはsender_user_idの
   // プロフィール）。anchorはクリックした要素の座標で、画面下寄りの発言（一番下の投稿欄近く）で
   // カードが投稿欄の裏に隠れないよう、ProfileCard側でdocument.bodyへポータル配置する際の基準にする
@@ -1888,7 +1891,8 @@ export default function MessageList({
             <div
               id={`message-${m.id}`}
               onContextMenu={(e) => openContextMenu(m.id, e)}
-              className={`group relative flex gap-2.5 px-5 py-[7px] transition-colors duration-700 ${
+              onClick={(e) => onRowClick(m.id, e)}
+              className={`group relative flex gap-2.5 px-5 py-[7px] max-md:px-3 transition-colors duration-700 ${
                 highlightMessageId === m.id
                   ? 'bg-bot-bg'
                   : openThreadId === m.id
@@ -2068,7 +2072,9 @@ export default function MessageList({
                 // 囲み、時刻・発言者名の上に重なっても違和感のない浮遊ツールバーにする（ユーザー
                 // からの報告「スレッド返信で時刻表示と絵文字候補がかぶる」への対応。個々のボタンは
                 // 枠を持たず、バーの枠内に収める）
-                <div className="absolute right-4 top-0 hidden items-center gap-0.5 rounded-md border border-line bg-surface px-1 py-0.5 shadow-sm group-hover:flex">
+                <div
+                  className={`absolute right-4 top-0 items-center gap-0.5 rounded-md border border-line bg-surface px-1 py-0.5 shadow-sm ${barVisibility(m.id)}`}
+                >
                   {canReact && (
                     <ReactionQuickButtons
                       onToggle={(emoji) => toggleReaction(m.id, emoji)}

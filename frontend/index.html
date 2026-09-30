@@ -2,7 +2,10 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale=1: iOS Safariは文字サイズ16px未満の入力欄にフォーカスすると画面を自動で拡大し、
+         投稿後も拡大されたままになるため抑止する（F-32。iOS 10以降はこの指定があってもピンチ操作での
+         拡大はできる。文字の大きさはサイドバー下部の「文字サイズ」で変えられる） -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     <title>Kogack | AIネイティブチャットシステム</title>
     <script>
       // UI全体の表示倍率（src/lib/uiZoom.ts と同じ設定）をReactマウント前に適用し、初回描画の

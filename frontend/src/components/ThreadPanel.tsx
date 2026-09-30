@@ -3,6 +3,8 @@ import { useThread } from '../hooks/useThread'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useCustomEmoji } from '../hooks/useCustomEmoji'
 import { useMe } from '../hooks/useMe'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { useTapToShowActions } from '../hooks/useTapToShowActions'
 import { apiFetch, ApiError, votePoll, closePoll } from '../lib/api'
 import { SchedulePollCard } from './SchedulePollCard'
 import MessageList, {
@@ -88,6 +90,11 @@ export default function ThreadPanel({
   // latestWidthRefは直近のmousemoveで計算した幅を保持し、mouseup時点でそれをlocalStorageへ
   // 保存する（onMouseUpのクロージャがuseEffectの依存配列的に古いwidthを参照してしまうのを避けるため）
   const [threadWidth, setThreadWidth] = useState(readStoredThreadWidth)
+  // スマホ表示（F-32）ではスレッドを全画面で出す（会話本体はChannelView/DmView側で隠す）ため、
+  // 保存済みの幅は当てずリサイズハンドルも出さない
+  const isMobile = useIsMobile()
+  // 元発言のアクションバーもタッチ端末ではタップで出す（MessageList.tsxと同じ）
+  const { onRowClick: onParentClick, barVisibility: parentBarVisibility } = useTapToShowActions()
   const [resizingThread, setResizingThread] = useState(false)
   const dragStartRef = useRef<{ x: number; width: number } | null>(null)
   const latestWidthRef = useRef(threadWidth)
@@ -249,8 +256,8 @@ export default function ThreadPanel({
 
   return (
     <aside
-      className="relative flex flex-none flex-col border-l border-line-strong bg-surface shadow-[-4px_0_16px_rgba(16,24,40,0.05)]"
-      style={{ width: threadWidth }}
+      className="relative flex flex-none flex-col border-l border-line-strong bg-surface shadow-[-4px_0_16px_rgba(16,24,40,0.05)] max-md:min-w-0 max-md:flex-1 max-md:border-l-0 max-md:shadow-none"
+      style={isMobile ? undefined : { width: threadWidth }}
     >
       {/* 左端のリサイズハンドル（ユーザーからの明示的な要望「スレッドの枠の横幅をマウスで変更
           できるようにしたい」）。境界線（border-l）をまたぐ形で少し広めの当たり判定を確保し、
@@ -258,7 +265,7 @@ export default function ThreadPanel({
       <div
         onMouseDown={startResize}
         title="ドラッグして幅を変更"
-        className={`absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize select-none ${
+        className={`absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize select-none max-md:hidden ${
           resizingThread ? 'bg-accent-600/40' : 'hover:bg-accent-600/25'
         }`}
       />
@@ -295,7 +302,7 @@ export default function ThreadPanel({
 
       <div ref={bodyCallbackRef} className="flex-1 overflow-y-auto overflow-x-hidden py-1.5">
         {parentMessage && (
-          <div className="group relative flex gap-2.5 border-b border-line px-4 py-3">
+          <div className="group relative flex gap-2.5 border-b border-line px-4 py-3" onClick={(e) => onParentClick('parent', e)}>
             <Avatar
               message={parentMessage}
               onClick={
@@ -381,7 +388,9 @@ export default function ThreadPanel({
             {/* 元発言への絵文字リアクション（ユーザーからの明示的な要望）。MessageList.tsxと同じ
                 「ホバー時に右上へ重ねて表示」の配置＋1枚の枠（枠線＋背景＋影）で囲む浮遊ツールバー。
                 返信・削除ボタンはここには元々無いためクイックボタン＋ピッカーだけを置く */}
-            <div className="absolute right-3 top-1 hidden items-center gap-0.5 rounded-md border border-line bg-surface px-1 py-0.5 shadow-sm group-hover:flex">
+            <div
+              className={`absolute right-3 top-1 items-center gap-0.5 rounded-md border border-line bg-surface px-1 py-0.5 shadow-sm ${parentBarVisibility('parent')}`}
+            >
               <ReactionQuickButtons
                 onToggle={toggleParentReaction}
                 pickerOpen={!!parentEmojiPickerAnchor}

@@ -15,6 +15,7 @@ import MembersModal from '../components/MembersModal'
 import NotifModeButton from '../components/NotifModeButton'
 import SummarizeRangeButton, { type SummaryRange } from '../components/SummarizeRangeButton'
 import HeaderSearchBar from '../components/HeaderSearchBar'
+import MobileBackLink from '../components/MobileBackLink'
 import { useToast } from '../components/Toast'
 import type { AttachmentPayload, ChannelNotifMode, MentionPayload } from '../types'
 
@@ -271,8 +272,10 @@ export default function ChannelView() {
 
   return (
     <div className="flex h-full">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-5">
+      {/* スマホ表示（F-32）ではスレッドを開いている間は会話本体を隠し、スレッドを全画面で出す */}
+      <div className={`flex min-w-0 flex-1 flex-col ${threadId ? 'max-md:hidden' : ''}`}>
+        <div className="flex h-[52px] flex-none items-center gap-2.5 border-b border-line px-5 max-md:gap-1.5 max-md:px-3">
+          <MobileBackLink to="/" label="チャンネル一覧へ戻る" />
           <span className="text-base text-ink-subtle">{channel?.is_public === false ? '🔒' : '#'}</span>
           <span
             onClick={channel ? () => setMembersModalTab('info') : undefined}
@@ -281,7 +284,7 @@ export default function ChannelView() {
             {channel?.name ?? '読み込み中...'}
           </span>
           {channel?.topic && (
-            <span className="ml-1 min-w-0 max-w-[220px] flex-shrink truncate text-xs text-ink-subtle">
+            <span className="ml-1 min-w-0 max-w-[220px] flex-shrink truncate text-xs text-ink-subtle max-md:hidden">
               {channel.topic}
             </span>
           )}
@@ -292,7 +295,9 @@ export default function ChannelView() {
               onClick={() => setMembersModalTab('members')}
               className="flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
             >
-              👥 所属メンバー：{channel.member_count}人
+              👥<span className="max-md:hidden"> 所属メンバー：</span>
+              {channel.member_count}
+              <span className="max-md:hidden">人</span>
             </button>
           )}
           {channel && (
@@ -316,7 +321,7 @@ export default function ChannelView() {
               to={`/channels/${channelId}/settings`}
               className="flex-none rounded-[7px] border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:border-line-strong hover:bg-surface-subtle"
             >
-              ⚙ チャンネル設定
+              ⚙<span className="max-md:hidden"> チャンネル設定</span>
             </Link>
           )}
         </div>
@@ -355,7 +360,7 @@ export default function ChannelView() {
           />
         </div>
 
-        <div className="flex-none border-t border-line px-5 py-2.5">
+        <div className="flex-none border-t border-line px-5 py-2.5 max-md:px-3">
           <Composer
             // key={channelId}: Composerは入力中の本文・添付ファイル等を自身のuseStateで保持するが、
             // どの会話宛てかを識別するpropを持たない。ChannelViewはURLのchannelIdだけが変わる

@@ -12,6 +12,7 @@ import SearchView from './pages/SearchView'
 import AdminConsole from './pages/AdminConsole'
 import HelpView from './pages/HelpView'
 import { readLastChannelId } from './lib/lastChannel'
+import { useIsMobile } from './hooks/useIsMobile'
 
 // ルーティング・認証ガード（詳細設計書 総論5.1節・5.9節、画面設計11.3節）。
 // このスライスはS-01ログイン＋S-02サイドバー＋S-03チャンネル会話＋DM＋S-04スレッド表示＋S-05横断検索＋S-06チャンネル設定＋S-08管理コンソール。
@@ -97,8 +98,12 @@ export default function App() {
 // チャンネル一覧（A-05）にあればそこへ、無ければ（退出済み・未保存等）参加中の最初のチャンネルへ
 // 誘導する（基本設計書3.1節「最後に開いていたチャンネルを表示」、画面設計のlocalStorageキー表）。
 // ログイン直後に加え、管理コンソール等の「← ワークスペースに戻る」もここを通る。
+// スマホ表示（F-32）では/が「サイドバーだけの画面」そのもの（Layout.tsx参照）のため誘導しない
+// （誘導すると会話画面の「‹」で戻った瞬間にまた会話へ飛ばされ、サイドバーを開けなくなる）。
 function Home() {
   const { joined, isLoading } = useChannels()
+  const isMobile = useIsMobile()
+  if (isMobile) return null
   if (isLoading) {
     return <div className="p-8 text-center text-sm text-ink-subtle">読み込み中...</div>
   }

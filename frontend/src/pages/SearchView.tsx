@@ -5,6 +5,7 @@ import { useSearch, searchParamsFor, type SearchQuery } from '../hooks/useSearch
 import { apiFetch } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
+import MobileBackLink from '../components/MobileBackLink'
 import { Avatar, type AvatarSource } from '../components/MessageList'
 import type { SearchResponse, SearchResultItem, UserSearchResult } from '../types'
 
@@ -565,8 +566,9 @@ export default function SearchView() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-none px-7 pt-4">
+      <div className="flex-none px-7 max-md:px-4 pt-4">
         <div className="flex gap-2">
+          <MobileBackLink to="/" label="チャンネル一覧へ戻る" />
           <div className="relative w-full max-w-md">
             <div className="relative flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2">
               <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="flex-none">
@@ -763,8 +765,8 @@ export default function SearchView() {
       </div>
 
       <div className="mt-2 flex-1 overflow-y-auto pb-6">
-        {!hasQuery && <p className="px-7 pt-4 text-sm text-ink-subtle">検索語を入力してください。</p>}
-        {hasQuery && isLoading && <p className="px-7 pt-4 text-sm text-ink-subtle">検索中...</p>}
+        {!hasQuery && <p className="px-7 max-md:px-4 pt-4 text-sm text-ink-subtle">検索語を入力してください。</p>}
+        {hasQuery && isLoading && <p className="px-7 max-md:px-4 pt-4 text-sm text-ink-subtle">検索中...</p>}
         {hasQuery && result && query && (
           <SearchResultsTabs
             key={searchParams.toString()}
@@ -836,13 +838,13 @@ function SearchResultsTabs({
 
   return (
     <>
-      <div className="mx-7 flex items-center gap-1 border-b border-line">
+      <div className="mx-7 flex items-center gap-1 border-b border-line max-md:mx-4">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
-            className={`border-b-2 px-3 py-2 text-[13px] font-semibold ${
+            className={`whitespace-nowrap border-b-2 px-3 py-2 text-[13px] font-semibold max-md:px-2 ${
               activeTab === tab.key
                 ? 'border-accent-600 text-accent-700'
                 : 'border-transparent text-ink-subtle hover:text-ink-muted'
@@ -854,14 +856,14 @@ function SearchResultsTabs({
         ))}
         <span
           title="ドキュメント根拠検索（Google Drive文書、層2）は未実装です"
-          className="cursor-not-allowed border-b-2 border-transparent px-3 py-2 text-[13px] font-semibold text-line-strong"
+          className="cursor-not-allowed whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-[13px] font-semibold text-line-strong max-md:hidden"
         >
           ドキュメント根拠
           <span className="ml-1 font-normal">未実装</span>
         </span>
       </div>
 
-      {visibleCount === 0 && <p className="px-7 pt-4 text-sm text-ink-subtle">該当する結果がありません。</p>}
+      {visibleCount === 0 && <p className="px-7 max-md:px-4 pt-4 text-sm text-ink-subtle">該当する結果がありません。</p>}
 
       {(activeTab === 'all' || activeTab === 'message') && messageItems.length > 0 && (
         <>
@@ -875,9 +877,9 @@ function SearchResultsTabs({
               key={item.message_id}
               type="button"
               onClick={() => onOpenResult(item)}
-              className="flex w-full gap-3 border-b border-surface-muted px-7 py-2.5 text-left hover:bg-surface-subtle"
+              className="flex w-full gap-3 border-b border-surface-muted px-7 max-md:px-4 py-2.5 text-left hover:bg-surface-subtle max-md:flex-col max-md:gap-0.5"
             >
-              <div className="w-[150px] flex-none pt-px text-[11.5px] font-semibold text-ink">
+              <div className="w-[150px] flex-none pt-px max-md:w-auto max-md:text-ink-subtle text-[11.5px] font-semibold text-ink">
                 {item.channel_name ? `# ${item.channel_name}` : (item.dm_label ?? 'DM')}
               </div>
               <div className="min-w-0 flex-1">
@@ -893,7 +895,7 @@ function SearchResultsTabs({
             </button>
           ))}
           {hasMoreMessages && (
-            <div className="border-b border-surface-muted px-7 py-2.5">
+            <div className="border-b border-surface-muted px-7 max-md:px-4 py-2.5">
               <button
                 type="button"
                 disabled={loadingMore === 'message'}
@@ -917,14 +919,14 @@ function SearchResultsTabs({
           {fileItems.map((item) => (
             <div
               key={item.attachment_id}
-              className="flex w-full items-center gap-3 border-b border-surface-muted px-7 py-2.5 hover:bg-surface-subtle"
+              className="flex w-full items-center gap-3 border-b border-surface-muted px-7 max-md:px-4 py-2.5 hover:bg-surface-subtle"
             >
               <button
                 type="button"
                 onClick={() => onOpenResult(item)}
-                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                className="flex min-w-0 flex-1 items-center gap-3 text-left max-md:flex-col max-md:items-start max-md:gap-0.5"
               >
-                <div className="w-[150px] flex-none text-[11.5px] font-semibold text-ink">
+                <div className="w-[150px] flex-none text-[11.5px] font-semibold text-ink max-md:w-auto max-md:text-ink-subtle">
                   {item.channel_name ? `# ${item.channel_name}` : (item.dm_label ?? 'DM')}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -951,7 +953,7 @@ function SearchResultsTabs({
             </div>
           ))}
           {hasMoreFiles && (
-            <div className="px-7 py-2.5">
+            <div className="px-7 max-md:px-4 py-2.5">
               <button
                 type="button"
                 disabled={loadingMore === 'file'}

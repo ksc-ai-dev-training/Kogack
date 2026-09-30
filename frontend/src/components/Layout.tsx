@@ -11,9 +11,11 @@ import { useUnreadTitleBadge } from '../hooks/useUnreadTitleBadge'
 import { usePushSubscription } from '../hooks/usePushSubscription'
 import { useUiZoom } from '../hooks/useUiZoom'
 import { useDraftKeys } from '../hooks/useDraftKeys'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { UI_ZOOM_LABELS, UI_ZOOM_ORDER } from '../lib/uiZoom'
 import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
 import { GuardedLink, GuardedNavLink } from './GuardedLink'
+import MobileBackLink from './MobileBackLink'
 import NotificationSettingsButton from './NotificationSettingsButton'
 import JoinChannelModal from './JoinChannelModal'
 import DmPickerModal from './DmPickerModal'
@@ -106,8 +108,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   const settingsMatch = useMatch('/channels/:channelId/settings')
   const adminMatch = useMatch('/admin')
   const [searchParams] = useSearchParams()
-  const settingsTab = searchParams.get('tab') ?? 'admin'
-  const adminTab = searchParams.get('tab') ?? 'users'
+  const isMobile = useIsMobile()
+  // スマホ表示では?tab=無しのURLが「項目一覧（サイドバー）」画面を表すため、どれも選択状態にしない
+  const settingsTab = searchParams.get('tab') ?? (isMobile ? null : 'admin')
+  const adminTab = searchParams.get('tab') ?? (isMobile ? null : 'users')
 
   // 「チャンネル」「ダイレクトメッセージ」見出しの開閉（lib/sidebarSections.ts）。閉じている間も、
   // 未読・メンションのあるもの（ミュート中は除く＝バッジを出さないものは出さない）と、今開いている
@@ -123,6 +127,14 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   // 操作マニュアル（/help）の「← 戻る」の戻り先として、/help以外の画面へ移るたびに場所を覚える
   // （lib/helpReturnPath.ts）
   const location = useLocation()
+  // スマホ表示（F-32 モバイル対応レイアウト、2026-09-30）はSlackのアプリと同じく、サイドバーだけの
+  // 画面と会話（メイン領域）だけの画面を分ける。サイドバー側を出すのは次のURLのとき:
+  //   /（ワークスペース） / チャンネル設定・管理コンソールの?tab=無し（設定項目の一覧）
+  // それ以外はメイン領域を全幅で出し、各画面ヘッダー左端の「‹」（MobileBackLink）でサイドバー側へ戻る。
+  // PC表示（md以上）では従来どおり両方を並べる。出し分けはCSS（max-md:hidden）だけで行い、
+  // どちらの画面もマウントしたままにする（権限チェック等の各画面のuseEffectを従来どおり動かすため）
+  const mobileShowsSidebar =
+    location.pathname === '/' || ((settingsMatch || adminMatch) && !searchParams.has('tab'))
   useEffect(() => {
     if (location.pathname !== '/help') rememberNonHelpPath(`${location.pathname}${location.search}${location.hash}`)
   }, [location.pathname, location.search, location.hash])
@@ -167,8 +179,13 @@ export default function Layout({ me, children }: { me: Me; children: React.React
   return (
     // documentElement の zoom で全体を拡大する（src/lib/uiZoom.ts）。ビューポート基準の全画面
     // サイズだけは zoom で割り戻さないと縦横スクロールが出るため calc で補正する。
-    <div className="flex h-[calc(100vh/var(--ui-zoom))] w-[calc(100vw/var(--ui-zoom))] bg-surface-muted">
-      <aside className="flex w-[260px] flex-none flex-col border-r border-line bg-surface-subtle">
+    // 高さはdvh（スマホのアドレスバーの出入りに追従する）。vhのままだとスマホでは投稿欄が画面外に隠れる
+    <div className="flex h-[calc(100dvh/var(--ui-zoom))] w-[calc(100vw/var(--ui-zoom))] bg-surface-muted">
+      <aside
+        className={`flex w-[260px] flex-none flex-col border-r border-line bg-surface-subtle max-md:w-full max-md:border-r-0 ${
+          mobileShowsSidebar ? '' : 'max-md:hidden'
+        }`}
+      >
         <div className="flex h-14 flex-none items-center gap-2 border-b border-line bg-surface px-4">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent-600 to-accent-700 text-xs font-bold text-white">
             K
@@ -203,7 +220,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
 
         {settingsMatch ? (
           <div className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3.5">
-            <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">チャンネル設定</div>
+            <div className="mb-1.5 flex items-center gap-1 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">
+              <MobileBackLink to={`/channels/${settingsMatch.params.channelId}`} label="チャンネルに戻る" />
+              チャンネル設定
+            </div>
             <ul>
               <li>
                 <GuardedLink
@@ -291,7 +311,10 @@ export default function Layout({ me, children }: { me: Me; children: React.React
           </div>
         ) : adminMatch ? (
           <div className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3.5">
-            <div className="mb-1.5 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">管理コンソール</div>
+            <div className="mb-1.5 flex items-center gap-1 px-2 text-[11px] font-bold tracking-wide text-ink-subtle">
+              <MobileBackLink to="/" label="ワークスペースに戻る" />
+              管理コンソール
+            </div>
             <ul>
               <li>
                 <GuardedLink to="/admin?tab=users" className={navItemClass(adminTab === 'users')}>
@@ -533,7 +556,7 @@ export default function Layout({ me, children }: { me: Me; children: React.React
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+      <main className={`min-w-0 flex-1 overflow-hidden ${mobileShowsSidebar ? 'max-md:hidden' : ''}`}>{children}</main>
 
       {modalOpen && <JoinChannelModal onClose={() => setModalOpen(false)} />}
       {dmModalOpen && <DmPickerModal onClose={() => setDmModalOpen(false)} />}
