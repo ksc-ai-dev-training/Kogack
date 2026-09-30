@@ -50,6 +50,7 @@
       <tr class="diff-new"><td>1.7</td><td>2026-09-03</td><td>7.2節に4件目のGoogle認証エラー種別<code>consent_denied</code>を追加した。層2ドキュメントQ&Aに向けたGoogle Drive OAuthスコープ拡張の検証中に発見した不具合の修正（ユーザーからの報告）: 従来、Googleの同意画面で「キャンセル」を選択すると<code>code</code>が返らないことだけを見て<code>oauth_failed</code>（理由不明の「もう一度お試しください」）に一律分類しており、Drive等の追加スコープを拒否した利用者はチャット機能自体にもログインできないまま原因が分からない状態になっていた。Googleが返す<code>error=access_denied</code>（stateがCookie値と一致した場合のみ信頼する）を専用の種別として区別し、許可が必要である旨を案内するメッセージへ変更した。</td></tr>
       <tr class="diff-new"><td>1.8</td><td>2026-09-03</td><td>5.9節に「ログイン中のユーザーが実行中に切り替わった場合の保護」の設計判断を追加した。ログイン・ログアウトのボタンを経由しないセッション切り替え（複数タブ・dev-loginのAPI直接呼び出し等）が起きると、そのタブは直前のユーザーが見ていたチャンネルURLをそのまま新しいユーザーの権限で描画してしまい、非公開チャンネルであれば存在を意図せず開示する不具合が実機検証で見つかった（ユーザーからの報告）。<code>App.tsx</code>にユーザーID変化を検知するガード（レンダー中にstateを調整するパターンを使用）を追加し、<code>useMe()</code>にも他の主要フックと同じ3秒間隔の<code>refreshInterval</code>を持たせた。</td></tr>
       <tr class="diff-new"><td>1.9</td><td>2026-09-04</td><td>7.5節のログ収集先をKoyebからFly.ioへ更新した（ホスティング先の変更、基本設計書9.6節「設計判断」参照。ユーザーの意向）。</td></tr>
+      <tr class="diff-new"><td>1.10</td><td>2026-09-30</td><td>9.5節（ドキュメント質問応答の権限フィルタリング）を、要件定義書v1.31・基本設計書8.2節の代替方式（限定公開の文書の閲覧者をT-24で管理し、参照範囲の設定時に参加者との整合を強制する）に合わせて改めた。</td></tr>
     </tbody>
   </table>
 
@@ -362,7 +363,7 @@ CREATE POLICY channels_visibility ON channels FOR SELECT USING (
   <ol class="steps">
     <li>9.2節手順7で<code>search_documents(query)</code>が呼ばれる</li>
     <li>索引（基本設計書8.2節、S-08「今すぐ同期」で更新済み）から候補文書を取得</li>
-    <li>候補ごとに<code>drive_client.py</code>で質問者本人のDrive閲覧権限を確認し、権限なしは除外（キャッシュは数分程度まで許容）</li>
+    <li><s>候補ごとに<code>drive_client.py</code>で質問者本人のDrive閲覧権限を確認し、権限なしは除外（キャッシュは数分程度まで許容）</s><span class="diff-new">質問のたびの権限確認は行わない。チャンネルの参加者全員が参照範囲の全文書の閲覧者であることを、参照範囲の追加・非公開チャンネルへの招待・文書の閲覧者変更の時点で<code>services/doc_permissions.py</code>が保証しているため（基本設計書8.2節）</span></li>
     <li>残った候補のうち当該チャンネルのT-10範囲内のもののみをAIに渡す（範囲外は9.2節のout_of_scope_policyに従う、基本設計書8.2節）</li>
     <li>回答生成後、根拠文書をT-07 message_blocks（citation）として保存</li>
   </ol>

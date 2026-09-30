@@ -52,6 +52,7 @@
       <tr class="diff-new"><td>1.21</td><td>2026-09-30</td><td>日程調整（ユーザーからの明示的な要望、要件定義書上のF-xxに対応付けられていない新規機能）に伴い、アンケート（T-29 polls/poll_options/poll_votes、2026-09-18実装）に<code>polls.kind</code>・<code>polls.decided_option_id</code>・<code>poll_options.starts_on</code>を追加し、新規T-32 poll_schedule_respondents・poll_schedule_answersを追加した（3.21節）。T-29自体は本書に未記載だったため、3.21節に日程調整に関わる範囲で合わせて記載した。</td></tr>
       <tr class="diff-new"><td>1.22</td><td>2026-09-30</td><td>アンケートの複数回答（ユーザーからの明示的な要望）に伴い、T-29 pollsに<code>allow_multiple</code>を追加し、poll_votesの主キーを(poll_id, user_id)から(option_id, user_id)へ変更した（3.21節）。単一選択の「1人1票」はAPIで保証する。</td></tr>
       <tr class="diff-new"><td>1.23</td><td>2026-09-30</td><td>メンションの催促を既定でオンにした（ユーザーからの明示的な要望）。T-08の<code>mention_reminder_enabled</code>の既定値をtrue、<code>mention_reminder_enabled_at</code>の既定値をnow()にし、既存チャンネルもT-31 app_migrationsで一括でtrueにした（切り替えた時刻より前のメンションは催促しない）。</td></tr>
+      <tr class="diff-new"><td>1.24</td><td>2026-09-30</td><td>3.9節に、実装済みで未記載だったT-09 doc_foldersの<code>is_restricted</code>列と、新規T-24 doc_folder_viewers（限定公開の文書の閲覧者）を追記した（要件定義書v1.31 5.1節の代替方式、基本設計書8.2節）。</td></tr>
     </tbody>
   </table>
 
@@ -236,11 +237,16 @@
       <tr><td>T-09</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
       <tr class="diff-new"><td>T-09</td><td>item_type</td><td>TEXT</td><td>NOT NULL</td><td>'folder'</td><td>CHECK IN ('folder','file')</td></tr>
       <tr class="diff-new"><td>T-09</td><td>parent_folder_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→doc_folders.id（自己参照、ON DELETE CASCADE）。CHECK (item_type='folder' AND parent_folder_id IS NULL) OR (item_type='file' AND parent_folder_id IS NOT NULL)</td></tr>
+      <tr class="diff-new"><td>T-09</td><td>is_restricted</td><td>BOOLEAN</td><td>NOT NULL</td><td>false</td><td>true＝限定公開（T-24に登録された閲覧者のみ閲覧可）。フォルダ・ファイルの行ごとに持つ</td></tr>
       <tr><td>T-10</td><td>channel_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→channels.id、複合PK(channel_id, folder_id)</td></tr>
       <tr><td>T-10</td><td>folder_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→doc_folders.id（フォルダ・フォルダ内の個別ファイルのいずれのidも指す）</td></tr>
       <tr><td>T-10</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
+      <tr class="diff-new"><td>T-24</td><td>folder_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→doc_folders.id（ON DELETE CASCADE）、複合PK(folder_id, user_id)</td></tr>
+      <tr class="diff-new"><td>T-24</td><td>user_id</td><td>BIGINT</td><td>NOT NULL</td><td>-</td><td>FK→users.id（ON DELETE CASCADE）</td></tr>
+      <tr class="diff-new"><td>T-24</td><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>
   </table>
+  <p class="muted diff-new">T-24 doc_folder_viewersは、限定公開（is_restricted=true）の文書を閲覧できる利用者の一覧。全社公開の文書では使わない。「チャンネルの参加者全員が参照範囲の全文書の閲覧者である」ことを参照範囲の追加・招待・閲覧者変更の時点で強制する判定は<code>services/doc_permissions.py</code>に集約している（基本設計書8.2節「設計判断」）。</p>
   <div class="callout diff-new">
     <strong>設計判断（フォルダ内の特定ファイルだけを参照範囲に含める機能をT-09の拡張で実現した理由）:</strong>
     ユーザーからの明示的な要望。実際のGoogle Drive APIでフォルダの中身を自動列挙する方式（画面モックアップS-06が想定する形）は、Drive OAuthスコープの全社展開・GCP側のDrive API有効化のいずれも千田氏との協議待ちで未解決のため見送り、フォルダ登録（A-39）と同じ「URL/IDの手動貼り付け」方式のまま個別ファイルも登録できるようにした（着手前にユーザーへ確認し、この方式を選択）。新規テーブルを追加せずT-09にitem_type/parent_folder_idを追加したのは、T-10 channel_doc_foldersが「idの集合を洗い替える」既存の仕組み（A-27）をそのまま使い回すため（ファイルもフォルダも「参照範囲の1項目」という点では同じで、検索対象を区別する必要が生じるのは実際のAI検索実装時）。drive_folder_id/drive_folder_name列はitem_type='file'の行でもそのまま使う（新規に列を増やさない）。
