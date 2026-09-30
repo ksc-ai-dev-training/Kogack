@@ -401,23 +401,38 @@ export default function Composer({
   // マウント時1回だけ下書きを復元する（Composerは会話が変わるたびkey propで再マウントされる
   // 既存設計、2026-09-14）。useLayoutEffectにするのは、復元前の空表示・復元後の高さ再計算前の
   // 状態が一瞬でも画面に見えてしまうのを防ぐため（既存のリサイズ処理と同じ理由）。
+  // 復元した本文に含まれる確定済みメンション（と@チャンネルAI名）へ、候補から選んだときと同じ
+  // ハイライトを付け直す。貼り付け時（handlePaste）と同じく、書式のライブプレビュー同期
+  // （refreshEditorHousekeeping）より前に呼ぶこと——同期後は書式要素の境界に置かれる不可視の
+  // 目印文字の分だけ位置がずれ、ハイライトが1文字手前から始まってしまった（実機Playwrightで確認）。
+  // バグ修正（2026-09-30、ユーザーからの報告「メンションを入れた未送信の状態で他の画面へ移って
+  // 戻ると、@名前の青いハイライトが消えている」）: 以前は発言編集（initialBody）の復元でしか
+  // 付け直しておらず、下書き（draftKey）の復元と、カスタム絵文字読み込み後の再構築（下の
+  // useEffect）ではメンション情報（mentions state）は残っていても表示だけが消えていた
+  const aiCandidateName = mentionCandidates?.find((c) => c.isAi)?.name
+  // 直近の付け直しで使ったチャンネルAI名（下のuseEffectで、AI名の読み込みが遅れた場合の追いかけに使う）
+  const aiHighlightAppliedForRef = useRef<string | undefined>(undefined)
+  const rehighlightRestoredMentions = (root: HTMLElement, restored: MentionPayload[]) => {
+    aiHighlightAppliedForRef.current = aiCandidateName
+    const needles = [
+      ...restored.map((m) => `@${m.display_name_snapshot}`),
+      ...(aiCandidateName ? [`@${aiCandidateName}`] : []),
+    ]
+    if (needles.length > 0) highlightMentionsInRange(root, 0, domToPlainText(root).length, needles)
+  }
+
   useLayoutEffect(() => {
     const root = editorRef.current
     if (!root) return
     if (draftKey) {
       const draft = getDraft(draftKey)
-      if (draft.body) root.replaceChildren(deserializeFromText(draft.body, customEmoji))
+      if (draft.body) {
+        root.replaceChildren(deserializeFromText(draft.body, customEmoji))
+        rehighlightRestoredMentions(root, draft.mentions)
+      }
     } else if (initialBody) {
       root.replaceChildren(deserializeFromText(initialBody, customEmoji))
-      // initialBodyに含まれる確定済みメンション（と@チャンネルAI名）は、候補から選んだときと同じ
-      // ハイライトを付け直す。貼り付け時（handlePaste）と同じく、書式のライブプレビュー同期
-      // （下のrefreshEditorHousekeeping）より前に行う——同期後は書式要素の境界に置かれる不可視の
-      // 目印文字の分だけ位置がずれ、ハイライトが1文字手前から始まってしまった（実機Playwrightで確認）。
-      const needles = [
-        ...(initialMentions ?? []).map((m) => `@${m.display_name_snapshot}`),
-        ...(mentionCandidates ?? []).filter((c) => c.isAi).map((c) => `@${c.name}`),
-      ]
-      if (needles.length > 0) highlightMentionsInRange(root, 0, domToPlainText(root).length, needles)
+      rehighlightRestoredMentions(root, initialMentions ?? [])
     }
     // setHasContent+resizeEditorを直接呼ぶのではなくrefreshEditorHousekeeping経由にする
     // （バグ修正: 直接呼んでいた当時はここが書式のライブプレビュー同期を経由せず、復元直後の
@@ -461,9 +476,32 @@ export default function Composer({
     const currentText = domToMarkdown(root)
     if (!currentText) return
     root.replaceChildren(deserializeFromText(currentText, customEmoji))
+    // 利用者はまだ編集していない（上のhasUserEditedRef判定）ため、mentionsはマウント時に復元した値のまま
+    rehighlightRestoredMentions(root, mentions)
     refreshEditorHousekeeping()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customEmojiLoading])
+
+  // チャンネルAI名（メンション候補）はチャンネル情報の非同期読み込み後に届くことがあり、マウント時の
+  // 復元に間に合わないと、復元した本文中の「@チャンネルAI名」だけハイライトされたりされなかったり
+  // した（実機Playwrightで確認）。届いた時点で、利用者がまだ編集していなければ付け直す。
+  // highlightMentionsInRangeは既存のハイライトの中まで再度包んでしまうため、上の絵文字の追いかけ
+  // 変換と同じく本文をいったん組み立て直してから全体を付け直す
+  useEffect(() => {
+    if (!aiCandidateName || aiHighlightAppliedForRef.current === aiCandidateName) return
+    aiHighlightAppliedForRef.current = aiCandidateName
+    if (hasUserEditedRef.current) return
+    const root = editorRef.current
+    if (!root || (!draftKey && !initialBody)) return
+    const currentText = domToMarkdown(root)
+    if (!currentText.includes(`@${aiCandidateName}`)) return
+    root.replaceChildren(deserializeFromText(currentText, customEmoji))
+    rehighlightRestoredMentions(root, mentions)
+    refreshEditorHousekeeping()
+    // 組み立て直しでカーソルが失われるため、マウント時（autoFocus）と同じく末尾へ戻す
+    if (document.activeElement === root) setSelectionOffsets(root, domToPlainText(root).length)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiCandidateName])
 
   // 下書きの永続化（ユーザーからの明示的な要望）。setBodyという単一の変更点が無くなったため、
   // 「内容が変わったことを示す軽量なカウンタ」contentVersionと、React stateのままのmentionsを
