@@ -1359,7 +1359,7 @@ function AutoResponseSection({
       {rules.length === 0 ? (
         <p className="mb-5 text-[12px] text-ink-subtle">依頼の種類はまだ登録されていません。</p>
       ) : (
-        <div className="mb-5 overflow-hidden rounded-[10px] border border-line">
+        <div className="mb-5 overflow-hidden rounded-[10px] border border-line-strong bg-surface shadow-[0_1px_3px_rgba(16,24,40,0.08)]">
           <table className="w-full text-left text-[12.5px]">
             <thead className="bg-surface-subtle text-[11px] text-ink-subtle">
               <tr>
@@ -1445,7 +1445,7 @@ function AutoResponseSection({
           }}
           placeholder="例: 給与・人事評価の個別相談"
           maxLength={100}
-          className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+          className="flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
         />
         <button
           type="button"
@@ -1598,7 +1598,7 @@ function SkillsSection({
       <ul className="mb-6 space-y-2.5">
         {settings.skills.length === 0 && <p className="text-[12px] text-ink-subtle">スキルはまだありません。</p>}
         {settings.skills.map((skill) => (
-          <li key={skill.id} className="rounded-[10px] border border-line px-3.5 py-3">
+          <li key={skill.id} className="rounded-[10px] border border-line-strong bg-surface px-3.5 py-3 shadow-[0_1px_3px_rgba(16,24,40,0.08)]">
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-bold text-ink">{skill.title}</span>
               <span
