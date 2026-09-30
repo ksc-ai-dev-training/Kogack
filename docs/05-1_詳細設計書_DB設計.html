@@ -51,6 +51,7 @@
       <tr class="diff-new"><td>1.20</td><td>2026-09-29</td><td>メンションの催促で、スレッドを使わずチャンネル本体で返事をした場合も反応とみなせるよう、送り主への@付き発言のルールとAIによる返事判定を追加した（ユーザーとの合意）。T-30に<code>outcome</code>列を追加し、3.19節に判定の仕様と精度評価の結果を追記した。</td></tr>
       <tr class="diff-new"><td>1.21</td><td>2026-09-30</td><td>日程調整（ユーザーからの明示的な要望、要件定義書上のF-xxに対応付けられていない新規機能）に伴い、アンケート（T-29 polls/poll_options/poll_votes、2026-09-18実装）に<code>polls.kind</code>・<code>polls.decided_option_id</code>・<code>poll_options.starts_on</code>を追加し、新規T-32 poll_schedule_respondents・poll_schedule_answersを追加した（3.21節）。T-29自体は本書に未記載だったため、3.21節に日程調整に関わる範囲で合わせて記載した。</td></tr>
       <tr class="diff-new"><td>1.22</td><td>2026-09-30</td><td>アンケートの複数回答（ユーザーからの明示的な要望）に伴い、T-29 pollsに<code>allow_multiple</code>を追加し、poll_votesの主キーを(poll_id, user_id)から(option_id, user_id)へ変更した（3.21節）。単一選択の「1人1票」はAPIで保証する。</td></tr>
+      <tr class="diff-new"><td>1.23</td><td>2026-09-30</td><td>メンションの催促を既定でオンにした（ユーザーからの明示的な要望）。T-08の<code>mention_reminder_enabled</code>の既定値をtrue、<code>mention_reminder_enabled_at</code>の既定値をnow()にし、既存チャンネルもT-31 app_migrationsで一括でtrueにした（切り替えた時刻より前のメンションは催促しない）。</td></tr>
     </tbody>
   </table>
 
@@ -216,9 +217,9 @@
       <tr><td>out_of_scope_policy</td><td>TEXT</td><td>NOT NULL</td><td><span class="diff-new">'general'</span></td><td>CHECK IN ('strict','general')（F-11）<span class="diff-new">。2026-09-29に既定を'strict'から'general'へ変更し、既存行も一括で切り替えた（T-31で1回だけ実行）</span></td></tr>
       <tr><td>fallback_handoff_user_id</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。NULL時は当該チャンネルchadminへ引き継ぐ（F-17）</td></tr>
       <tr class="diff-new"><td>ai_model</td><td>TEXT</td><td>NOT NULL</td><td>'gpt-5-mini'</td><td>同日中に既定をgpt-5-miniへ変更（ユーザーからの要望）。2026-09-17追加。当初はNULL可（NULL＝AI_MODEL環境変数の既定値を使う間接参照）だったが、同日中にユーザーの要望で「既定を使う」という抽象的な選択肢自体を撤去し、常に具体的なモデル名を持つNOT NULL DEFAULT 'gpt-4.1-nano'へ変更した。選択肢はDBのCHECK制約では縛らずAPI層（services/ai_client.MODEL_COSTSのキー集合）で検証する</td></tr>
-      <tr class="diff-new"><td>mention_reminder_enabled</td><td>BOOLEAN</td><td>NOT NULL</td><td>false</td><td>2026-09-29追加。メンションの催促の有効/無効（A-77、3.19節）</td></tr>
+      <tr class="diff-new"><td>mention_reminder_enabled</td><td>BOOLEAN</td><td>NOT NULL</td><td>true</td><td>2026-09-29追加。メンションの催促の有効/無効（A-77、3.19節）。2026-09-30に既定をfalseからtrueへ変更し、既存チャンネルも一括でtrueにした（T-31 app_migrationsで初回の起動だけ働く一度きりの移行）</td></tr>
       <tr class="diff-new"><td>mention_reminder_hours</td><td>INT</td><td>NOT NULL</td><td>24</td><td>2026-09-29追加。催促までの待ち時間（時間）。CHECK 1〜168</td></tr>
-      <tr class="diff-new"><td>mention_reminder_enabled_at</td><td>TIMESTAMPTZ</td><td>NULL可</td><td>-</td><td>2026-09-29追加。最後にオフ→オンへ切り替えた時刻。これより前のメンションは催促しない</td></tr>
+      <tr class="diff-new"><td>mention_reminder_enabled_at</td><td>TIMESTAMPTZ</td><td>NULL可</td><td>now()</td><td>2026-09-29追加。最後にオフ→オンへ切り替えた時刻。これより前のメンションは催促しない（既定値now()は2026-09-30追加。行の作成時点からオンのため）</td></tr>
       <tr><td>updated_by</td><td>BIGINT</td><td>NULL可</td><td>-</td><td>FK→users.id。監査ログの参照元</td></tr>
       <tr><td>created_at / updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>now()</td><td>-</td></tr>
     </tbody>

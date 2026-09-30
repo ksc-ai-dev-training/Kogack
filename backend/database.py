@@ -965,7 +965,7 @@ ALTER TABLE poll_schedule_answers ENABLE ROW LEVEL SECURITY;
 -- メンションの催促（ユーザーからの明示的な要望「メンションを受けたのに一定時間たっても返信も
 -- リアクションもしていないユーザーに、AIが自動的に催促・リマインドする機能」、2026-09-29。
 -- 要件定義書上のF-xxに対応付けられていない新規機能）。チャンネルごとの設定はT-08へ列を足す
--- （S-06「反応モード」タブ、A-77）。既定はオフ。mention_reminder_enabled_atはオンにした時刻で、
+-- （S-06「反応モード」タブ、A-77）。既定は当初オフ（2026-09-30にオンへ変更、下記）。mention_reminder_enabled_atはオンにした時刻で、
 -- これより前のメンションは催促しない（オンにした直後に過去の未反応メンションがまとめて催促される
 -- のを防ぐ）。ADD COLUMN IF NOT EXISTSは列が既にあれば丸ごとスキップされるため、インラインの
 -- CHECK制約も含めて毎起動実行しても冪等
@@ -973,6 +973,22 @@ ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS mention_reminder_enable
 ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS mention_reminder_hours INT NOT NULL DEFAULT 24
     CHECK (mention_reminder_hours BETWEEN 1 AND 168);
 ALTER TABLE channel_ai_settings ADD COLUMN IF NOT EXISTS mention_reminder_enabled_at TIMESTAMPTZ;
+-- 既定をオンに変更（ユーザーからの明示的な要望「AIの返信催促機能を、デフォルトでONにしたい」、
+-- 2026-09-30）。既存チャンネルも一括でオンにする（ユーザーに確認済み）。新しく作られる行は
+-- mention_reminder_enabled=trueと、オンにした時刻としてmention_reminder_enabled_at=now()を
+-- 既定で持つ（enabled_atがNULLのままだと services/mention_reminder.py の
+-- 「m.created_at >= enabled_at」が常に偽になり、オンなのに催促されないため）。既存チャンネルの
+-- 切り替えはapp_migrationsで初回の起動だけ働く形にし、その後に管理者がオフにしたチャンネルを
+-- 起動のたびにオンへ戻さないようにする。切り替えた時刻より前のメンションは催促しない
+ALTER TABLE channel_ai_settings ALTER COLUMN mention_reminder_enabled SET DEFAULT true;
+ALTER TABLE channel_ai_settings ALTER COLUMN mention_reminder_enabled_at SET DEFAULT now();
+WITH first_run AS (
+    INSERT INTO app_migrations (name) VALUES ('2026-09-30_mention_reminder_default_on')
+    ON CONFLICT (name) DO NOTHING RETURNING name
+)
+UPDATE channel_ai_settings
+    SET mention_reminder_enabled = true, mention_reminder_enabled_at = now(), updated_at = now()
+    WHERE NOT mention_reminder_enabled AND EXISTS (SELECT 1 FROM first_run);
 
 -- T-30 mention_reminders: 催促済みの（発言, 対象者）の記録。1件のメンションにつき催促は1回だけに
 -- するための重複防止（UNIQUE）を兼ねる。催促の発言自体はT-05にsender_type='ai'で投稿し、その
