@@ -36,6 +36,7 @@ import {
   getCodeBlockElementAtSelection,
   getBlockFormatKindAtSelection,
   getFormatsAtCaret,
+  insertFormatShellAtCaret,
   getInlineCodeElementAt,
   convertLinesToListItems,
   convertLinesToQuote,
@@ -322,6 +323,9 @@ export default function Composer({
   // 更新しない——合成の途中経過ごとに更新すると、合成が確定した時点で「合成開始前からの
   // 増加分」ではなく「合成の最後の1コマからの増加分」しか測れなくなるため。
   const prevPlainTextLengthRef = useRef(0)
+  // IME変換の開始直前に保留書式から先に作った実要素（insertFormatShellAtCaret）。変換をEsc等で
+  // 取り消して何も確定しなかった場合に、保留状態（pendingFormats）へ戻すために覚えておく。
+  const imeFormatShellRef = useRef<{ el: HTMLElement; formats: ToggleFormatKind[] } | null>(null)
 
   const canSchedule = !!(scheduleTarget?.channel_id || scheduleTarget?.dm_id)
 
@@ -606,6 +610,15 @@ export default function Composer({
     const root = editorRef.current
     if (!root) return
     removeCaretMarkerFromDom(root)
+    // 変換開始前に作った書式の要素に何も確定されなかった（Escで取り消した等）場合は、空の要素を
+    // 消してボタンを保留状態へ戻す（ボタンを押しただけで何も入力していない状態と同じにする）
+    const shell = imeFormatShellRef.current
+    imeFormatShellRef.current = null
+    if (shell && root.contains(shell.el) && !shell.el.textContent) {
+      shell.el.remove()
+      setActiveFormats((prev) => prev.slice(0, prev.length - shell.formats.length))
+      setPendingFormats(shell.formats)
+    }
     materializePendingFormats(root)
     runPostInputChecks(root)
     afterMutate()
@@ -1233,6 +1246,20 @@ export default function Composer({
     // ブラウザのネイティブなIME処理にそのまま委ねる（Planサブエージェントの設計精査で
     // 指摘された、この種の実装で最も起きやすい不具合クラスへの対処）。
     if ((e.nativeEvent as KeyboardEvent).isComposing) return
+
+    // IME変換の開始直前（変換開始前のkeydownはkeyCode 229で届き、まだisComposingはfalse）に、
+    // 保留中の書式の実要素を先に作ってカーソルをその内側へ入れる。変換中の（未確定の）文字から
+    // 太字等で表示されるようにするため（composerEditing.tsのinsertFormatShellAtCaret参照）。
+    // この時点ではまだ変換が始まっていないため、DOMを書き換えても変換は壊れない。
+    if (e.nativeEvent.keyCode === 229 && pendingFormats.length > 0 && editorRef.current) {
+      const el = insertFormatShellAtCaret(editorRef.current, pendingFormats)
+      if (el) {
+        imeFormatShellRef.current = { el, formats: pendingFormats }
+        setActiveFormats((prev) => [...prev, ...pendingFormats])
+        setPendingFormats([])
+      }
+      return
+    }
 
     if (emojiOpen && e.key === 'Escape') {
       setEmojiOpen(false)
