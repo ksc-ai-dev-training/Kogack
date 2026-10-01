@@ -460,6 +460,15 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p class="diff-new"><strong>A-41 <span class="badge badge-post">POST</span> /api/admin/doc-folders/sync</strong></p>
   <p class="muted diff-new">未実装（F-22の索引・埋め込みベクトル生成、基本設計書8.2節）。S-08の「今すぐ同期」ボタンは無効表示のままとし、次のスライス（Drive OAuthスコープ拡張・埋め込みAPI呼び出しを実装するスライス）で対応する。</p>
 
+  <p><strong><span class="badge badge-post">POST</span> /api/admin/doc-folders/usable-channels（公開範囲の設定画面用、ID未採番）</strong></p>
+  <pre><code>// request
+{ "viewer_user_ids": ["7", "12"] }
+// response 200
+{ "usable": [ { "id": "42", "name": "人事チーム", "member_count": 2 } ],
+  "near_miss": [ { "id": "43", "name": "人事・総務", "member_count": 3,
+                   "missing": [ { "id": "15", "name": "佐藤 花子" } ] } ] }</code></pre>
+  <p class="muted">S-08で参照ドキュメントの公開範囲（限定公開の閲覧者）を選ぶ画面が、「その閲覧者にした場合に参照範囲へ追加できるチャンネル」をその場で示すために使う（admin限定）。<code>usable</code>は参加者全員が閲覧者に含まれる非公開チャンネル（A-27の割当条件と同じ）、<code>near_miss</code>は足りない参加者が3人以下のチャンネルで、足りない人を<code>missing</code>に添える（無効化済みの参加者が足りない場合は閲覧者に追加できないため含めない）。限定公開（<code>is_restricted=true</code>）で有効な閲覧者が1人もいない指定は、登録（A-39・アップロード）・閲覧者編集のいずれも422で拒否する。</p>
+
   <p><strong>A-42 <span class="badge badge-get">GET</span> /api/admin/usage</strong></p>
   <pre><code>GET /api/admin/usage?month=2026-08
 // response 200

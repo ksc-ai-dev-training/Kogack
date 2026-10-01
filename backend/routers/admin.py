@@ -139,15 +139,18 @@ def _doc_folders_query(where: str = "") -> str:
                f.is_restricted, f.index_status, f.index_error,
                u.name AS added_by_name,
                COALESCE(cdf_agg.channel_count, 0) AS channel_count,
-               COALESCE(viewer_agg.viewer_ids, ARRAY[]::bigint[]) AS viewer_ids
+               COALESCE(viewer_agg.viewer_ids, ARRAY[]::bigint[]) AS viewer_ids,
+               COALESCE(viewer_agg.viewer_names, ARRAY[]::text[]) AS viewer_names
         FROM doc_folders f
         JOIN users u ON u.id = f.added_by
         LEFT JOIN (
             SELECT folder_id, COUNT(*) AS channel_count FROM channel_doc_folders GROUP BY folder_id
         ) cdf_agg ON cdf_agg.folder_id = f.id
         LEFT JOIN (
-            SELECT folder_id, array_agg(user_id ORDER BY user_id) AS viewer_ids
-            FROM doc_folder_viewers GROUP BY folder_id
+            SELECT v.folder_id,
+                   array_agg(v.user_id ORDER BY u.name, v.user_id) AS viewer_ids,
+                   array_agg(u.name ORDER BY u.name, v.user_id) AS viewer_names
+            FROM doc_folder_viewers v JOIN users u ON u.id = v.user_id GROUP BY v.folder_id
         ) viewer_agg ON viewer_agg.folder_id = f.id
         {where}
         ORDER BY f.parent_folder_id NULLS FIRST, f.created_at
@@ -171,11 +174,30 @@ def _doc_folder_out(row) -> dict:
         # 閲覧権限モデル（Slice 2b、2026-09-09）。is_restricted=falseならviewer_user_idsは常に空。
         "is_restricted": row["is_restricted"],
         "viewer_user_ids": [str(uid) for uid in row["viewer_ids"]],
+        # 閲覧者の氏名（2026-10-01、ユーザーからの指摘「誰に閲覧権限があるのか名前が分からない
+        # （1，2，3と書かれている）」）。従来はidしか返さず、閲覧権限の編集画面が既存の閲覧者を
+        # 氏名に変換できずidをそのまま表示していた。viewer_user_idsと同じ並び（氏名順）
+        "viewers": [
+            {"id": str(uid), "name": name} for uid, name in zip(row["viewer_ids"], row["viewer_names"])
+        ],
         # 索引化（Slice 3、2026-09-09）。'not_applicable'（source='drive'、索引化非対応）/
         # 'pending'/'indexing'/'ready'/'failed'
         "index_status": row["index_status"],
         "index_error": row["index_error"],
     }
+
+
+async def _require_viewers(conn, is_restricted: bool, viewer_ids: set[int]) -> None:
+    """限定公開にするのに、有効な閲覧者が1人もいない指定を拒否する（2026-10-01、ユーザーからの要望）。
+    従来は閲覧者0人のまま限定公開にでき、誰も閲覧できずどのチャンネルにも割り当てられない文書が
+    黙って作られていた。_set_viewersと同じく無効化済みの利用者は数えない"""
+    if not is_restricted:
+        return
+    valid = await conn.fetchval(
+        "SELECT count(*) FROM users WHERE id = ANY($1::bigint[]) AND is_active", list(viewer_ids)
+    )
+    if not valid:
+        raise HTTPException(422, detail="限定公開にする場合は、閲覧できる人を1人以上選んでください")
 
 
 async def _set_viewers(conn, folder_id: int, is_restricted: bool, viewer_ids: set[int]) -> None:
@@ -254,6 +276,7 @@ async def create_doc_folder(body: CreateDocFolderRequest, user: CurrentUser = De
         raise HTTPException(422, detail="viewer_user_idsは数値のIDです")
 
     async with pool.acquire() as conn, conn.transaction():
+        await _require_viewers(conn, body.is_restricted, viewer_ids)
         new_id = await conn.fetchval(
             """INSERT INTO doc_folders
                    (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id, is_restricted)
@@ -293,6 +316,7 @@ async def create_upload_folder(
     except ValueError:
         raise HTTPException(422, detail="viewer_user_idsは数値のIDです")
     async with pool.acquire() as conn, conn.transaction():
+        await _require_viewers(conn, body.is_restricted, viewer_ids)
         new_id = await conn.fetchval(
             """INSERT INTO doc_folders
                    (drive_folder_id, drive_folder_name, added_by, item_type, parent_folder_id,
@@ -342,6 +366,8 @@ async def upload_doc_file(
         if parent["item_type"] != "folder" or parent["source"] != "upload":
             raise HTTPException(422, detail="登録先には、アップロードで作成したフォルダを指定してください")
 
+    # 実ファイルを保存する前に確かめる（拒否したのにファイルだけVolumeに残らないように）
+    await _require_viewers(pool, is_restricted, viewer_ids)
     data = await file.read()
     if len(data) > _DOC_UPLOAD_MAX_BYTES:
         raise HTTPException(400, detail="ファイルサイズは20MBまでです")
@@ -485,6 +511,7 @@ async def update_doc_folder_viewers(
                     422,
                     detail=f"公開チャンネルが参照しているため限定公開にできません。先に各チャンネルの参照ドキュメント範囲から外してください: {names}",
                 )
+        await _require_viewers(conn, body.is_restricted, viewer_ids)
         effective_viewer_ids = viewer_ids if body.is_restricted else set()
         affected = (
             await doc_permissions.channels_missing_access_for_folder(conn, folder_id, effective_viewer_ids)
@@ -509,6 +536,57 @@ async def update_doc_folder_viewers(
 
     row = await pool.fetchrow(_doc_folders_query("WHERE f.id = $1"), folder_id)
     return _doc_folder_out(row)
+
+
+class UsableChannelsRequest(BaseModel):
+    viewer_user_ids: list[str] = Field(default_factory=list)
+
+
+# 「あと少しで使える」チャンネルとして示す、閲覧権限の足りない参加者の人数の上限
+_NEAR_MISS_MAX_MISSING = 3
+
+
+@router.post("/doc-folders/usable-channels")
+async def usable_channels(body: UsableChannelsRequest, user: CurrentUser = Depends(require_roles("admin"))):
+    """新規: 公開範囲の設定画面で「この閲覧者にした場合、どのチャンネルの参照範囲に使えるか」を
+    その場で示すための判定（2026-10-01、ユーザーからの要望。従来は限定公開にしたあと、どこで
+    使えるのか画面から分からなかった）。限定公開の文書は「参加者全員が閲覧者に含まれる非公開
+    チャンネル」にだけ割り当てられる（ai_settings.pyのA-27・doc_permissions.members_missing_access
+    と同じ条件）。usableはその条件を満たすチャンネル、near_missは閲覧者を少し足せば使える
+    チャンネル（足りない参加者が_NEAR_MISS_MAX_MISSING人以下）で、足りない人の氏名を添える。
+    全員に公開する場合は全チャンネルで使えるため、画面側はこのAPIを呼ばない"""
+    try:
+        viewer_ids = [int(x) for x in body.viewer_user_ids]
+    except ValueError:
+        raise HTTPException(422, detail="viewer_user_idsは数値のIDです")
+    rows = await get_pool().fetch(
+        """SELECT c.id, c.name, count(*) AS member_count,
+                  COALESCE(array_agg(u.name ORDER BY u.name)
+                           FILTER (WHERE NOT (cm.user_id = ANY($1::bigint[]))), ARRAY[]::text[]) AS missing_names,
+                  COALESCE(array_agg(cm.user_id ORDER BY u.name)
+                           FILTER (WHERE NOT (cm.user_id = ANY($1::bigint[]))), ARRAY[]::bigint[]) AS missing_ids,
+                  bool_or(NOT u.is_active AND NOT (cm.user_id = ANY($1::bigint[]))) AS missing_inactive
+           FROM channels c
+           JOIN channel_members cm ON cm.channel_id = c.id
+           JOIN users u ON u.id = cm.user_id
+           WHERE NOT c.is_public
+           GROUP BY c.id, c.name
+           ORDER BY c.name""",
+        viewer_ids,
+    )
+    usable, near_miss = [], []
+    for r in rows:
+        missing = len(r["missing_ids"])
+        item = {"id": str(r["id"]), "name": r["name"], "member_count": r["member_count"]}
+        if missing == 0:
+            usable.append(item)
+        elif missing <= _NEAR_MISS_MAX_MISSING and missing < r["member_count"] and not r["missing_inactive"]:
+            # 無効化済みの参加者は閲覧者に追加できない（_set_viewersが除外する）ため候補にしない
+            near_miss.append({
+                **item,
+                "missing": [{"id": str(i), "name": n} for i, n in zip(r["missing_ids"], r["missing_names"])],
+            })
+    return {"usable": usable, "near_miss": near_miss}
 
 
 def _month_range(month: str | None) -> tuple[datetime, datetime, str]:

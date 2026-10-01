@@ -499,6 +499,8 @@ export interface DocFolder {
   // 閲覧権限モデル（Slice 2b、2026-09-09）。is_restricted=falseならviewer_user_idsは常に空。
   is_restricted: boolean
   viewer_user_ids: string[]
+  // 閲覧者の氏名（viewer_user_idsと同じ並び・氏名順）。一覧・閲覧権限の編集画面で名前を表示する
+  viewers: { id: string; name: string }[]
   // 索引化（Slice 3、2026-09-09）。'not_applicable'（source='drive'）/'pending'/'indexing'/'ready'/'failed'
   index_status: 'not_applicable' | 'pending' | 'indexing' | 'ready' | 'failed'
   index_error: string | null

@@ -419,87 +419,296 @@ function UsersTab({ me }: { me: Me | null }) {
 // A-38〜A-40: ドキュメント参照範囲タブ本体（F-22）。このスライスはフォルダの登録・削除のみを
 // 対象とし、「今すぐ同期」（A-41、実際のDrive同期・埋め込み索引生成）は次スライスで実装するため
 // ここではボタンを無効表示に留める（CLAUDE.md実装状況節）
-// 閲覧権限モデル（Slice 2b、2026-09-09）の閲覧者選択UI。DmPickerModal（補足02）の利用者検索と
-// 同じパターン（200msデバウンス、/api/users?q=）を、チェックボックス複数選択向けに簡略化して
-// 再利用する。全社員（最大200名）をチェックボックスで並べるのではなく、検索して選ぶ方式にする。
-function ViewerPicker({
-  selectedIds, onChange,
-}: {
-  selectedIds: Set<string>
-  onChange: (next: Set<string>) => void
-}) {
-  const [q, setQ] = useState('')
-  const [results, setResults] = useState<{ id: string; name: string; email: string }[]>([])
-  const [selectedDetails, setSelectedDetails] = useState<Map<string, { name: string; email: string }>>(new Map())
+// 参照ドキュメントの公開範囲を決めるポップアップ（2026-10-01、ユーザーからの要望「ファイルを
+// アップロードしたときに毎回公開する範囲を決める画面が出てくる。一番上に全員公開のチェックボックス、
+// その下に閲覧者を選ぶ候補一覧」）。アップロード時（fileNamesあり）と、一覧の「閲覧権限」からの
+// 編集時の両方で使う。従来はファイル選択欄の上に「限定公開にする」チェックがあり、(1)閲覧者0人の
+// まま限定公開にできる、(2)名前を入力しないと候補が出ない、(3)今回の全ファイルに同じ設定がかかる
+// ことが分かりにくい、(4)限定公開にしたあとどのチャンネルで使えるか分からない、という問題があった。
+// 「全員に公開」も閲覧者も選んでいない間は保存できない（どちらかを必ず明示的に選ばせる）
+type ScopeViewer = { id: string; name: string }
+type UsableChannels = {
+  usable: { id: string; name: string; member_count: number }[]
+  near_miss: { id: string; name: string; member_count: number; missing: ScopeViewer[] }[]
+}
 
+function DocScopeModal({
+  title, fileNames, initialPublic, initialViewers, confirmLabel, onConfirm, onClose,
+}: {
+  title: string
+  // アップロード時のみ。今回アップロードするファイル名の一覧
+  fileNames?: string[]
+  initialPublic: boolean
+  initialViewers: ScopeViewer[]
+  confirmLabel: string
+  // 保存処理。失敗時のメッセージ表示は呼び出し元が行う（このポップアップは開いたまま）
+  onConfirm: (isRestricted: boolean, viewerIds: string[]) => Promise<void>
+  onClose: () => void
+}) {
+  const overlayClose = useOverlayClose(onClose)
+  const [isPublic, setIsPublic] = useState(initialPublic)
+  // 選択中の閲覧者（id→氏名、選んだ順）
+  const [selected, setSelected] = useState<Map<string, string>>(
+    () => new Map(initialViewers.map((v) => [v.id, v.name])),
+  )
+  const [q, setQ] = useState('')
+  const [users, setUsers] = useState<{ id: string; name: string; email: string }[] | null>(null)
+  const [usable, setUsable] = useState<UsableChannels | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  // 候補一覧は全社員（想定200名）をはじめから並べ、入力欄は絞り込みに使う
   useEffect(() => {
+    let cancelled = false
+    apiFetch<{ items: { id: string; name: string; email: string; is_active: boolean }[] }>('/api/users?limit=1000')
+      .then((res) => {
+        if (!cancelled) setUsers(res.items.filter((u) => u.is_active))
+      })
+      .catch(() => {
+        if (!cancelled) setUsers([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 選んだ閲覧者で使えるチャンネルを、選択を変えるたびに少し待ってから問い合わせる
+  const selectedKey = [...selected.keys()].sort().join(',')
+  useEffect(() => {
+    if (isPublic || selected.size === 0) {
+      setUsable(null)
+      return
+    }
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
-        const res = await apiFetch<{ items: { id: string; name: string; email: string; is_active: boolean }[] }>(
-          `/api/users?q=${encodeURIComponent(q)}`,
-        )
-        if (!cancelled) setResults(res.items.filter((u) => u.is_active))
+        const res = await apiFetch<UsableChannels>('/api/admin/doc-folders/usable-channels', {
+          method: 'POST',
+          body: JSON.stringify({ viewer_user_ids: [...selected.keys()] }),
+        })
+        if (!cancelled) setUsable(res)
       } catch {
-        // 検索失敗時は一覧を維持する
+        if (!cancelled) setUsable(null)
       }
-    }, 200)
+    }, 250)
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [q])
+    // selectedKeyで選択内容の変化を検知する（Mapは毎回新しいオブジェクトになるため）
+  }, [isPublic, selectedKey])
 
-  const toggle = (u: { id: string; name: string; email: string }) => {
-    const next = new Set(selectedIds)
-    if (next.has(u.id)) {
-      next.delete(u.id)
-    } else {
-      next.add(u.id)
-      setSelectedDetails((prev) => new Map(prev).set(u.id, { name: u.name, email: u.email }))
+  const toggle = (id: string, name: string) => {
+    setSelected((prev) => {
+      const next = new Map(prev)
+      if (next.has(id)) next.delete(id)
+      else next.set(id, name)
+      return next
+    })
+  }
+  const addAll = (viewers: ScopeViewer[]) => {
+    setSelected((prev) => {
+      const next = new Map(prev)
+      for (const v of viewers) next.set(v.id, v.name)
+      return next
+    })
+  }
+
+  const needle = q.trim().toLowerCase()
+  const filtered = (users ?? []).filter(
+    (u) => !needle || u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle),
+  )
+  const canSave = !saving && (isPublic || selected.size > 0)
+
+  const submit = async () => {
+    if (!canSave) return
+    setSaving(true)
+    try {
+      await onConfirm(!isPublic, isPublic ? [] : [...selected.keys()])
+    } finally {
+      setSaving(false)
     }
-    onChange(next)
   }
 
   return (
-    <div>
-      {selectedIds.size > 0 && (
-        <div className="mb-1.5 flex flex-wrap gap-1.5">
-          {[...selectedIds].map((id) => (
-            <span
-              key={id}
-              className="flex items-center gap-1 rounded-full bg-accent-50 px-2 py-0.5 text-[11.5px] text-accent-700"
-            >
-              {selectedDetails.get(id)?.name ?? id}
-              <button type="button" onClick={() => toggle({ id, name: '', email: '' })} className="text-accent-700">
-                ✕
-              </button>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onMouseDown={overlayClose.onMouseDown}
+      onClick={overlayClose.onClick}
+    >
+      <div
+        className="flex max-h-[90vh] w-full max-w-[560px] flex-col rounded-[12px] bg-surface shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-none items-center justify-between border-b border-line px-5 py-3.5">
+          <span className="min-w-0 truncate text-[14px] font-bold text-ink">{title}</span>
+          <button type="button" onClick={onClose} className="flex-none bg-transparent text-ink-subtle">
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {fileNames && (
+            <div className="mb-3.5 rounded-lg bg-surface-subtle px-3 py-2.5 text-[12px] text-ink-muted">
+              <div className="font-bold text-ink">アップロードするファイル（{fileNames.length}件）</div>
+              <div className="mt-0.5 truncate" title={fileNames.join('、')}>
+                {fileNames.slice(0, 5).join('、')}
+                {fileNames.length > 5 && ` ほか${fileNames.length - 5}件`}
+              </div>
+              {fileNames.length > 1 && (
+                <div className="mt-1 text-[11px] text-ink-subtle">
+                  ここで決めた公開範囲は、今回のすべてのファイルに適用されます（あとから一覧の「閲覧権限」で1件ずつ変更できます）。
+                </div>
+              )}
+            </div>
+          )}
+
+          <label
+            className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 ${isPublic ? 'border-accent-600 bg-accent-50' : 'border-line'}`}
+          >
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 flex-none"
+            />
+            <span>
+              <span className="block text-[13px] font-bold text-ink">🌐 全員に公開する（閲覧制限なし）</span>
+              <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-subtle">
+                全社員が閲覧できます。公開チャンネル・非公開チャンネルのどちらの参照範囲にも追加できます。
+              </span>
             </span>
-          ))}
+          </label>
+
+          <div className={`mt-3.5 ${isPublic ? 'pointer-events-none opacity-40' : ''}`} aria-disabled={isPublic}>
+            <div className="text-[13px] font-bold text-ink">🔒 閲覧できる人を選ぶ</div>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-subtle">
+              選んだ人だけが閲覧できます。参照範囲に追加できるのは、参加者全員がここで選んだ人に含まれる非公開チャンネルだけです（公開チャンネルには追加できません）。
+            </p>
+
+            {selected.size > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {[...selected].map(([id, name]) => (
+                  <span
+                    key={id}
+                    className="flex items-center gap-1 rounded-full bg-accent-50 px-2 py-0.5 text-[11.5px] text-accent-700"
+                  >
+                    {name}
+                    <button type="button" onClick={() => toggle(id, name)} className="bg-transparent text-accent-700" aria-label={`${name}を外す`}>
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="氏名・メールアドレスで絞り込み..."
+              disabled={isPublic}
+              className="mt-2 w-full rounded-lg border border-line-strong px-3 py-1.5 text-[12.5px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
+            />
+            <div className="mt-1.5 flex items-center justify-between text-[11px] text-ink-subtle">
+              <span>
+                {users === null ? '読み込み中…' : `${filtered.length}名を表示中・${selected.size}名を選択中`}
+              </span>
+              {selected.size > 0 && (
+                <button type="button" onClick={() => setSelected(new Map())} className="bg-transparent text-accent-700 hover:underline">
+                  選択をすべて解除
+                </button>
+              )}
+            </div>
+            <div className="mt-1 max-h-52 overflow-y-auto rounded-lg border border-line">
+              {filtered.length === 0 && users !== null && (
+                <div className="px-2.5 py-2 text-[12px] text-ink-subtle">該当する利用者がいません</div>
+              )}
+              {filtered.map((u) => (
+                <label
+                  key={u.id}
+                  className="flex cursor-pointer items-center gap-2 border-b border-line px-2.5 py-1.5 text-[12px] last:border-b-0 hover:bg-surface-subtle"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(u.id)}
+                    onChange={() => toggle(u.id, u.name)}
+                    disabled={isPublic}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="text-ink">{u.name}</span>
+                  <span className="truncate text-ink-subtle">{u.email}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="mt-3 rounded-lg bg-surface-subtle px-3 py-2.5 text-[12px] leading-relaxed text-ink-muted">
+              <div className="font-bold text-ink">この設定で参照範囲に追加できるチャンネル</div>
+              {selected.size === 0 ? (
+                <div className="mt-0.5 text-ink-subtle">閲覧できる人を選ぶと、ここに表示されます。</div>
+              ) : usable === null ? (
+                <div className="mt-0.5 text-ink-subtle">確認中…</div>
+              ) : (
+                <>
+                  <div className="mt-0.5">
+                    {usable.usable.length > 0
+                      ? usable.usable.map((c) => `#${c.name}（${c.member_count}名）`).join('、')
+                      : '条件を満たす非公開チャンネルはまだありません。'}
+                  </div>
+                  {usable.near_miss.length > 0 && (
+                    <div className="mt-2">
+                      <div className="text-[11.5px] text-ink-subtle">閲覧できる人を追加すると使えるチャンネル:</div>
+                      {usable.near_miss.map((c) => (
+                        <div key={c.id} className="mt-1 flex items-center justify-between gap-2">
+                          <span className="min-w-0">
+                            #{c.name} … あと {c.missing.map((m) => m.name).join('、')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => addAll(c.missing)}
+                            className="flex-none rounded-md border border-line-strong bg-surface px-2 py-0.5 text-[11px] font-semibold text-accent-700"
+                          >
+                            追加する
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
         </div>
-      )}
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="氏名・メールアドレスで検索..."
-        className="w-full rounded-lg border border-line-strong px-3 py-1.5 text-[12.5px] text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
-      />
-      {q && results.length > 0 && (
-        <div className="mt-1.5 max-h-32 overflow-y-auto rounded-lg border border-line">
-          {results.map((u) => (
-            <label
-              key={u.id}
-              className="flex cursor-pointer items-center gap-2 border-b border-line px-2.5 py-1.5 text-[12px] last:border-b-0 hover:bg-surface-subtle"
-            >
-              <input type="checkbox" checked={selectedIds.has(u.id)} onChange={() => toggle(u)} className="h-3.5 w-3.5" />
-              <span className="text-ink">{u.name}</span>
-              <span className="text-ink-subtle">{u.email}</span>
-            </label>
-          ))}
+
+        <div className="flex flex-none flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3">
+          {!isPublic && selected.size === 0 && (
+            <span className="mr-auto min-w-0 basis-full text-[11.5px] leading-snug text-ink-subtle sm:basis-0 sm:flex-1">
+              「全員に公開する」か、閲覧できる人を1人以上選んでください
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-none whitespace-nowrap rounded-lg border border-line-strong px-3.5 py-1.5 text-[12.5px] font-semibold text-ink-muted"
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            disabled={!canSave}
+            onClick={submit}
+            className="flex-none whitespace-nowrap rounded-lg bg-accent-600 px-3.5 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40"
+          >
+            {confirmLabel}
+          </button>
         </div>
-      )}
+      </div>
     </div>
   )
+}
+
+// 一覧の行に出す閲覧者の氏名（多い場合は先頭の数名＋「ほかN名」。全員の氏名は行のツールチップで見られる）
+function viewerSummary(viewers: { name: string }[], max = 5): string {
+  const shown = viewers.slice(0, max).map((v) => v.name).join('、')
+  return viewers.length > max ? `${shown} ほか${viewers.length - max}名` : shown
 }
 
 // フォルダごとD&D/選択したファイルの1件（2026-09-09、フォルダ単位グループ化）。folderNameは
@@ -738,10 +947,10 @@ function DocFoldersTab() {
   // 複数ファイル・フォルダごとの選択に対応（2026-09-09、ユーザーからの明示的な要望）。
   // フォルダ単位グループ化（同日、追加の要望）にともないFile[]からUploadEntry[]へ変更した
   const [uploadEntries, setUploadEntries] = useState<UploadEntry[]>([])
-  // 閲覧権限モデル（Slice 2b、2026-09-09）。新規登録時のみここで指定する（既存フォルダの
-  // 閲覧者編集は一覧の「閲覧権限」ボタン→EditViewersModalで行う）
-  const [isRestricted, setIsRestricted] = useState(false)
-  const [viewerIds, setViewerIds] = useState<Set<string>>(new Set())
+  // 公開範囲（閲覧権限モデル、Slice 2b）は「アップロード」を押したときに開くポップアップ
+  // （DocScopeModal）で毎回決める（2026-10-01、ユーザーからの要望）。既存フォルダの閲覧者編集は
+  // 一覧の「閲覧権限」ボタン→EditViewersModalで、同じポップアップを使う
+  const [scopeOpen, setScopeOpen] = useState(false)
   const [editingViewersFor, setEditingViewersFor] = useState<DocFolder | null>(null)
   // アプリ内プレビュー（2026-09-17）。対応形式（画像・PDF・プレーンテキスト）のファイルのみ対象
   const [previewTarget, setPreviewTarget] = useState<DocFolder | null>(null)
@@ -780,11 +989,16 @@ function DocFoldersTab() {
     return kb < 1024 ? `${kb.toFixed(0)}KB` : `${(kb / 1024).toFixed(1)}MB`
   }
 
-  const add = async () => {
+  const openScope = () => {
     if (uploadEntries.length === 0) {
       toast('アップロードするファイルを選んでください', 'error')
       return
     }
+    setScopeOpen(true)
+  }
+
+  const add = async (isRestricted: boolean, viewerIds: string[]) => {
+    setScopeOpen(false)
     setSaving(true)
     // バックエンドは1ファイルずつしか受け付けないため（services/doc_storage.py参照）、複数選択・
     // フォルダ選択時はここで順番に呼び出す。1件失敗しても残りは続行し（限定公開設定は全件に共通で
@@ -815,12 +1029,12 @@ function DocFoldersTab() {
         entry.displayName !== entry.file.name
           ? new File([entry.file], entry.displayName, { type: entry.file.type })
           : entry.file
-      await uploadDocFile(uploadFile, isRestricted, [...viewerIds], parentFolderId)
+      await uploadDocFile(uploadFile, isRestricted, viewerIds, parentFolderId)
     }
 
     for (const [folderName, list] of folderGroups) {
       try {
-        const folder = await createUploadDocFolder(folderName, isRestricted, [...viewerIds])
+        const folder = await createUploadDocFolder(folderName, isRestricted, viewerIds)
         for (const entry of list) {
           try {
             await uploadOne(entry, folder.id)
@@ -843,8 +1057,6 @@ function DocFoldersTab() {
     }
 
     setUploadEntries([])
-    setIsRestricted(false)
-    setViewerIds(new Set())
     await mutate()
     setSaving(false)
     if (failed === 0) {
@@ -943,8 +1155,13 @@ function DocFoldersTab() {
                   <div className="truncate text-[11.5px] text-ink-subtle">
                     {f.source === 'upload' && `${sizeOf(f)} ・ `}
                     追加: {f.added_by_name} ・ {dateOf(f)} ・ 使用中のチャンネル{f.channel_count}件
-                    {f.is_restricted && ` ・ 閲覧可能${f.viewer_user_ids.length}名`}
                   </div>
+                  {f.is_restricted && (
+                    <div className="truncate text-[11.5px] text-ink-subtle" title={f.viewers.map((v) => v.name).join('、')}>
+                      🔒 閲覧できる人（{f.viewers.length}名）:{' '}
+                      {f.viewers.length === 0 ? 'まだ誰も指定されていません' : viewerSummary(f.viewers)}
+                    </div>
+                  )}
                 </div>
               )
               const icon = isChild ? (f.source === 'upload' ? '📎' : '📄') : f.item_type === 'folder' ? '📁' : f.source === 'upload' ? '📎' : '📄'
@@ -1005,25 +1222,6 @@ function DocFoldersTab() {
 
         <div className="max-w-[640px] rounded-[10px] border border-dashed border-line-strong bg-surface-subtle px-4 py-4">
           <div className="mb-3.5 text-[12.5px] font-bold text-ink">＋ ファイルを追加</div>
-          <div className="mb-3.5 rounded-lg border border-line bg-surface px-3 py-2.5">
-            <label className="flex items-center gap-1.5 text-[12.5px] font-bold text-ink">
-              <input
-                type="checkbox"
-                checked={isRestricted}
-                onChange={(e) => setIsRestricted(e.target.checked)}
-                className="h-3.5 w-3.5"
-              />
-              🔒 限定公開にする（指定した利用者のみ閲覧可能）
-            </label>
-            <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
-              チェックしない場合は全社員が閲覧可能な扱いになり、公開チャンネルの参照範囲にも含められます。限定公開にすると、下で選んだ利用者のみが閲覧できる扱いになり、公開チャンネルの参照範囲には含められません（非公開チャンネルのみ、参加者全員が閲覧権限を持つ場合に含められます）。
-            </p>
-            {isRestricted && (
-              <div className="mt-2.5">
-                <ViewerPicker selectedIds={viewerIds} onChange={setViewerIds} />
-              </div>
-            )}
-          </div>
           <div className="mb-3.5">
             <label className="mb-1.5 block text-[12.5px] font-bold text-ink-muted">ファイル</label>
             <FileDropzone entries={uploadEntries} onChange={setUploadEntries} />
@@ -1034,13 +1232,25 @@ function DocFoldersTab() {
           <button
             type="button"
             disabled={saving}
-            onClick={add}
+            onClick={openScope}
             className="rounded-lg bg-accent-600 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
           >
-            📎 アップロード
+            {saving ? 'アップロード中…' : '📎 アップロード（次に公開範囲を選びます）'}
           </button>
         </div>
       </div>
+
+      {scopeOpen && (
+        <DocScopeModal
+          title="公開範囲を決めてください"
+          fileNames={uploadEntries.map((e) => e.displayName)}
+          initialPublic={false}
+          initialViewers={[]}
+          confirmLabel="この範囲でアップロード"
+          onConfirm={add}
+          onClose={() => setScopeOpen(false)}
+        />
+      )}
 
       {editingViewersFor && (
         <EditViewersModal
@@ -1071,9 +1281,10 @@ function DocFoldersTab() {
   )
 }
 
-// 既存フォルダの閲覧権限編集（Slice 2b、(2)(8)）。PUT /api/admin/doc-folders/{id}/viewersが
-// 409を返した場合（既にこのフォルダを参照しているチャンネルの参加者が閲覧権限を失う）は、
-// 対象を名指しした確認ダイアログを出し、「はい」を押した場合のみforce=trueで再送信する。
+// 既存フォルダの閲覧権限編集（Slice 2b、(2)(8)）。公開範囲のポップアップ（DocScopeModal）を
+// アップロード時と共通で使う。PUT /api/admin/doc-folders/{id}/viewersが409を返した場合（既に
+// このフォルダを参照しているチャンネルの参加者が閲覧権限を失う）は、対象を名指しした確認ダイアログを
+// 出し、「はい」を押した場合のみforce=trueで再送信する。
 function EditViewersModal({
   folder, onClose, onSaved,
 }: {
@@ -1081,19 +1292,14 @@ function EditViewersModal({
   onClose: () => void
   onSaved: () => void
 }) {
-  const overlayClose = useOverlayClose(onClose)
   const toast = useToast()
   const confirm = useConfirm()
-  const [isRestricted, setIsRestricted] = useState(folder.is_restricted)
-  const [viewerIds, setViewerIds] = useState<Set<string>>(new Set(folder.viewer_user_ids))
-  const [saving, setSaving] = useState(false)
 
-  const save = async (force: boolean) => {
-    setSaving(true)
+  const save = async (isRestricted: boolean, viewerIds: string[], force = false): Promise<void> => {
     try {
       await apiFetch(`/api/admin/doc-folders/${folder.id}/viewers`, {
         method: 'PUT',
-        body: JSON.stringify({ is_restricted: isRestricted, viewer_user_ids: [...viewerIds], force }),
+        body: JSON.stringify({ is_restricted: isRestricted, viewer_user_ids: viewerIds, force }),
       })
       toast('閲覧権限を更新しました')
       onSaved()
@@ -1109,68 +1315,22 @@ function EditViewersModal({
           confirmLabel: 'はい（強制退出させて保存）',
           danger: true,
         })
-        if (ok) {
-          setSaving(false)
-          await save(true)
-          return
-        }
+        if (ok) await save(isRestricted, viewerIds, true)
       } else {
         toast(e instanceof Error ? e.message : '保存に失敗しました', 'error')
       }
-    } finally {
-      setSaving(false)
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-      onMouseDown={overlayClose.onMouseDown}
-      onClick={overlayClose.onClick}
-    >
-      <div
-        className="w-full max-w-[480px] rounded-[12px] bg-surface p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-[14px] font-bold text-ink">閲覧権限を編集: {folder.drive_folder_name}</span>
-          <button type="button" onClick={onClose} className="bg-transparent text-ink-subtle">
-            ✕
-          </button>
-        </div>
-        <label className="flex items-center gap-1.5 text-[12.5px] font-bold text-ink">
-          <input
-            type="checkbox"
-            checked={isRestricted}
-            onChange={(e) => setIsRestricted(e.target.checked)}
-            className="h-3.5 w-3.5"
-          />
-          🔒 限定公開にする（指定した利用者のみ閲覧可能）
-        </label>
-        {isRestricted && (
-          <div className="mt-2.5">
-            <ViewerPicker selectedIds={viewerIds} onChange={setViewerIds} />
-          </div>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-line-strong px-3.5 py-1.5 text-[12.5px] font-semibold text-ink-muted"
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => save(false)}
-            className="rounded-lg bg-accent-600 px-3.5 py-1.5 text-[12.5px] font-bold text-white disabled:opacity-40"
-          >
-            保存する
-          </button>
-        </div>
-      </div>
-    </div>
+    <DocScopeModal
+      title={`閲覧権限を編集: ${folder.drive_folder_name}`}
+      initialPublic={!folder.is_restricted}
+      initialViewers={folder.viewers}
+      confirmLabel="保存する"
+      onConfirm={(isRestricted, viewerIds) => save(isRestricted, viewerIds)}
+      onClose={onClose}
+    />
   )
 }
 
