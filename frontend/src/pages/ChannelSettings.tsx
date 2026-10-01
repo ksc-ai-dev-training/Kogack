@@ -11,6 +11,7 @@ import { useReportDirty } from '../lib/unsavedChanges'
 import { GuardedLink } from '../components/GuardedLink'
 import MobileBackLink from '../components/MobileBackLink'
 import { useMe } from '../hooks/useMe'
+import DocPreviewModal, { docPreviewKind } from '../components/DocPreviewModal'
 import { apiFetch, ApiError, uploadIcon } from '../lib/api'
 import { avatarColorFor } from '../lib/avatarColor'
 import { useToast } from '../components/Toast'
@@ -884,6 +885,12 @@ function DocScopeTabBody({
 }) {
   const toast = useToast()
   const confirm = useConfirm()
+  const { me } = useMe()
+  // 文書のプレビュー（2026-10-01、ユーザーからの要望）。全員に公開している文書か、自分が閲覧者に
+  // 入っている限定公開の文書だけ開ける（サーバー側のpreview_doc_for_scopeでも同じ条件で判定する）
+  const [previewTarget, setPreviewTarget] = useState<DocFolder | null>(null)
+  const canPreview = (f: DocFolder) =>
+    !f.is_restricted || me?.role === 'admin' || (me ? f.viewer_user_ids.includes(me.id) : false)
   const [selected, setSelected] = useState(() => new Set(settings.folder_ids))
   const [policy, setPolicy] = useState(settings.out_of_scope_policy)
   const [saving, setSaving] = useState(false)
@@ -994,7 +1001,7 @@ function DocScopeTabBody({
   return (
     <div className="max-w-[560px]">
       <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
-        チャンネルAIが回答の根拠として参照するGoogleドライブのフォルダを選びます（F-11・F-22）。候補は管理コンソールの「ドキュメント参照範囲」タブで管理者が登録します。実際のDrive同期・索引・AI検索は次のスライスで実装するため、この設定はまだAI応答には反映されません。
+        チャンネルAIが回答の根拠として参照する社内ドキュメントを選びます（F-11・F-22）。候補は管理コンソールの「ドキュメント参照範囲」タブでシステム管理者が登録します。「プレビュー」で中身を確認できます（限定公開の文書は、自分が閲覧者に入っているものだけ）。
       </p>
 
       <div className="mb-5">
@@ -1069,6 +1076,23 @@ function DocScopeTabBody({
                         <span className="truncate">{f.drive_folder_name}</span>
                       </span>
                     )}
+                    {f.item_type === 'file' && f.source === 'upload' && docPreviewKind(f.drive_folder_name) !== null &&
+                      (canPreview(f) ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewTarget(f)}
+                          className="flex-none bg-transparent text-[11.5px] text-accent-700 hover:underline"
+                        >
+                          プレビュー
+                        </button>
+                      ) : (
+                        <span
+                          className="flex-none text-[11px] text-ink-subtle"
+                          title="この文書の閲覧者に入っていないため、中身を表示できません"
+                        >
+                          閲覧権限なし
+                        </span>
+                      ))}
                     {f.is_restricted && (
                       <span className="flex-none rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
                         🔒 限定公開
@@ -1114,6 +1138,21 @@ function DocScopeTabBody({
       >
         保存
       </button>
+
+      {previewTarget &&
+        (() => {
+          const kind = docPreviewKind(previewTarget.drive_folder_name)
+          return (
+            kind && (
+              <DocPreviewModal
+                previewUrl={`/api/channels/${channelId}/doc-folders/${previewTarget.id}/preview`}
+                fileName={previewTarget.drive_folder_name}
+                kind={kind}
+                onClose={() => setPreviewTarget(null)}
+              />
+            )
+          )
+        })()}
     </div>
   )
 }

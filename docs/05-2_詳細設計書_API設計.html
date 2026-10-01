@@ -460,6 +460,9 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p class="diff-new"><strong>A-41 <span class="badge badge-post">POST</span> /api/admin/doc-folders/sync</strong></p>
   <p class="muted diff-new">未実装（F-22の索引・埋め込みベクトル生成、基本設計書8.2節）。S-08の「今すぐ同期」ボタンは無効表示のままとし、次のスライス（Drive OAuthスコープ拡張・埋め込みAPI呼び出しを実装するスライス）で対応する。</p>
 
+  <p><strong><span class="badge badge-get">GET</span> /api/channels/{id}/doc-folders/{folder_id}/preview（S-06参照ドキュメント範囲タブの文書プレビュー、ID未採番）</strong></p>
+  <p class="muted">当該チャンネルのchadminまたはシステムadmin（<code>require_channel_admin</code>）。全員に公開している文書か、呼び出し元が閲覧者（<code>doc_folder_viewers</code>）に入っている限定公開の文書だけを返し、それ以外は403（システムadminはS-08と同じく全文書可）。文書がこのチャンネルの参照範囲に入っているかは問わない（追加前の確認に使うため）。応答の形式はS-08のプレビュー・チャット上の引用プレビューと同じ（画像・PDF・テキストはそのまま、Word・PowerPoint・Excelは本文のブロック列のJSON、共通処理は<code>services/doc_preview.py</code>）。</p>
+
   <p><strong><span class="badge badge-post">POST</span> /api/admin/doc-folders/usable-channels（公開範囲の設定画面用、ID未採番）</strong></p>
   <pre><code>// request
 { "viewer_user_ids": ["7", "12"] }

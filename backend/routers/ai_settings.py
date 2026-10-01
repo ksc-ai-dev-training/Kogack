@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 import audit_log
 from auth_helpers import CurrentUser, require_channel_admin
 from database import get_pool
-from services import ai_client, doc_permissions
+from services import ai_client, doc_permissions, doc_preview
 
 router = APIRouter(prefix="/api/channels", tags=["ai-settings"])
 
@@ -190,6 +190,34 @@ class UpdateDocScopeRequest(BaseModel):
     # falseのまま409（要確認）を受け取った後、確認ダイアログで「はい」を押した場合のみtrueにして
     # 再送信する（閲覧権限モデルSlice 2b、(5)）。この場合のみ権限を失う参加者を強制退出させる。
     force: bool = False
+
+
+@router.get("/{channel_id}/doc-folders/{folder_id}/preview")
+async def preview_doc_for_scope(
+    channel_id: int, folder_id: int, user: CurrentUser = Depends(require_channel_admin),
+):
+    """S-06「参照ドキュメント範囲」タブでの文書プレビュー（2026-10-01、ユーザーからの要望。参照範囲を
+    選ぶとき、ファイル名だけでなく中身を確かめられるようにする）。S-08のプレビュー（admin限定）と
+    異なりチャンネル管理者なら誰でも開ける画面のため、閲覧権限モデルに従い、全員に公開している文書か、
+    本人が閲覧者（doc_folder_viewers）に入っている限定公開の文書だけを返す。システム管理者はS-08で
+    すべての文書をプレビューできるため、ここでも同じく許可する。channel_idは画面の文脈（このチャンネルの
+    管理者であること）の確認にだけ使い、文書がこのチャンネルの参照範囲に入っているかは問わない
+    （これから追加するかを判断するためのプレビューのため）"""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT item_type, source, storage_path, drive_folder_name, is_restricted FROM doc_folders WHERE id = $1",
+        folder_id,
+    )
+    if row is None:
+        raise HTTPException(404, detail="見つかりません")
+    if row["is_restricted"] and user.role != "admin":
+        is_viewer = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM doc_folder_viewers WHERE folder_id = $1 AND user_id = $2)",
+            folder_id, user.id,
+        )
+        if not is_viewer:
+            raise HTTPException(403, detail="この文書の閲覧権限がないため、プレビューできません")
+    return doc_preview.preview_response(row)
 
 
 @router.put("/{channel_id}/ai-settings/doc-scope")

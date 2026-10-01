@@ -4,10 +4,8 @@
 # （require_thread_access）。返信自体はネストしない（返信への返信は対象外）。
 import json
 import re
-from pathlib import Path
-from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 import background
@@ -16,10 +14,8 @@ from auth_helpers import CurrentUser, require_auth, require_channel_admin, requi
 from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped, toggle_reaction
-from services import ai_agent, doc_storage, push_sender
-from services.office_preview import OFFICE_EXTENSIONS, office_to_blocks
+from services import ai_agent, doc_preview, push_sender
 from routers.attachments import delete_unreferenced_files
-from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -488,36 +484,4 @@ async def preview_citation(
     row = await get_pool().fetchrow(
         "SELECT item_type, source, storage_path, drive_folder_name FROM doc_folders WHERE id = $1", folder_id
     )
-    if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
-        raise HTTPException(404, detail="見つかりません")
-
-    # Office形式（Word・PowerPoint・Excel）はS-08のpreview_doc_folder（routers/admin.py）と同じく
-    # 本文をブロック列のJSONへ変換して返す（2026-10-01、ユーザー要望「参照したときにもクリックしたら
-    # プレビューできるように」）
-    ext = Path(row["drive_folder_name"]).suffix.lower()
-    is_office = ext in OFFICE_EXTENSIONS
-    content_type = None if is_office else preview_content_type(row["drive_folder_name"])
-    if not is_office and content_type is None:
-        raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
-
-    try:
-        data = doc_storage.read(row["storage_path"])
-    except FileNotFoundError:
-        raise HTTPException(404, detail="見つかりません")
-
-    if is_office:
-        try:
-            return office_to_blocks(data, ext)
-        except Exception:
-            raise HTTPException(422, detail="ファイルを読み込めませんでした（破損しているか、拡張子と実際の形式が異なる可能性があります）")
-
-    ascii_fallback = row["drive_folder_name"].encode("ascii", "replace").decode("ascii")
-    headers = {
-        "Content-Disposition": (
-            f'inline; filename="{ascii_fallback}"; filename*=utf-8\'\'{quote(row["drive_folder_name"])}'
-        )
-    }
-    if content_type.startswith("text/plain"):
-        text = data.decode("utf-8", errors="replace")
-        return Response(content=text, media_type=content_type, headers=headers)
-    return Response(content=data, media_type=content_type, headers=headers)
+    return doc_preview.preview_response(row)

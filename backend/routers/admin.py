@@ -5,18 +5,15 @@ import json
 import re
 from datetime import date, datetime, time
 from pathlib import Path
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 import background
 from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
-from services import ai_client, doc_indexer, doc_permissions, doc_storage
-from services.office_preview import OFFICE_EXTENSIONS, office_to_blocks
-from services.preview_kind import preview_content_type
+from services import ai_client, doc_indexer, doc_permissions, doc_preview, doc_storage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 JST = ZoneInfo("Asia/Tokyo")
@@ -410,39 +407,7 @@ async def preview_doc_folder(folder_id: int, user: CurrentUser = Depends(require
     row = await get_pool().fetchrow(
         "SELECT item_type, source, storage_path, drive_folder_name FROM doc_folders WHERE id = $1", folder_id
     )
-    if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
-        raise HTTPException(404, detail="見つかりません")
-
-    # Office形式（Word・PowerPoint・Excel）はブラウザで直接表示できないため、本文をブロック列の
-    # JSONへ変換して返す（2026-10-01、services/office_preview.py参照）。preview_kind.pyはF-07添付
-    # ファイルのプレビューとも共有しているため、参照ドキュメント限定のこの分岐はここに置く
-    ext = Path(row["drive_folder_name"]).suffix.lower()
-    is_office = ext in OFFICE_EXTENSIONS
-    content_type = None if is_office else preview_content_type(row["drive_folder_name"])
-    if not is_office and content_type is None:
-        raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
-
-    try:
-        data = doc_storage.read(row["storage_path"])
-    except FileNotFoundError:
-        raise HTTPException(404, detail="見つかりません")
-
-    if is_office:
-        try:
-            return office_to_blocks(data, ext)
-        except Exception:
-            raise HTTPException(422, detail="ファイルを読み込めませんでした（破損しているか、拡張子と実際の形式が異なる可能性があります）")
-
-    ascii_fallback = row["drive_folder_name"].encode("ascii", "replace").decode("ascii")
-    headers = {
-        "Content-Disposition": (
-            f'inline; filename="{ascii_fallback}"; filename*=utf-8\'\'{quote(row["drive_folder_name"])}'
-        )
-    }
-    if content_type.startswith("text/plain"):
-        text = data.decode("utf-8", errors="replace")
-        return Response(content=text, media_type=content_type, headers=headers)
-    return Response(content=data, media_type=content_type, headers=headers)
+    return doc_preview.preview_response(row)
 
 
 @router.delete("/doc-folders/{folder_id}", status_code=204)
