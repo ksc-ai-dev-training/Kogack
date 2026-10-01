@@ -249,6 +249,7 @@ POST /api/channels/42/members
   <p><strong>A-49 <span class="badge badge-put">PUT</span> /api/channels/{id}/visibility（公開/非公開切替）</strong></p>
   <pre><code>{ "is_public": false }
 // response 200: { "id": "42", "is_public": false }</code></pre>
+  <p class="muted">公開へ切り替える場合、このチャンネルの参照ドキュメント範囲に限定公開のフォルダ・ファイルが含まれていれば422を返し切り替えない（公開チャンネルは限定公開フォルダを持てない、A-27と同じ不変条件。対象の文書名をメッセージに含める）。</p>
 
   <p class="diff-new"><strong>A-15 <span class="badge badge-post">POST</span> /api/channels/{id}/summarize（要約実行）</strong></p>
   <pre class="diff-new"><code>// request（thread_id省略時はチャンネル本体の直近100件が対象）

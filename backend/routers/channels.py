@@ -497,6 +497,22 @@ async def update_visibility(
 ):
     """A-49: 公開/非公開切替（F-34）"""
     pool = get_pool()
+    if body.is_public:
+        # 公開チャンネルは限定公開フォルダを参照範囲に持てない（A-27と同じ不変条件）。従来はこの
+        # 切替で確認しておらず、限定公開フォルダを参照する非公開チャンネルをそのまま公開にできた
+        # （2026-10-01バグ修正）
+        restricted = await pool.fetch(
+            """SELECT f.drive_folder_name FROM channel_doc_folders cdf
+               JOIN doc_folders f ON f.id = cdf.folder_id
+               WHERE cdf.channel_id = $1 AND f.is_restricted ORDER BY f.drive_folder_name""",
+            channel_id,
+        )
+        if restricted:
+            names = "、".join(r["drive_folder_name"] for r in restricted)
+            raise HTTPException(
+                422,
+                detail=f"限定公開の文書を参照しているため公開チャンネルにできません。先に参照ドキュメント範囲から外してください: {names}",
+            )
     row = await pool.fetchrow(
         "UPDATE channels SET is_public = $2, updated_at = now() WHERE id = $1 RETURNING id, is_public",
         channel_id, body.is_public,
@@ -667,7 +683,10 @@ async def list_messages(
         if rows is None:
             raise HTTPException(404, detail="発言が見つかりません")
     elif before:
-        before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        try:
+            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(422, detail="beforeの形式が不正です") from None
         rows = list(reversed(await pool.fetch(
             f"""{_MESSAGES_SELECT}
                WHERE m.channel_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL

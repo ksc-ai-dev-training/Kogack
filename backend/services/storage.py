@@ -71,6 +71,16 @@ async def download(bucket: str, path: str) -> bytes:
     return res.content
 
 
+async def delete(bucket: str, path: str) -> None:
+    """指定パスを削除する。既に存在しない場合は何もしない。"""
+    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.delete(url, headers=_headers())
+    if res.status_code >= 300 and res.status_code not in (400, 404):
+        # Supabase Storageは存在しないオブジェクトの削除に400/404を返すことがある
+        raise StorageError(f"Supabase Storageからの削除に失敗しました: {res.status_code} {res.text[:200]}")
+
+
 def public_url(bucket: str, path: str) -> str:
     """Publicバケット向け。ICON_BUCKET専用（ATTACHMENT_BUCKETはPrivateのため使わない）。"""
     return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{path}"

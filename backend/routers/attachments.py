@@ -12,6 +12,8 @@
 # と同じ権限判定を経由してこのバックエンドがバイト列を仲介する（クライアントへ直接のバケットURLは
 # 渡さない）。未設定時（ローカル開発）は backend/uploads/attachments へのディスク保存に
 # フォールバックする（2026-09-09、CLAUDE.md実装状況「Fly.ioストレージ検討」を参照）。
+import re
+import traceback
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -42,6 +44,33 @@ _MAX_BYTES = 20 * 1024 * 1024  # 20MB（05-1_詳細設計書_DB設計.html 3.6�
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "attachments"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# A-21が発行する保存名（uuid4のhex＋元ファイルの拡張子）の形式。storage_pathは投稿時にクライアントから
+# 送られてくる値のため、実体を削除する前にこの形式であることを確かめ、「../」等で他のファイルや
+# 他のバケットのオブジェクトを指していないことを保証する
+_STORAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}(\.[^/\\]*)?$")
+
+
+async def delete_unreferenced_files(pool, storage_paths: list[str]) -> None:
+    """発言から外した添付ファイルの実体を削除する（発言の編集で添付を削除したとき用、2026-10-01）。
+    同じstorage_pathを別の添付行がまだ参照している場合・A-21の保存名の形式でない場合は残す。
+    実体の削除に失敗しても編集自体は成功させる（ダウンロードはDB行が無いため既にできない）"""
+    for path in set(storage_paths):
+        if not _STORAGE_NAME_RE.match(path):
+            continue
+        still_used = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM message_attachments WHERE storage_path = $1)", path
+        )
+        if still_used:
+            continue
+        try:
+            if storage.is_configured():
+                await storage.delete(storage.ATTACHMENT_BUCKET, path)
+            else:
+                (UPLOAD_DIR / path).unlink(missing_ok=True)
+        except (storage.StorageError, OSError):
+            traceback.print_exc()
 
 
 @router.post("", status_code=201)

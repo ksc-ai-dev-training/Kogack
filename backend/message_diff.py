@@ -6,6 +6,8 @@
 
 from datetime import datetime, timedelta
 
+from fastapi import HTTPException
+
 # 差分ポーリングの取得開始をクライアントのsinceより少し前へ巻き戻す幅（2026-09-29バグ修正）。
 # updated_atの既定値・UPDATE時のnow()は「トランザクション開始時刻」でありコミット時刻ではない。
 # そのため、先に始まった投稿のトランザクション（メンション・添付の書き込み中）より後に始まった
@@ -18,7 +20,10 @@ SINCE_OVERLAP = timedelta(seconds=5)
 
 def parse_since(since: str) -> datetime:
     """A-10/A-18のsince文字列を、SINCE_OVERLAPだけ巻き戻した検索開始時刻に変換する"""
-    return datetime.fromisoformat(since.replace("Z", "+00:00")) - SINCE_OVERLAP
+    try:
+        return datetime.fromisoformat(since.replace("Z", "+00:00")) - SINCE_OVERLAP
+    except ValueError:
+        raise HTTPException(422, detail="sinceの形式が不正です") from None
 
 
 async def deleted_since(pool, scope_column: str, scope_id: int, since_dt) -> list:

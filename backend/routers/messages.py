@@ -18,6 +18,7 @@ from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped, toggle_reaction
 from services import ai_agent, doc_storage, push_sender
 from services.office_preview import OFFICE_EXTENSIONS, office_to_blocks
+from routers.attachments import delete_unreferenced_files
 from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
@@ -169,6 +170,7 @@ async def edit_message(message_id: int, body: EditMessageRequest, user: CurrentU
     if is_poll:
         raise HTTPException(400, detail="アンケートの本文は編集できません")
 
+    removed_paths: list[str] = []
     async with pool.acquire() as conn, conn.transaction():
         updated = await conn.fetchrow(
             "UPDATE messages SET body = $2, edited_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
@@ -180,12 +182,20 @@ async def edit_message(message_id: int, body: EditMessageRequest, user: CurrentU
             except ValueError:
                 raise HTTPException(422, detail="remove_attachment_idsは数値のIDです")
             # message_idも条件に含め、他の発言の添付を誤って消せないようにする
-            await conn.execute(
-                "DELETE FROM message_attachments WHERE message_id = $1 AND id = ANY($2::bigint[])",
-                message_id, remove_ids,
-            )
+            removed_paths = [
+                r["storage_path"]
+                for r in await conn.fetch(
+                    """DELETE FROM message_attachments WHERE message_id = $1 AND id = ANY($2::bigint[])
+                       RETURNING storage_path""",
+                    message_id, remove_ids,
+                )
+            ]
         if body.new_attachments:
             await insert_attachments(conn, message_id, user.id, body.new_attachments)
+    # 外した添付の実体もストレージから消す（2026-10-01バグ修正。従来はDB行だけを消し、ファイルが
+    # 残り続けていた）。コミット後に行い、編集が取り消された場合にファイルだけ消える事態を避ける
+    if removed_paths:
+        await delete_unreferenced_files(pool, removed_paths)
 
     blocks_by_message = await fetch_blocks_grouped(pool, [message_id])
     attachments_by_message = await fetch_attachments_grouped(pool, [message_id])

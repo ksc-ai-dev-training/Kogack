@@ -333,7 +333,10 @@ async def list_messages(
             "has_more": False,
         }
     if before:
-        before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        try:
+            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(422, detail="beforeの形式が不正です") from None
         rows = list(reversed(await pool.fetch(
             f"""{_MESSAGES_SELECT}
                WHERE m.dm_id = $1 AND m.deleted_at IS NULL AND m.thread_parent_id IS NULL

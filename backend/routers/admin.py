@@ -471,6 +471,20 @@ async def update_doc_folder_viewers(
         raise HTTPException(422, detail="viewer_user_idsは数値のIDです")
 
     async with pool.acquire() as conn, conn.transaction():
+        if body.is_restricted:
+            # 公開チャンネルは限定公開フォルダを参照範囲に持てない（A-27・A-49と同じ不変条件、
+            # 2026-10-01バグ修正）。従来は公開チャンネルが参照中のフォルダもそのまま限定公開にできた
+            public_channels = await conn.fetch(
+                """SELECT c.name FROM channel_doc_folders cdf JOIN channels c ON c.id = cdf.channel_id
+                   WHERE cdf.folder_id = $1 AND c.is_public ORDER BY c.name""",
+                folder_id,
+            )
+            if public_channels:
+                names = "、".join(f"#{r['name']}" for r in public_channels)
+                raise HTTPException(
+                    422,
+                    detail=f"公開チャンネルが参照しているため限定公開にできません。先に各チャンネルの参照ドキュメント範囲から外してください: {names}",
+                )
         effective_viewer_ids = viewer_ids if body.is_restricted else set()
         affected = (
             await doc_permissions.channels_missing_access_for_folder(conn, folder_id, effective_viewer_ids)
