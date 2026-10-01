@@ -699,11 +699,13 @@ function PromptTab({
         onChange={(e) => setPrompt(e.target.value)}
         rows={10}
         maxLength={8000}
+        placeholder="例: あなたは総務部の問い合わせ窓口です。社内規程に基づいて答え、規程に書かれていないことは推測せず総務部への確認を案内してください。"
         className="w-full rounded-lg border border-line-strong px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus:border-accent-600 focus:ring-4 focus:ring-accent-50"
       />
       <div className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
         編集のたびに上書き保存されます。変更者・日時は監査ログ（S-08管理コンソール）に記録されます（過去バージョンの一覧・差分表示は対象外）。
       </div>
+      <BehaviorPromptExamples prompt={prompt} onToggle={(text) => setPrompt((cur) => toggleExample(cur, text))} />
       <button
         type="button"
         disabled={saving}
@@ -712,6 +714,90 @@ function PromptTab({
       >
         保存
       </button>
+    </div>
+  )
+}
+
+// 振る舞い定義の書き方の例（ユーザー要望、2026-10-01）。名前・口調は「キャラクタ」タブ、任せる業務・
+// 断る依頼は「スキルと対応範囲設定」タブが担当するため、例はそれ以外（役割・答え方・してはいけないこと）に絞る。
+// ボタンはトグル式: 例文が入力欄に含まれていなければ既存の記述を消さないよう末尾に追記し、含まれていれば
+// その例文（と区切りの空行）だけを取り除く（ユーザー要望、2回押したら2個分入るのではなく消えてほしい）。
+// 追加後に例文を書き換えた場合は一致しなくなるため、再び「追加」扱いになる
+const BEHAVIOR_PROMPT_EXAMPLES: { title: string; text: string }[] = [
+  {
+    title: '社内の問い合わせ窓口',
+    text: `あなたは総務部の問い合わせ窓口です。社員からの備品・各種申請・社内規程に関する質問に答えます。
+・参照ドキュメント（社内規程）に書かれている内容を根拠に答え、該当する規程の名前を添えてください。
+・規程に書かれていないことは推測で答えず、「総務部（内線123）にご確認ください」と案内してください。
+・給与や人事評価など個人に関わる相談には答えず、担当者への直接の相談を勧めてください。`,
+  },
+  {
+    title: '開発チームのサポート',
+    text: `あなたは開発チームのサポート役です。メンバーからの技術的な質問やコードレビューの相談に答えます。
+・回答は結論を先に書き、必要に応じてコード例を添えてください。
+・社内のコーディング規約に関わる質問は、参照ドキュメントの規約を優先してください。
+・本番環境の操作手順は答えず、チームリーダーへの確認を案内してください。`,
+  },
+  {
+    title: '雑談・アイデア出し',
+    text: `あなたはチームの雑談とアイデア出しの相手です。
+・堅苦しくならないよう、短めの返答を心がけてください。
+・アイデアを求められたら、方向性の違う案を3つほど挙げてください。
+・業務上の正式な判断が必要な話題になったら、担当者に確認するよう一言添えてください。`,
+  },
+]
+
+function toggleExample(cur: string, text: string): string {
+  const i = cur.indexOf(text)
+  if (i < 0) return (cur.trim() ? `${cur.replace(/\s+$/, '')}\n\n${text}` : text).slice(0, 8000)
+  const before = cur.slice(0, i).replace(/\s+$/, '')
+  const after = cur.slice(i + text.length).replace(/^\s+/, '')
+  return before && after ? `${before}\n\n${after}` : before || after
+}
+
+function BehaviorPromptExamples({ prompt, onToggle }: { prompt: string; onToggle: (text: string) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-surface-subtle">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[12.5px] font-bold text-ink-muted hover:text-accent-700"
+      >
+        <span className="text-[10px]">{open ? '▼' : '▶'}</span>
+        書き方の例を見る
+      </button>
+      {open && (
+        <div className="border-t border-line px-3 pb-3 pt-2">
+          <p className="mb-2 text-[11.5px] leading-relaxed text-ink-subtle">
+            「AIの役割」「答え方」「してはいけないこと」を箇条書きで書くと伝わりやすくなります。名前・口調は「キャラクタ」タブ、AIに任せる業務や断る依頼は「スキルと対応範囲設定」タブで設定します。
+          </p>
+          {BEHAVIOR_PROMPT_EXAMPLES.map((ex) => {
+            const added = prompt.includes(ex.text)
+            return (
+              <div key={ex.title} className="mt-2.5">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[12px] font-bold text-ink">{ex.title}</span>
+                  <button
+                    type="button"
+                    onClick={() => onToggle(ex.text)}
+                    className={
+                      added
+                        ? 'rounded-md border border-accent-600 bg-accent-50 px-2 py-0.5 text-[11px] font-semibold text-accent-700 hover:bg-white'
+                        : 'rounded-md border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold text-ink-muted hover:border-accent-600 hover:text-accent-700'
+                    }
+                  >
+                    {added ? '入力欄から取り除く' : '入力欄に追加'}
+                  </button>
+                </div>
+                <pre className="whitespace-pre-wrap rounded-md border border-line bg-white px-2.5 py-2 font-sans text-[12px] leading-relaxed text-ink-muted">
+                  {ex.text}
+                </pre>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
