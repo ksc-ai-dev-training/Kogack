@@ -27,12 +27,15 @@ import calendar
 import json
 import traceback
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
+import background
 from database import get_pool
 from mentions import MentionInput, insert_mention_blocks
-from services import ai_agent, mention_reminder, trigger_matcher
+from services import ai_agent, mention_reminder, push_sender, trigger_matcher
 
 POLL_INTERVAL_SECONDS = 30
+JST = ZoneInfo("Asia/Tokyo")
 
 _task: asyncio.Task | None = None
 
@@ -47,7 +50,13 @@ def _next_run_after(current: datetime, anchor: datetime, frequency: str) -> date
     仕組みは無く、それと一貫させた）。'month_end'（月末、2026-09-15追加）は'monthly'とほぼ同じだが
     anchor.dayを見ず常にその月の最終日を使う（'monthly'でanchor.day=31を指定した場合と実質的に
     同じ計算になるが、利用者が「31日」という具体的な日にちを意識せず「月末」を明示的に選べるようにする
-    ための別頻度として用意した）。時刻（時分秒）はcurrent（＝直前のnext_run_at）のものをそのまま維持する。"""
+    ための別頻度として用意した）。時刻（時分秒）はcurrent（＝直前のnext_run_at）のものをそのまま維持する。
+
+    バグ修正（2026-10-01）: 曜日・日にち・月末の判定は日本時間で行う。DBから読んだ値はUTCのため、
+    従来は日本時間0〜8時台の定期投稿でUTC上の前日として計算され、「平日」が土曜に投稿され月曜が
+    抜ける、「毎月1日」が前月末日に、「月末」が翌月1日にずれていた"""
+    current = current.astimezone(JST)
+    anchor = anchor.astimezone(JST)
     if frequency == "daily":
         return current + timedelta(days=1)
     if frequency == "weekdays":
@@ -88,6 +97,27 @@ async def _dispatch_due_messages() -> None:
             )
             if claimed is None:
                 continue
+            # 送信者が送信時点でも宛先の参加者で、かつアカウントが有効であることを確かめる
+            # （2026-10-01バグ修正）。従来は予約時（A-50）にしか確認しておらず、予約後に退出した・
+            # 外された・無効化された利用者の発言が、参加していないチャンネル/DMへ投稿されていた
+            if row["channel_id"] is not None:
+                sender_ok = await conn.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM channel_members cm JOIN users u ON u.id = cm.user_id
+                       WHERE cm.channel_id = $1 AND cm.user_id = $2 AND u.is_active)""",
+                    row["channel_id"], row["sender_user_id"],
+                )
+            else:
+                sender_ok = await conn.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM direct_message_members dmm JOIN users u ON u.id = dmm.user_id
+                       WHERE dmm.dm_id = $1 AND dmm.user_id = $2 AND u.is_active)""",
+                    row["dm_id"], row["sender_user_id"],
+                )
+            if not sender_ok:
+                await conn.execute(
+                    "UPDATE scheduled_messages SET status = 'cancelled', sent_at = NULL WHERE id = $1",
+                    row["id"],
+                )
+                continue
             if row["thread_parent_id"] is not None:
                 # 返信先が宛先と同じチャンネル/DMの本体の発言であることを送信時点でも確かめる
                 # （2026-09-29。A-50の検証を入れる前に作られた不正な予約や、予約後に元発言が
@@ -122,6 +152,7 @@ async def _dispatch_due_messages() -> None:
             # A-50側でも常に空にしていたため、DMの予約投稿のメンションが黙って失われていた）
             raw_mentions = row["mentions"]
             mentions_data = json.loads(raw_mentions) if isinstance(raw_mentions, str) else raw_mentions
+            blocks: list[dict] = []
             if mentions_data:
                 # バグ修正（2026-09-14、ユーザーからの報告「自分宛にメンションしたメッセージを
                 # 予約投稿すると、なぜか時間になっても正常に送られません」）: insert_mention_blocks
@@ -138,11 +169,12 @@ async def _dispatch_due_messages() -> None:
                 # 生き続けるが、この特定の予約メッセージだけが決して発言化されない状態になる）。
                 # sender_user_idも渡すようにした（@here対応、送信者自身をアクティブ参加者の
                 # スナップショットから除外するために使う。当時@hereはまだ存在せず未対応だった）
-                await insert_mention_blocks(
+                blocks = await insert_mention_blocks(
                     conn, message_row["id"], [MentionInput(**m) for m in mentions_data],
                     channel_id=row["channel_id"], dm_id=row["dm_id"],
                     sender_user_id=row["sender_user_id"], body=row["body"],
                 )
+            sender_name = await conn.fetchval("SELECT name FROM users WHERE id = $1", row["sender_user_id"])
             if row["thread_parent_id"] is not None:
                 # バグ修正（2026-09-14）: routers/messages.py post_replyと同じ理由。予約投稿が
                 # スレッド返信の場合も元発言のupdated_atを更新しないと、本体タイムラインの
@@ -150,6 +182,27 @@ async def _dispatch_due_messages() -> None:
                 await conn.execute(
                     "UPDATE messages SET updated_at = now() WHERE id = $1", row["thread_parent_id"]
                 )
+        # デスクトップ通知②（Web Push）。A-11/A-14/A-19と同じ通知を送る（2026-10-01バグ修正。
+        # 従来は予約投稿だけ一度も送っておらず、予約で送ったDM・メンションに通知が届かなかった）
+        if row["thread_parent_id"] is not None:
+            url = (
+                f"/channels/{row['channel_id']}?thread={row['thread_parent_id']}"
+                if row["channel_id"] is not None
+                else f"/dms/{row['dm_id']}?thread={row['thread_parent_id']}"
+            )
+            background.spawn(push_sender.notify_thread_reply(
+                channel_id=row["channel_id"], dm_id=row["dm_id"], thread_parent_id=row["thread_parent_id"],
+                sender_id=row["sender_user_id"], sender_name=sender_name, body=row["body"], blocks=blocks, url=url,
+            ))
+        elif row["channel_id"] is not None:
+            background.spawn(push_sender.notify_channel_message(
+                row["channel_id"], row["sender_user_id"], sender_name, row["body"], blocks,
+                f"/channels/{row['channel_id']}",
+            ))
+        else:
+            background.spawn(push_sender.notify_dm_message(
+                row["dm_id"], row["sender_user_id"], sender_name, row["body"], blocks, f"/dms/{row['dm_id']}",
+            ))
         if row["channel_id"] is not None:
             # バグ修正（2026-09-14、ユーザーからの報告「メンションでAIに呼びかけたメッセージを
             # 予約投稿してもAIが反応しない」）: A-11（channels.post_message）・A-14
