@@ -15,6 +15,7 @@ import background
 from auth_helpers import CurrentUser, require_auth, require_roles
 from database import get_pool
 from services import ai_client, doc_indexer, doc_permissions, doc_storage
+from services.docx_preview import docx_to_blocks
 from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -386,14 +387,24 @@ async def preview_doc_folder(folder_id: int, user: CurrentUser = Depends(require
     if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
         raise HTTPException(404, detail="見つかりません")
 
-    content_type = preview_content_type(row["drive_folder_name"])
-    if content_type is None:
+    # Word（.docx）はブラウザで直接表示できないため、本文をブロック列のJSONへ変換して返す
+    # （2026-10-01、services/docx_preview.py参照）。preview_kind.pyはF-07添付ファイル・引用
+    # プレビューとも共有しているため、S-08限定のこの分岐はここに置く
+    is_docx = Path(row["drive_folder_name"]).suffix.lower() == ".docx"
+    content_type = None if is_docx else preview_content_type(row["drive_folder_name"])
+    if not is_docx and content_type is None:
         raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
 
     try:
         data = doc_storage.read(row["storage_path"])
     except FileNotFoundError:
         raise HTTPException(404, detail="見つかりません")
+
+    if is_docx:
+        try:
+            return docx_to_blocks(data)
+        except Exception:
+            raise HTTPException(422, detail="Wordファイルを読み込めませんでした（破損しているか、.docx形式ではない可能性があります）")
 
     ascii_fallback = row["drive_folder_name"].encode("ascii", "replace").decode("ascii")
     headers = {

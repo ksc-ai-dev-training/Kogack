@@ -46,7 +46,15 @@ function truncateLabel(text: string, max: number): string {
 // （routers/admin.py _preview_content_type）とも揃えている。ファイル自体が別ドメイン
 // （doc_foldersと message_attachments）のため、MessageList.tsx側のコンポーネントは
 // 変更せずこちらに小さく複製する。
-type DocPreviewKind = 'image' | 'pdf' | 'text'
+// Word（.docx、2026-10-01）はバックエンドが本文をブロック列のJSONへ変換して返し、ここでReactの
+// テキストとして描画する（services/docx_preview.py参照。文書内のHTML・リンク等は解釈させない）
+type DocPreviewKind = 'image' | 'pdf' | 'text' | 'docx'
+type DocxBlock =
+  | { type: 'heading'; level: number; text: string }
+  | { type: 'paragraph'; text: string }
+  | { type: 'list_item'; text: string }
+  | { type: 'table'; rows: { text: string; span: number }[][] }
+type DocxPreview = { blocks: DocxBlock[]; truncated: boolean }
 const DOC_PREVIEW_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
 const DOC_PREVIEW_TEXT_EXT = new Set(['txt', 'md', 'csv', 'json', 'log'])
 function docPreviewKind(fileName: string): DocPreviewKind | null {
@@ -54,7 +62,66 @@ function docPreviewKind(fileName: string): DocPreviewKind | null {
   if (DOC_PREVIEW_IMAGE_EXT.has(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
   if (DOC_PREVIEW_TEXT_EXT.has(ext)) return 'text'
+  if (ext === 'docx') return 'docx'
   return null
+}
+
+const DOCX_HEADING_CLASS = ['', 'text-[18px]', 'text-[16px]', 'text-[14.5px]', 'text-[13.5px]']
+
+function DocxBody({ preview }: { preview: DocxPreview }) {
+  if (preview.blocks.length === 0) {
+    return <p className="text-[12.5px] text-ink-subtle">本文がありません。</p>
+  }
+  return (
+    <div className="rounded-md border border-line bg-surface px-6 py-5 text-[13px] leading-[1.75] text-ink">
+      {preview.blocks.map((b, i) => {
+        if (b.type === 'heading') {
+          return (
+            <div key={i} className={`mb-2 mt-4 font-bold first:mt-0 ${DOCX_HEADING_CLASS[b.level] ?? 'text-[13.5px]'}`}>
+              {b.text}
+            </div>
+          )
+        }
+        if (b.type === 'list_item') {
+          return (
+            <div key={i} className="flex gap-2 pl-2">
+              <span className="text-ink-subtle">・</span>
+              <span className="whitespace-pre-wrap break-words">{b.text}</span>
+            </div>
+          )
+        }
+        if (b.type === 'table') {
+          return (
+            <div key={i} className="my-3 overflow-x-auto">
+              <table className="border-collapse text-[12.5px]">
+                <tbody>
+                  {b.rows.map((row, r) => (
+                    <tr key={r} className={r === 0 ? 'bg-surface-subtle font-semibold' : ''}>
+                      {row.map((cell, c) => (
+                        <td key={c} colSpan={cell.span} className="whitespace-pre-wrap break-words border border-line px-2.5 py-1.5 align-top">
+                          {cell.text}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+        return b.text.trim() ? (
+          <p key={i} className="mb-1.5 whitespace-pre-wrap break-words">
+            {b.text}
+          </p>
+        ) : (
+          <div key={i} className="h-3" />
+        )
+      })}
+      {preview.truncated && (
+        <p className="mt-4 text-[12px] text-ink-subtle">文書が長いため、途中までを表示しています。</p>
+      )}
+    </div>
+  )
 }
 
 function DocPreviewModal({
@@ -71,18 +138,24 @@ function DocPreviewModal({
   const overlayClose = useOverlayClose(onClose)
   const [text, setText] = useState<string | null>(null)
   const [textError, setTextError] = useState<string | null>(null)
+  const [docx, setDocx] = useState<DocxPreview | null>(null)
   const previewUrl = `/api/admin/doc-folders/${folderId}/preview`
 
   useEffect(() => {
-    if (kind !== 'text') return
+    if (kind !== 'text' && kind !== 'docx') return
     let cancelled = false
     fetch(previewUrl, { credentials: 'same-origin' })
-      .then((res) => {
-        if (!res.ok) throw new Error('プレビューを取得できませんでした')
-        return res.text()
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null)
+          throw new Error(typeof body?.detail === 'string' ? body.detail : 'プレビューを取得できませんでした')
+        }
+        return kind === 'docx' ? res.json() : res.text()
       })
       .then((t) => {
-        if (!cancelled) setText(t)
+        if (cancelled) return
+        if (kind === 'docx') setDocx(t as DocxPreview)
+        else setText(t as string)
       })
       .catch((e) => {
         if (!cancelled) setTextError(e instanceof Error ? e.message : 'プレビューを取得できませんでした')
@@ -112,14 +185,17 @@ function DocPreviewModal({
         <div className="flex flex-none items-center justify-between gap-3 border-b border-line px-4 py-2.5">
           <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{fileName}</span>
           <div className="flex flex-none items-center gap-2">
-            <a
-              href={previewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] text-ink-muted hover:bg-surface-subtle"
-            >
-              新しいタブで開く
-            </a>
+            {/* Wordはプレビュー用のJSONを返すため、新しいタブで開いても文書としては表示できない */}
+            {kind !== 'docx' && (
+              <a
+                href={previewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] text-ink-muted hover:bg-surface-subtle"
+              >
+                新しいタブで開く
+              </a>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -150,6 +226,14 @@ function DocPreviewModal({
               <pre className="whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 text-[12.5px] leading-[1.6] text-ink">
                 {text}
               </pre>
+            ))}
+          {kind === 'docx' &&
+            (textError ? (
+              <p className="text-[12.5px] text-danger-text">{textError}</p>
+            ) : docx === null ? (
+              <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
+            ) : (
+              <DocxBody preview={docx} />
             ))}
         </div>
       </div>
