@@ -234,8 +234,9 @@ async def update_doc_scope(
     非公開チャンネルには追加できるが、新たに追加しようとするフォルダについて参加者全員が
     閲覧権限を持っている必要がある。権限の無い参加者がいる場合、force=falseなら409で
     対象者を返し（確認ダイアログの材料）、force=trueならその対象者を強制退出させたうえで
-    追加する。ただし対象に最後のチャンネル管理者が含まれる場合はforce=trueでも400で拒否する
-    （既存のA-48/A-72/A-73と同じ安全策）。この判定は「新たに追加しようとしているフォルダ」
+    追加する。ただし操作した本人が閲覧権限を持たない場合と、対象に最後のチャンネル管理者が含まれる
+    場合は、確認（409）を挟まず最初から422で拒否する（既存のA-48/A-72/A-73と同じ安全策。2026-10-01に
+    「はいを押してから断られる」流れを解消）。この判定は「新たに追加しようとしているフォルダ」
     （現在の設定に既に含まれているフォルダは対象外）のみ行う——既存の割当分は、招待時の
     チェック（A-08、services/doc_permissions.py）により参加者全員の権限が既に保たれている
     はずという不変条件を前提にしている。"""
@@ -275,20 +276,38 @@ async def update_doc_scope(
                 missing = await doc_permissions.members_missing_access(conn, channel_id, r["id"])
                 if missing:
                     affected.append({"folder_id": str(r["id"]), "folder_name": r["drive_folder_name"], "members": missing})
+            # 操作した本人が閲覧権限を持たない文書は、そもそも追加できない（2026-10-01、ユーザーからの指摘）。
+            # 従来は「本人を強制退出させますか？」と確認し、「はい」を押すと「最後のチャンネル管理者は
+            # 退出させられません」で断られる回りくどい流れになっていた。本人が退出してまで追加する
+            # 場面は無いため、確認を挟まず理由を返す（画面側でもチェック自体をできなくしている）
+            self_blocked = [a["folder_name"] for a in affected if any(m["id"] == str(user.id) for m in a["members"])]
+            if self_blocked:
+                names = "、".join(f"「{n}」" for n in self_blocked)
+                hint = (
+                    "管理コンソールの「ドキュメント参照範囲」で自分を閲覧者に追加してください"
+                    if user.role == "admin"
+                    else "必要な場合は、システム管理者にあなたを閲覧者へ追加するよう依頼してください"
+                )
+                raise HTTPException(
+                    422, detail=f"{names}はあなたが閲覧者に入っていないため、参照範囲に追加できません。{hint}",
+                )
+            if affected:
+                target_user_ids = {int(m["id"]) for a in affected for m in a["members"]}
+                removals = [(channel_id, uid) for uid in target_user_ids]
+                # 確認で「はい」を押しても実行できない（最後のチャンネル管理者を退出させることになる）
+                # 場合は、確認ダイアログを出す前に理由を返す（同じく回りくどさの解消）
+                conflicts = await doc_permissions.check_last_admin_conflicts(conn, removals)
+                if conflicts:
+                    names = "、".join(f"{c['user_name']}さん" for c in conflicts)
+                    raise HTTPException(
+                        422,
+                        detail=f"チャンネル管理者の{names}に閲覧権限がないため、追加できません"
+                        "（最後のチャンネル管理者は退出させられません）。システム管理者に閲覧者への追加を"
+                        "依頼するか、先に別の参加者をチャンネル管理者にしてください",
+                    )
             if affected and not body.force:
                 raise HTTPException(409, detail={"message": "権限のない参加者がいます", "affected": affected})
             if affected and body.force:
-                target_user_ids = {int(m["id"]) for a in affected for m in a["members"]}
-                removals = [(channel_id, uid) for uid in target_user_ids]
-                conflicts = await doc_permissions.check_last_admin_conflicts(conn, removals)
-                if conflicts:
-                    raise HTTPException(
-                        400,
-                        detail={
-                            "message": "最後のチャンネル管理者を退出させる操作は実行できません",
-                            "conflicts": conflicts,
-                        },
-                    )
                 for _, uid in removals:
                     await doc_permissions.force_remove_member(conn, channel_id, uid)
 

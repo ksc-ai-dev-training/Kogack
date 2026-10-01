@@ -77,7 +77,7 @@ export default function ChannelSettings() {
           <PromptTab channelId={channelId} settings={settings} mutate={mutateAi} />
         )}
         {tab === 'docscope' && channelId && settings && channel && (
-          <DocScopeTab channelId={channelId} settings={settings} mutate={mutateAi} isPublic={channel.is_public} />
+          <DocScopeTab channelId={channelId} settings={settings} mutate={mutateAi} isPublic={channel.is_public} isMember={channel.is_member} />
         )}
         {(tab === 'skills' || tab === 'auto') && channelId && settings && (
           <TasksTab channelId={channelId} settings={settings} mutate={mutateAi} />
@@ -854,11 +854,13 @@ function DocScopeTab({
   settings,
   mutate,
   isPublic,
+  isMember,
 }: {
   channelId: string
   settings: AiSettings
   mutate: () => Promise<AiSettings | undefined>
   isPublic: boolean
+  isMember: boolean
 }) {
   // 「選択済みファイルを含むフォルダは初期状態から展開しておく」という初期化ロジックが`folders`
   // （useDocFolders、settingsとは別のフック）に依存するため、folders未ロードのままだと
@@ -867,7 +869,11 @@ function DocScopeTab({
   // 初期値を直接設定する」パターンで解消する）。
   const { folders, isLoading } = useDocFolders()
   if (isLoading) return <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
-  return <DocScopeTabBody channelId={channelId} settings={settings} mutate={mutate} isPublic={isPublic} folders={folders} />
+  return (
+    <DocScopeTabBody
+      channelId={channelId} settings={settings} mutate={mutate} isPublic={isPublic} isMember={isMember} folders={folders}
+    />
+  )
 }
 
 function DocScopeTabBody({
@@ -875,12 +881,14 @@ function DocScopeTabBody({
   settings,
   mutate,
   isPublic,
+  isMember,
   folders,
 }: {
   channelId: string
   settings: AiSettings
   mutate: () => Promise<AiSettings | undefined>
   isPublic: boolean
+  isMember: boolean
   folders: DocFolder[]
 }) {
   const toast = useToast()
@@ -891,6 +899,11 @@ function DocScopeTabBody({
   const [previewTarget, setPreviewTarget] = useState<DocFolder | null>(null)
   const canPreview = (f: DocFolder) =>
     !f.is_restricted || me?.role === 'admin' || (me ? f.viewer_user_ids.includes(me.id) : false)
+  // 自分が閲覧者に入っていない限定公開の文書は選べない（2026-10-01、ユーザーからの指摘）。選べてしまうと
+  // 保存時に「自分を強制退出させますか？」→「最後のチャンネル管理者は退出させられません」と回りくどく
+  // 断られていた。チャンネルに参加していないシステム管理者は退出の対象にならないため選べる
+  const isSelfBlocked = (f: DocFolder) =>
+    f.is_restricted && isMember && !(me ? f.viewer_user_ids.includes(me.id) : false)
   const [selected, setSelected] = useState(() => new Set(settings.folder_ids))
   const [policy, setPolicy] = useState(settings.out_of_scope_policy)
   const [saving, setSaving] = useState(false)
@@ -929,6 +942,10 @@ function DocScopeTabBody({
       toast('公開チャンネルには限定公開のフォルダを含められません', 'error')
       return
     }
+    if (isSelfBlocked(f) && !selected.has(f.id)) {
+      toast('あなたに閲覧権限がないため選べません', 'error')
+      return
+    }
     // フォルダ（parent_folder_id無しのitem_type='folder'）のチェックボックスは、その配下の
     // 全ファイルとも連動させる（ユーザーからの明示的な要望「フォルダにチェックを入れたら
     // 自動的にそのフォルダの中にあるファイルすべてにチェックが入るようにしてほしい」、
@@ -950,6 +967,7 @@ function DocScopeTabBody({
         // 公開チャンネルで限定公開の子ファイルは連動対象から除外する（disabled表示のチェック
         // ボックスを裏側から勝手にONにしてしまわないよう、上のガードと同じ条件で守る）
         if (isPublic && c.is_restricted) continue
+        if (willCheck && isSelfBlocked(c)) continue
         if (willCheck) next.add(c.id)
         else next.delete(c.id)
       }
@@ -1001,7 +1019,7 @@ function DocScopeTabBody({
   return (
     <div className="max-w-[560px]">
       <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
-        チャンネルAIが回答の根拠として参照する社内ドキュメントを選びます（F-11・F-22）。候補は管理コンソールの「ドキュメント参照範囲」タブでシステム管理者が登録します。「プレビュー」で中身を確認できます（限定公開の文書は、自分が閲覧者に入っているものだけ）。
+        チャンネルAIが回答の根拠として参照する社内ドキュメントを選びます（F-11・F-22）。候補は管理コンソールの「ドキュメント参照範囲」タブでシステム管理者が登録します。「プレビュー」で中身を確認できます。限定公開の文書は、自分が閲覧者に入っているものだけプレビュー・選択できます（「閲覧権限なし」の文書が必要な場合は、システム管理者に閲覧者への追加を依頼してください）。
       </p>
 
       <div className="mb-5">
@@ -1033,7 +1051,8 @@ function DocScopeTabBody({
                   }
                 })
               return flatRows.map(({ folder: f, isChild, childCount }, idx) => {
-                const disabled = isPublic && f.is_restricted
+                const selfBlocked = !isPublic && isSelfBlocked(f) && !selected.has(f.id)
+                const disabled = (isPublic && f.is_restricted) || selfBlocked
                 const isLast = idx === flatRows.length - 1
                 const expanded = !isChild && expandedFolders.has(f.id)
                 return (
@@ -1045,9 +1064,13 @@ function DocScopeTabBody({
                         : 'bg-surface px-3.5 py-2.5 text-[13px]'
                     } ${disabled ? 'opacity-40' : ''}`}
                     title={
-                      disabled
-                        ? `公開チャンネルには限定公開の${isChild ? 'ファイル' : 'フォルダ'}を含められません`
-                        : undefined
+                      selfBlocked
+                        ? me?.role === 'admin'
+                          ? '閲覧者に入っていないため選べません。管理コンソールで自分を閲覧者に追加してください'
+                          : 'あなたに閲覧権限がないため選べません。必要な場合は、システム管理者にあなたを閲覧者へ追加するよう依頼してください'
+                        : disabled
+                          ? `公開チャンネルには限定公開の${isChild ? 'ファイル' : 'フォルダ'}を含められません`
+                          : undefined
                     }
                   >
                     <input
@@ -1076,8 +1099,26 @@ function DocScopeTabBody({
                         <span className="truncate">{f.drive_folder_name}</span>
                       </span>
                     )}
+                    {/* プレビューできない・選べない理由が分かるよう、自分が閲覧者に入っていない限定公開の
+                        文書には形式に関係なく「閲覧権限なし」を出す */}
+                    {f.is_restricted && !canPreview(f) ? (
+                      <span
+                        className="flex-none text-[11px] text-ink-subtle"
+                        title="この文書の閲覧者に入っていないため、中身の表示・参照範囲への追加はできません"
+                      >
+                        閲覧権限なし
+                      </span>
+                    ) : isSelfBlocked(f) ? (
+                      // システム管理者は中身を確認できるが、閲覧者に入っていない参加者として退出の対象になるため選べない
+                      <span
+                        className="flex-none text-[11px] text-ink-subtle"
+                        title="閲覧者に入っていないため、参照範囲には追加できません。管理コンソールで自分を閲覧者に追加してください"
+                      >
+                        閲覧者に未登録
+                      </span>
+                    ) : null}
                     {f.item_type === 'file' && f.source === 'upload' && docPreviewKind(f.drive_folder_name) !== null &&
-                      (canPreview(f) ? (
+                      canPreview(f) && (
                         <button
                           type="button"
                           onClick={() => setPreviewTarget(f)}
@@ -1085,14 +1126,7 @@ function DocScopeTabBody({
                         >
                           プレビュー
                         </button>
-                      ) : (
-                        <span
-                          className="flex-none text-[11px] text-ink-subtle"
-                          title="この文書の閲覧者に入っていないため、中身を表示できません"
-                        >
-                          閲覧権限なし
-                        </span>
-                      ))}
+                      )}
                     {f.is_restricted && (
                       <span className="flex-none rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold text-danger-text">
                         🔒 限定公開

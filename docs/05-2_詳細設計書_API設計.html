@@ -463,6 +463,8 @@ GET /api/search?q=デプロイ%20手順&in=42&from=15&after=2026-08-01&type=all&
   <p><strong><span class="badge badge-get">GET</span> /api/channels/{id}/doc-folders/{folder_id}/preview（S-06参照ドキュメント範囲タブの文書プレビュー、ID未採番）</strong></p>
   <p class="muted">当該チャンネルのchadminまたはシステムadmin（<code>require_channel_admin</code>）。全員に公開している文書か、呼び出し元が閲覧者（<code>doc_folder_viewers</code>）に入っている限定公開の文書だけを返し、それ以外は403（システムadminはS-08と同じく全文書可）。文書がこのチャンネルの参照範囲に入っているかは問わない（追加前の確認に使うため）。応答の形式はS-08のプレビュー・チャット上の引用プレビューと同じ（画像・PDF・テキストはそのまま、Word・PowerPoint・Excelは本文のブロック列のJSON、共通処理は<code>services/doc_preview.py</code>）。</p>
 
+  <p class="muted">A-27（参照ドキュメント範囲の保存）とS-08の閲覧者編集は、限定公開の文書の閲覧権限がない参加者がいる場合に409で確認を求め、<code>force=true</code>で再送するとその参加者を強制退出させる。ただし、(1) A-27で操作した本人が閲覧権限を持たない文書を新たに追加しようとした場合、(2) 強制退出の対象に最後のチャンネル管理者が含まれる場合は、確認しても実行できないため409を返さず最初から422で理由を返す（2026-10-01、「はいを押してから断られる」流れの解消。画面側も(1)の文書はチェックできない）。</p>
+
   <p><strong><span class="badge badge-post">POST</span> /api/admin/doc-folders/usable-channels（公開範囲の設定画面用、ID未採番）</strong></p>
   <pre><code>// request
 { "viewer_user_ids": ["7", "12"] }

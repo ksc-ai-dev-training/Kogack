@@ -450,7 +450,7 @@ async def update_doc_folder_viewers(
     force=falseなら409（{message, affected: [{channel_id, channel_name, members}]}）を返し
     実際には何も変更しない（確認ダイアログの材料をフロントへ渡す）。force=trueなら、その対象者を
     強制退出させたうえで閲覧者リストを更新する。ただし対象に「そのチャンネルの最後の管理者」が
-    含まれる場合は、force=trueであっても400で操作全体を拒否する（既存のA-48/A-72/A-73と同じ
+    含まれる場合は、確認（409）を挟まず最初から422で操作全体を拒否する（既存のA-48/A-72/A-73と同じ
     安全策。services/doc_permissions.py参照）。"""
     pool = get_pool()
     exists = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM doc_folders WHERE id = $1)", folder_id)
@@ -483,16 +483,22 @@ async def update_doc_folder_viewers(
             if body.is_restricted
             else []
         )
+        if affected:
+            removals = [(int(ch["channel_id"]), int(m["id"])) for ch in affected for m in ch["members"]]
+            # 確認で「はい」を押しても実行できない（最後のチャンネル管理者を退出させることになる）場合は、
+            # 確認ダイアログ（409）を出す前に理由を返す（2026-10-01、S-06のA-27と同じ回りくどさの解消）
+            conflicts = await doc_permissions.check_last_admin_conflicts(conn, removals)
+            if conflicts:
+                names = "、".join(f"#{c['channel_name']}の{c['user_name']}さん" for c in conflicts)
+                raise HTTPException(
+                    422,
+                    detail=f"{names}は最後のチャンネル管理者のため、閲覧できる人から外せません"
+                    "（外すとチャンネルから退出させることになるため）。閲覧できる人に残すか、"
+                    "先にそのチャンネルで別の参加者をチャンネル管理者にしてください",
+                )
         if affected and not body.force:
             raise HTTPException(409, detail={"message": "権限のない参加者がいます", "affected": affected})
         if affected and body.force:
-            removals = [(int(ch["channel_id"]), int(m["id"])) for ch in affected for m in ch["members"]]
-            conflicts = await doc_permissions.check_last_admin_conflicts(conn, removals)
-            if conflicts:
-                raise HTTPException(
-                    400,
-                    detail={"message": "最後のチャンネル管理者を退出させる操作は実行できません", "conflicts": conflicts},
-                )
             for ch_id, u_id in removals:
                 await doc_permissions.force_remove_member(conn, ch_id, u_id)
 
