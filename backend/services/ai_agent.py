@@ -522,16 +522,31 @@ APP_MANUAL_NOT_FOUND_RECHECK = (
 MAX_TOOL_ROUNDS = 3  # search_documents・search_channel_history・search_app_manualいずれも共通の上限（無限ループ・コスト際限無い増大の防止）
 
 
-def _build_doc_scope_section(out_of_scope_policy: str) -> str:
+# AIへの指示に含める参照ドキュメント名の上限（文書数が多いチャンネルで入力トークンが際限なく増えるのを防ぐ）
+MAX_LISTED_DOC_NAMES = 50
+
+
+def _build_doc_scope_section(out_of_scope_policy: str, doc_names: list[str]) -> str:
     """search_documentsツールを提示する際にあわせて渡す指示（Slice 3）。out_of_scope_policy
     （S-06「参照範囲外の質問への対応」、これまで保存はされるが未使用だった設定）を初めて
     AIの挙動へ反映する: 'strict'は検索結果が見つからない場合の一般知識での回答を明示的に禁止し、
-    'general'は許可する。"""
+    'general'は許可する。
+    doc_names（2026-10-01）: このチャンネルが参照できる文書のファイル名一覧。従来はAIが文書の
+    存在自体を知らず、ファイル名を指定した質問で検索が空振りすると「そのようなファイルはありません」と
+    実在する文書を否定していた（ユーザーからの報告）。一覧を渡し、ファイル名をqueryへ含めて検索させる
+    （services/doc_search.pyの名前一致と組み合わせて機能する）"""
+    listed = doc_names[:MAX_LISTED_DOC_NAMES]
+    rest = len(doc_names) - len(listed)
     lines = [
         "", "# 社内ドキュメントの参照について",
         "あなたには search_documents という、このチャンネルが参照する社内ドキュメントを検索する"
         "機能があります。ドキュメントの内容について聞かれた場合は、必ずこれを使って実際に検索してから"
         "回答し、検索せずに推測で答えないこと。",
+        "このチャンネルが参照できるドキュメント（ファイル名）:",
+        *(f"- {n}" for n in listed),
+        *([f"- ほか{rest}件"] if rest > 0 else []),
+        "ファイル名を挙げて内容を聞かれたら、そのファイル名をqueryに含めて検索すること。"
+        "上の一覧にあるファイルについて「存在しない」「見つからない」と答えないこと。",
     ]
     if out_of_scope_policy == "strict":
         lines.append(
@@ -1240,7 +1255,7 @@ async def _run_chat_with_tools(
     2026-09-14にsearch_channel_history、2026-09-16にsearch_app_manualを追加）。
     search_channel_history・search_app_manualはいずれも常に提示する（索引の有無・per-channel
     設定という概念が無いため）。use_doc_tools=Trueの場合のみsearch_documentsもあわせて提示する
-    （このチャンネルに索引済み文書がある場合のみ、doc_search.channel_has_indexed_documents）。
+    （このチャンネルに索引済み文書がある場合のみ、doc_search.list_indexed_document_names）。
     最大MAX_TOOL_ROUNDS回まで、モデルからの検索要求→対応する検索を実行→結果をtoolメッセージ
     として返す、を繰り返す。
     最後の1ラウンドはtools自体を渡さず、モデルに必ずテキストで最終回答させる（ラウンド上限に
@@ -1477,8 +1492,9 @@ async def _generate_and_post(
         # 提示する（Slice 3、2026-09-09）。無ければツール自体を持たせず、doc_scope_sectionも省略
         # （検索対象が無いのにツールだけ提示しても、モデルが空振りの検索を試みるだけで無駄）。
         # search_channel_history（2026-09-14）はこの判定に関わらず常に提示する（_run_chat_with_tools参照）
-        use_doc_tools = await doc_search.channel_has_indexed_documents(channel_id)
-        doc_scope_section = _build_doc_scope_section(settings["out_of_scope_policy"]) if use_doc_tools else ""
+        doc_names = await doc_search.list_indexed_document_names(channel_id)
+        use_doc_tools = bool(doc_names)
+        doc_scope_section = _build_doc_scope_section(settings["out_of_scope_policy"], doc_names) if use_doc_tools else ""
         messages: list[dict] = [
             {
                 "role": "system",
