@@ -11,6 +11,7 @@
 # プレビューと索引で別々に読み取り処理を持つと、AIが読んでいる内容と画面で確認できる内容が
 # 食い違いうるため一本化した（Wordの索引化は従来どおり段落のみを抽出しており、ここでは変えていない）。
 import io
+import re
 from datetime import date, datetime, time
 
 from docx import Document as DocxDocument
@@ -86,10 +87,79 @@ def _docx_to_blocks(data: bytes) -> dict:
     return {"blocks": blocks, "truncated": truncated}
 
 
+# PowerPointが画像に自動で付ける代替テキスト（「テキスト が含まれている画像 自動的に生成された説明」等）。
+# 内容をほとんど表さないため、AIへ渡すとノイズになるだけなので除外する
+_AUTO_ALT_TEXT_MARKERS = ("自動的に生成された説明", "automatically generated")
+_IMAGE_FILE_NAME = re.compile(r"[^/\\]+\.(png|jpe?g|gif|bmp|tiff?|emf|wmf|svg|webp)", re.IGNORECASE)
+
+
+def _chart_value(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _pptx_chart_blocks(chart) -> list[dict]:
+    """グラフ（2026-10-01、ユーザー要望で追加）。PowerPointのグラフは描画用の画像ではなく元データ
+    （タイトル・項目・系列ごとの値）をファイル内に持っているため、それを表として取り出す。
+    横軸の項目を行、系列を列にする。散布図など項目を持たない種類は1, 2, 3…の連番で代用する。
+    想定外の構造のグラフで読み取りに失敗しても、スライドの他の内容の読み取りは続ける"""
+    try:
+        title = chart.chart_title.text_frame.text.strip() if chart.has_title and chart.chart_title.has_text_frame else ""
+        series = [s for plot in chart.plots for s in plot.series]
+        if not series:
+            return []
+        try:
+            categories = [str(c) for c in chart.plots[0].categories]
+        except Exception:
+            categories = []
+        # 散布図は項目（categories）を持たず、X値はpython-pptxの公開APIに無いためXMLのキャッシュから読む
+        x_label = "項目"
+        if not categories:
+            xs = series[0]._element.xpath("./c:xVal//c:pt/c:v/text()")
+            if xs:
+                categories = [_chart_value(float(x)) if x.replace(".", "", 1).lstrip("-").isdigit() else x for x in xs]
+                x_label = "X"
+        n = max(len(categories), max(len(list(s.values)) for s in series))
+        categories = (categories + [str(i + 1) for i in range(len(categories), n)])[:n]
+        header = [x_label] + [s.name or f"系列{i + 1}" for i, s in enumerate(series)]
+        values = [list(s.values) for s in series]
+        rows = [header] + [
+            [categories[r]] + [_chart_value(v[r]) if r < len(v) else "" for v in values] for r in range(n)
+        ]
+    except Exception:
+        return [{"type": "paragraph", "text": "グラフ（内容を読み取れませんでした）"}]
+    return [
+        {"type": "paragraph", "text": f"グラフ: {title}" if title else "グラフ"},
+        # has_header: 1行目が必ず見出し（項目・系列名）であることを索引化（_table_to_text）へ伝える
+        {"type": "table", "rows": [[{"text": c, "span": 1} for c in r] for r in rows], "has_header": True},
+    ]
+
+
+def _pptx_alt_text(shape) -> str:
+    """画像の代替テキスト（PowerPointの「代替テキスト」欄）。画像そのものの中身は読み取れないため、
+    作成者が書いた説明があればそれを使う（2026-10-01）"""
+    descr = shape._element.xpath("./*/p:cNvPr/@descr")
+    text = (descr[0] if descr else "").strip()
+    if not text or any(m in text for m in _AUTO_ALT_TEXT_MARKERS):
+        return ""
+    # 作成ツールによっては代替テキスト欄に画像のファイル名（image.png等）が入るだけのため除外する
+    if _IMAGE_FILE_NAME.fullmatch(text):
+        return ""
+    return text
+
+
 def _pptx_shape_blocks(shape) -> list[dict]:
     """スライド上の図形1つ分のブロック。グループ図形は中の図形を再帰的に辿る"""
     if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
         return [b for child in shape.shapes for b in _pptx_shape_blocks(child)]
+    if getattr(shape, "has_chart", False) and shape.has_chart:
+        return _pptx_chart_blocks(shape.chart)
+    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+        alt = _pptx_alt_text(shape)
+        return [{"type": "paragraph", "text": f"画像: {alt}"}] if alt else []
     if getattr(shape, "has_table", False) and shape.has_table:
         rows = [[{"text": cell.text, "span": 1} for cell in row.cells] for row in shape.table.rows]
         return [{"type": "table", "rows": rows}]
@@ -178,13 +248,14 @@ def office_to_blocks(data: bytes, ext: str) -> dict:
     raise ValueError(f"unsupported: {ext}")
 
 
-def _table_to_text(rows: list[list[dict]], is_sheet: bool) -> list[str]:
+def _table_to_text(rows: list[list[dict]], labeled: bool) -> list[str]:
     """表を索引用のテキスト行にする。Excelのシートは1行目を見出しとみなし、各行を
     「見出し: 値 / 見出し: 値」の形にする（検索で一部の行だけがAIへ渡されても、どの列の値か
     分かるようにするため。行が文字数ベースのチャンク分割で途中で切れても同様）。
-    スライド内の表は見出し行の有無が一定しないため、セルを「 | 」で区切るだけにする"""
+    スライド内の表は見出し行の有無が一定しないため、セルを「 | 」で区切るだけにする（グラフから
+    取り出した表は1行目が必ず見出しのため、Excelと同じ形にする）"""
     texts = [[c["text"] for c in r] for r in rows]
-    if not is_sheet or len(texts) < 2:
+    if not labeled or len(texts) < 2:
         return [" | ".join(t for t in r if t) for r in texts if any(r)]
     header = [h or get_column_letter(i + 1) for i, h in enumerate(texts[0])]
     lines = [" / ".join(h for h in texts[0] if h)]
@@ -210,7 +281,7 @@ def office_text_for_index(data: bytes, ext: str) -> str:
         elif b["type"] == "list_item":
             lines.append(f"・{b['text']}")
         elif b["type"] == "table":
-            lines.extend(_table_to_text(b["rows"], is_sheet=ext == ".xlsx"))
+            lines.extend(_table_to_text(b["rows"], labeled=ext == ".xlsx" or b.get("has_header", False)))
         else:
             lines.append(b["text"])
     return "\n".join(lines).strip()

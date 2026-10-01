@@ -7,7 +7,8 @@ export type OfficeBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'paragraph'; text: string }
   | { type: 'list_item'; text: string }
-  | { type: 'table'; rows: { text: string; span: number }[][] }
+  // has_header: PowerPointのグラフから取り出した表（1行目が必ず見出し）。表示は通常の表と同じ
+  | { type: 'table'; rows: { text: string; span: number }[][]; has_header?: boolean }
 export type OfficePreview = { blocks: OfficeBlock[]; truncated: boolean }
 
 const DOCX_HEADING_CLASS = ['', 'text-[18px]', 'text-[16px]', 'text-[14.5px]', 'text-[13.5px]']
