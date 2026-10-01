@@ -4,7 +4,9 @@
 # 続いており実ファイルを取得できないため、source='drive'の行はこのモジュールの対象外
 # （index_status='not_applicable'のまま）。
 #
-# 対応形式はPDF・Word（.docx）・プレーンテキスト/Markdownのみ（要件定義書F-07のような
+# 対応形式はPDF・Word（.docx）・PowerPoint（.pptx）・Excel（.xlsx）・プレーンテキスト/Markdownのみ
+# （PowerPoint・Excelは2026-10-01に追加、テキスト化はservices/office_preview.pyのoffice_text_for_index。
+# 旧形式の.ppt/.xlsは対象外）（要件定義書F-07のような
 # 「形式制限なし」ではなく、テキスト抽出できる形式に限定される。それ以外の形式は
 # index_status='failed'とし、index_errorに理由を残す）。
 import io
@@ -14,6 +16,7 @@ from pypdf import PdfReader
 
 from database import get_pool
 from services import ai_client, doc_storage
+from services.office_preview import office_text_for_index
 
 # 文字数ベースの単純なチャンク分割（トークン数の厳密なカウントは行わず、文字数を近似として
 # 使う。日本語混在テキストでも1500文字であれば text-embedding-3-small の8191トークン上限に
@@ -24,7 +27,7 @@ CHUNK_OVERLAP = 150
 # ための上限。超過分は索引化されない（検索に使えるのは先頭MAX_CHUNKS件分のみになる）。
 MAX_CHUNKS = 300
 
-_SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+_SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".md"}
 
 
 class UnsupportedFormatError(Exception):
@@ -39,6 +42,8 @@ def _extract_text(data: bytes, filename: str) -> str:
     if ext == ".docx":
         doc = DocxDocument(io.BytesIO(data))
         return "\n".join(p.text for p in doc.paragraphs)
+    if ext in (".pptx", ".xlsx"):
+        return office_text_for_index(data, ext)
     if ext in (".txt", ".md"):
         return data.decode("utf-8", errors="replace")
     raise UnsupportedFormatError(f"対応していないファイル形式です（{ext or '拡張子なし'}）")

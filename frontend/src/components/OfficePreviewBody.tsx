@@ -1,17 +1,18 @@
-// 参照ドキュメントのWord（.docx）プレビュー本文（2026-10-01）。バックエンド（services/docx_preview.py）が
+// 参照ドキュメントのOffice形式（Word・PowerPoint・Excel）プレビュー本文（2026-10-01）。
+// バックエンド（services/office_preview.py）が
 // 本文を見出し・段落・箇条書き・表のブロック列のJSONへ変換して返し、ここでReactのテキストとして描画する
 // （文書内のHTML・リンク等はブラウザに解釈させない）。S-08管理コンソールのDocPreviewModalと、チャット上の
 // 引用（citation）プレビューのCitationPreviewModal（MessageList.tsx）で共有する
-export type DocxBlock =
+export type OfficeBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'paragraph'; text: string }
   | { type: 'list_item'; text: string }
   | { type: 'table'; rows: { text: string; span: number }[][] }
-export type DocxPreview = { blocks: DocxBlock[]; truncated: boolean }
+export type OfficePreview = { blocks: OfficeBlock[]; truncated: boolean }
 
 const DOCX_HEADING_CLASS = ['', 'text-[18px]', 'text-[16px]', 'text-[14.5px]', 'text-[13.5px]']
 
-export default function DocxPreviewBody({ preview }: { preview: DocxPreview }) {
+export default function OfficePreviewBody({ preview }: { preview: OfficePreview }) {
   if (preview.blocks.length === 0) {
     return <p className="text-[12.5px] text-ink-subtle">本文がありません。</p>
   }

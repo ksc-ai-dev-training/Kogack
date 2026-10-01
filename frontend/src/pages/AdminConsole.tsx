@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useSearchParams } from 'react-router'
-import DocxPreviewBody, { type DocxPreview } from '../components/DocxPreviewBody'
+import OfficePreviewBody, { type OfficePreview } from '../components/OfficePreviewBody'
 import MobileBackLink from '../components/MobileBackLink'
 import { useAdminUsers } from '../hooks/useAdminUsers'
 import { useAuditLogs } from '../hooks/useAuditLogs'
@@ -47,8 +47,9 @@ function truncateLabel(text: string, max: number): string {
 // （routers/admin.py _preview_content_type）とも揃えている。ファイル自体が別ドメイン
 // （doc_foldersと message_attachments）のため、MessageList.tsx側のコンポーネントは
 // 変更せずこちらに小さく複製する。
-// Word（.docx、2026-10-01）の本文描画はcomponents/DocxPreviewBody.tsxを参照（チャット上の引用プレビューと共有）
-type DocPreviewKind = 'image' | 'pdf' | 'text' | 'docx'
+// Office形式（Word・PowerPoint・Excel、2026-10-01）の本文描画はcomponents/OfficePreviewBody.tsxを参照
+// （チャット上の引用プレビューと共有）
+type DocPreviewKind = 'image' | 'pdf' | 'text' | 'office'
 const DOC_PREVIEW_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
 const DOC_PREVIEW_TEXT_EXT = new Set(['txt', 'md', 'csv', 'json', 'log'])
 function docPreviewKind(fileName: string): DocPreviewKind | null {
@@ -56,7 +57,7 @@ function docPreviewKind(fileName: string): DocPreviewKind | null {
   if (DOC_PREVIEW_IMAGE_EXT.has(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
   if (DOC_PREVIEW_TEXT_EXT.has(ext)) return 'text'
-  if (ext === 'docx') return 'docx'
+  if (ext === 'docx' || ext === 'pptx' || ext === 'xlsx') return 'office'
   return null
 }
 
@@ -74,11 +75,11 @@ function DocPreviewModal({
   const overlayClose = useOverlayClose(onClose)
   const [text, setText] = useState<string | null>(null)
   const [textError, setTextError] = useState<string | null>(null)
-  const [docx, setDocx] = useState<DocxPreview | null>(null)
+  const [office, setOffice] = useState<OfficePreview | null>(null)
   const previewUrl = `/api/admin/doc-folders/${folderId}/preview`
 
   useEffect(() => {
-    if (kind !== 'text' && kind !== 'docx') return
+    if (kind !== 'text' && kind !== 'office') return
     let cancelled = false
     fetch(previewUrl, { credentials: 'same-origin' })
       .then(async (res) => {
@@ -86,11 +87,11 @@ function DocPreviewModal({
           const body = await res.json().catch(() => null)
           throw new Error(typeof body?.detail === 'string' ? body.detail : 'プレビューを取得できませんでした')
         }
-        return kind === 'docx' ? res.json() : res.text()
+        return kind === 'office' ? res.json() : res.text()
       })
       .then((t) => {
         if (cancelled) return
-        if (kind === 'docx') setDocx(t as DocxPreview)
+        if (kind === 'office') setOffice(t as OfficePreview)
         else setText(t as string)
       })
       .catch((e) => {
@@ -122,7 +123,7 @@ function DocPreviewModal({
           <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{fileName}</span>
           <div className="flex flex-none items-center gap-2">
             {/* Wordはプレビュー用のJSONを返すため、新しいタブで開いても文書としては表示できない */}
-            {kind !== 'docx' && (
+            {kind !== 'office' && (
               <a
                 href={previewUrl}
                 target="_blank"
@@ -163,13 +164,13 @@ function DocPreviewModal({
                 {text}
               </pre>
             ))}
-          {kind === 'docx' &&
+          {kind === 'office' &&
             (textError ? (
               <p className="text-[12.5px] text-danger-text">{textError}</p>
-            ) : docx === null ? (
+            ) : office === null ? (
               <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
             ) : (
-              <DocxPreviewBody preview={docx} />
+              <OfficePreviewBody preview={office} />
             ))}
         </div>
       </div>

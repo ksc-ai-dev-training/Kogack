@@ -17,7 +17,7 @@ from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped, toggle_reaction
 from services import ai_agent, doc_storage, push_sender
-from services.docx_preview import docx_to_blocks
+from services.office_preview import OFFICE_EXTENSIONS, office_to_blocks
 from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
@@ -481,11 +481,13 @@ async def preview_citation(
     if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
         raise HTTPException(404, detail="見つかりません")
 
-    # Word（.docx）はS-08のpreview_doc_folder（routers/admin.py）と同じく本文をブロック列のJSONへ
-    # 変換して返す（2026-10-01、ユーザー要望「参照したときにもクリックしたらプレビューできるように」）
-    is_docx = Path(row["drive_folder_name"]).suffix.lower() == ".docx"
-    content_type = None if is_docx else preview_content_type(row["drive_folder_name"])
-    if not is_docx and content_type is None:
+    # Office形式（Word・PowerPoint・Excel）はS-08のpreview_doc_folder（routers/admin.py）と同じく
+    # 本文をブロック列のJSONへ変換して返す（2026-10-01、ユーザー要望「参照したときにもクリックしたら
+    # プレビューできるように」）
+    ext = Path(row["drive_folder_name"]).suffix.lower()
+    is_office = ext in OFFICE_EXTENSIONS
+    content_type = None if is_office else preview_content_type(row["drive_folder_name"])
+    if not is_office and content_type is None:
         raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
 
     try:
@@ -493,11 +495,11 @@ async def preview_citation(
     except FileNotFoundError:
         raise HTTPException(404, detail="見つかりません")
 
-    if is_docx:
+    if is_office:
         try:
-            return docx_to_blocks(data)
+            return office_to_blocks(data, ext)
         except Exception:
-            raise HTTPException(422, detail="Wordファイルを読み込めませんでした（破損しているか、.docx形式ではない可能性があります）")
+            raise HTTPException(422, detail="ファイルを読み込めませんでした（破損しているか、拡張子と実際の形式が異なる可能性があります）")
 
     ascii_fallback = row["drive_folder_name"].encode("ascii", "replace").decode("ascii")
     headers = {

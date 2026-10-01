@@ -10,7 +10,7 @@ import { currentUiZoomScale } from '../lib/uiZoom'
 import { useOverlayClose } from '../hooks/useOverlayClose'
 import { useToast } from './Toast'
 import { useConfirm } from './ui/ConfirmDialog'
-import DocxPreviewBody, { type DocxPreview } from './DocxPreviewBody'
+import OfficePreviewBody, { type OfficePreview } from './OfficePreviewBody'
 import ProfileCard from './ProfileCard'
 import { GuardedLink } from './GuardedLink'
 import Composer, { EMOJI_LIST } from './Composer'
@@ -1024,14 +1024,14 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
 // エンドポイントが無いため、AttachmentPreviewModalの「ダウンロード」リンクの代わりに
 // 「新しいタブで開く」リンク（プレビューURL自体をtarget="_blank"で開く）にしている
 // （S-08管理コンソールのDocPreviewModalと同じ考え方）。
-// Word（.docx、2026-10-01、ユーザー要望「参照したときにもクリックしたらプレビューできるように」）は
-// 参照ドキュメント側だけの対応形式のため（F-07添付ファイルのattachmentPreviewKindは変えない）、
-// citationPreviewKindで追加し、本文はS-08と同じDocxPreviewBodyで描画する
-type CitationPreviewKind = PreviewKind | 'docx'
+// Office形式（Word・PowerPoint・Excel、2026-10-01、ユーザー要望「参照したときにもクリックしたら
+// プレビューできるように」）は参照ドキュメント側だけの対応形式のため（F-07添付ファイルのattachmentPreviewKindは変えない）、
+// citationPreviewKindで追加し、本文はS-08と同じOfficePreviewBodyで描画する
+type CitationPreviewKind = PreviewKind | 'office'
 function citationPreviewKind(fileName: string): CitationPreviewKind | null {
   const kind = attachmentPreviewKind(fileName)
   if (kind) return kind
-  return fileName.toLowerCase().endsWith('.docx') ? 'docx' : null
+  return /\.(docx|pptx|xlsx)$/i.test(fileName) ? 'office' : null
 }
 
 function CitationPreviewModal({
@@ -1050,11 +1050,11 @@ function CitationPreviewModal({
   const overlayClose = useOverlayClose(onClose)
   const [text, setText] = useState<string | null>(null)
   const [textError, setTextError] = useState<string | null>(null)
-  const [docx, setDocx] = useState<DocxPreview | null>(null)
+  const [office, setOffice] = useState<OfficePreview | null>(null)
   const previewUrl = `/api/messages/${messageId}/citations/${folderId}/preview`
 
   useEffect(() => {
-    if (kind !== 'text' && kind !== 'docx') return
+    if (kind !== 'text' && kind !== 'office') return
     let cancelled = false
     fetch(previewUrl, { credentials: 'same-origin' })
       .then(async (res) => {
@@ -1062,11 +1062,11 @@ function CitationPreviewModal({
           const body = await res.json().catch(() => null)
           throw new Error(typeof body?.detail === 'string' ? body.detail : 'プレビューを取得できませんでした')
         }
-        return kind === 'docx' ? res.json() : res.text()
+        return kind === 'office' ? res.json() : res.text()
       })
       .then((t) => {
         if (cancelled) return
-        if (kind === 'docx') setDocx(t as DocxPreview)
+        if (kind === 'office') setOffice(t as OfficePreview)
         else setText(t as string)
       })
       .catch((e) => {
@@ -1098,7 +1098,7 @@ function CitationPreviewModal({
           <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">📄 {fileName}</span>
           <div className="flex flex-none items-center gap-2">
             {/* Wordはプレビュー用のJSONを返すため、新しいタブで開いても文書としては表示できない */}
-            {kind !== 'docx' && (
+            {kind !== 'office' && (
               <a
                 href={previewUrl}
                 target="_blank"
@@ -1139,13 +1139,13 @@ function CitationPreviewModal({
                 {text}
               </pre>
             ))}
-          {kind === 'docx' &&
+          {kind === 'office' &&
             (textError ? (
               <p className="text-[12.5px] text-danger-text">{textError}</p>
-            ) : docx === null ? (
+            ) : office === null ? (
               <p className="text-[12.5px] text-ink-subtle">読み込み中...</p>
             ) : (
-              <DocxPreviewBody preview={docx} />
+              <OfficePreviewBody preview={office} />
             ))}
         </div>
       </div>
