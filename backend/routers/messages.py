@@ -4,6 +4,7 @@
 # （require_thread_access）。返信自体はネストしない（返信への返信は対象外）。
 import json
 import re
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -16,6 +17,7 @@ from database import get_pool
 from mentions import MentionInput, fetch_blocks_grouped, insert_mention_blocks
 from reactions import fetch_reactions_grouped, toggle_reaction
 from services import ai_agent, doc_storage, push_sender
+from services.docx_preview import docx_to_blocks
 from services.preview_kind import preview_content_type
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
@@ -479,14 +481,23 @@ async def preview_citation(
     if row is None or row["item_type"] != "file" or row["source"] != "upload" or row["storage_path"] is None:
         raise HTTPException(404, detail="見つかりません")
 
-    content_type = preview_content_type(row["drive_folder_name"])
-    if content_type is None:
+    # Word（.docx）はS-08のpreview_doc_folder（routers/admin.py）と同じく本文をブロック列のJSONへ
+    # 変換して返す（2026-10-01、ユーザー要望「参照したときにもクリックしたらプレビューできるように」）
+    is_docx = Path(row["drive_folder_name"]).suffix.lower() == ".docx"
+    content_type = None if is_docx else preview_content_type(row["drive_folder_name"])
+    if not is_docx and content_type is None:
         raise HTTPException(404, detail="この形式はアプリ内でのプレビューに対応していません")
 
     try:
         data = doc_storage.read(row["storage_path"])
     except FileNotFoundError:
         raise HTTPException(404, detail="見つかりません")
+
+    if is_docx:
+        try:
+            return docx_to_blocks(data)
+        except Exception:
+            raise HTTPException(422, detail="Wordファイルを読み込めませんでした（破損しているか、.docx形式ではない可能性があります）")
 
     ascii_fallback = row["drive_folder_name"].encode("ascii", "replace").decode("ascii")
     headers = {
